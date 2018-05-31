@@ -307,6 +307,7 @@
     <ClCompile Include="$(OpenMSXSrcDir)\cassette\CassettePort.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\cassette\DummyCassetteDevice.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\cassette\WavImage.cc" />
+    <ClCompile Include="$(OpenMSXSrcDir)\cassette\TsxImage.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\commands\Command.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\commands\CommandException.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\commands\Completer.cc" />
