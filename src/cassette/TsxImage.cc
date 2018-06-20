@@ -384,6 +384,18 @@ void TsxImage::convert(const Filename& filename, FilePool& filePool, CliComm& cl
 #endif
 				pos += writeBlock20((Block20*)&buf[pos]);
 			} else
+			if (bid == B21_GRP_START) {
+#ifdef DEBUG
+			cliComm.printWarning("Block#21");
+#endif
+				pos += *((uint8_t*)&buf[pos+1]) + 2;
+			} else
+			if (bid == B22_GRP_END) {
+#ifdef DEBUG
+				cliComm.printWarning("Block#22");
+#endif
+				pos += 1;
+			} else
 			if (bid == B30_TEXT_DESCRIP) {
 #ifdef DEBUG
 				cliComm.printInfo("Block#30");
@@ -440,14 +452,6 @@ void TsxImage::convert(const Filename& filename, FilePool& filePool, CliComm& cl
 			if (bid == B19_GEN_DATA) {
 				cliComm.printWarning("Block#19 Unsupported yet!");
 				pos += *((uint32_t*)&buf[pos+1]) + 5;
-			} else
-			if (bid == B21_GRP_START) {
-				cliComm.printWarning("Block#21 Unsupported yet!");
-				pos += *((uint8_t*)&buf[pos+1]) + 2;
-			} else
-			if (bid == B22_GRP_END) {
-				cliComm.printWarning("Block#22 Unsupported yet!");
-				pos += 1;
 			} else
 			if (bid == B23_JUMP_BLOCK) {
 				cliComm.printWarning("Block#23 Unsupported yet!");
