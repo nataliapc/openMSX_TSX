@@ -165,8 +165,11 @@ void TsxImage::writeHeader4B(int s)
 // write a MSX #4B byte
 void TsxImage::writeByte4B(byte b)
 {
-	// one start bit
-	write0();
+	uint8_t t;
+	// start bits
+	for (t=0; t<byteStartBits; t++) {
+		if (byteStartValue) write1(); else write0();
+	}
 	// eight data bits
 	for (auto i : xrange(8)) {
 		if (b & (1 << i)) {
@@ -175,9 +178,10 @@ void TsxImage::writeByte4B(byte b)
 			write0();
 		}
 	}
-	// two stop bits
-	write1();
-	write1();
+	// stop bits
+	for (t=0; t<byteStopBits; t++) {
+		if (byteStopValue) write1(); else write0();
+	}
 }
 
 // write silence
@@ -319,8 +323,12 @@ size_t TsxImage::writeBlock4B(Block4B *b, CliComm& cliComm) //MSX KCS Block
 	pulsePilot4B = ULTRA_SPEED ? TSTATES_MSX_PULSE : b->pilot;
 	pulseOne4B   = ULTRA_SPEED ? TSTATES_MSX_PULSE : b->bit1len;
 	pulseZero4B  = ULTRA_SPEED ? TSTATES_MSX_PULSE*2 : b->bit0len;
+	byteStartBits  = (b->bytecfg & 0b11000000) >> 6;
+	byteStartValue = (b->bytecfg & 0b00100000) >> 5;
+	byteStopBits   = (b->bytecfg & 0b00011000) >> 3;
+	byteStopValue  = (b->bytecfg & 0b00000100) >> 2;
 
-	if (b->bitcfg!=MSX_BITCFG || b->bytecfg!=MSX_BYTECFG) {
+	if (b->bitcfg!=MSX_BITCFG || (b->bytecfg & 1)!=0) {
 		cliComm.printWarning("Found bad standard MSX block. Assuming default values. Please check your TSX file...");
 	}
 
