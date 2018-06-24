@@ -128,10 +128,13 @@ private:
 	uint32_t pulsePilot4B = 0;
 	uint32_t pulseOne4B = 0;
 	uint32_t pulseZero4B = 0;
-	uint8_t  byteStartBits = 0;
-	uint8_t  byteStartValue = 0;
-	uint8_t  byteStopBits = 0;
-	uint8_t  byteStopValue = 0;
+	uint32_t numOnePulses4B = 0;
+	uint32_t numZeroPulses4B = 0;
+	uint8_t  byteStartBits4B = 0;
+	uint8_t  byteStartValue4B = 0;
+	uint8_t  byteStopBits4B = 0;
+	uint8_t  byteStopValue4B = 0;
+	uint8_t  msb4B = 0;
 	float    acumBytes = 0.f;
 
 	std::vector<signed char> output;

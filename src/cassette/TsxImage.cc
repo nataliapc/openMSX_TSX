@@ -83,9 +83,9 @@ static const float    TSTATES_MSX_PULSE = 238.f;
 
 // headers definitions
 static const byte TSX_HEADER   [ 8] = { 'Z','X','T','a','p','e','!', 0x1a};
-static const byte ASCII_HEADER[10]  = { 0xEA,0xEA,0xEA,0xEA,0xEA,0xEA,0xEA,0xEA,0xEA,0xEA };
+static const byte ASCII_HEADER [10] = { 0xEA,0xEA,0xEA,0xEA,0xEA,0xEA,0xEA,0xEA,0xEA,0xEA };
 static const byte BINARY_HEADER[10] = { 0xD0,0xD0,0xD0,0xD0,0xD0,0xD0,0xD0,0xD0,0xD0,0xD0 };
-static const byte BASIC_HEADER[10]  = { 0xD3,0xD3,0xD3,0xD3,0xD3,0xD3,0xD3,0xD3,0xD3,0xD3 };
+static const byte BASIC_HEADER [10] = { 0xD3,0xD3,0xD3,0xD3,0xD3,0xD3,0xD3,0xD3,0xD3,0xD3 };
 
 inline uint16_t tstates2bytes(uint32_t tstates)
 {
@@ -143,15 +143,13 @@ void TsxImage::writePulse(uint32_t tstates)
 
 void TsxImage::write0()
 {
-	writePulse(pulseZero4B);
-	writePulse(pulseZero4B);
+	for (uint8_t t=0; t<numZeroPulses4B; t++)
+		writePulse(pulseZero4B);
 }
 void TsxImage::write1()
 {
-	writePulse(pulseOne4B);
-	writePulse(pulseOne4B);
-	writePulse(pulseOne4B);
-	writePulse(pulseOne4B);
+	for (uint8_t t=0; t<numOnePulses4B; t++)
+		writePulse(pulseOne4B);
 }
 
 // write a header signal
@@ -167,20 +165,28 @@ void TsxImage::writeByte4B(byte b)
 {
 	uint8_t t;
 	// start bits
-	for (t=0; t<byteStartBits; t++) {
-		if (byteStartValue) write1(); else write0();
+	for (t=0; t<byteStartBits4B; t++) {
+		if (byteStartValue4B) write1(); else write0();
 	}
 	// eight data bits
 	for (auto i : xrange(8)) {
-		if (b & (1 << i)) {
-			write1();
+		if (msb4B) {
+			if (b & (1 << (7-i))) {
+				write1();
+			} else {
+				write0();
+			}
 		} else {
-			write0();
+			if (b & (1 << i)) {
+				write1();
+			} else {
+				write0();
+			}
 		}
 	}
 	// stop bits
-	for (t=0; t<byteStopBits; t++) {
-		if (byteStopValue) write1(); else write0();
+	for (t=0; t<byteStopBits4B; t++) {
+		if (byteStopValue4B) write1(); else write0();
 	}
 }
 
@@ -323,14 +329,15 @@ size_t TsxImage::writeBlock4B(Block4B *b, CliComm& cliComm) //MSX KCS Block
 	pulsePilot4B = ULTRA_SPEED ? TSTATES_MSX_PULSE : b->pilot;
 	pulseOne4B   = ULTRA_SPEED ? TSTATES_MSX_PULSE : b->bit1len;
 	pulseZero4B  = ULTRA_SPEED ? TSTATES_MSX_PULSE*2 : b->bit0len;
-	byteStartBits  = (b->bytecfg & 0b11000000) >> 6;
-	byteStartValue = (b->bytecfg & 0b00100000) >> 5;
-	byteStopBits   = (b->bytecfg & 0b00011000) >> 3;
-	byteStopValue  = (b->bytecfg & 0b00000100) >> 2;
-
-	if (b->bitcfg!=MSX_BITCFG || (b->bytecfg & 1)!=0) {
-		cliComm.printWarning("Found bad standard MSX block. Assuming default values. Please check your TSX file...");
-	}
+	numZeroPulses4B = (b->bitcfg & 0b11110000) >> 4;
+	numOnePulses4B = (b->bitcfg & 0b00001111);
+	if (numZeroPulses4B==0) numZeroPulses4B=16;
+	if (numOnePulses4B==0) numOnePulses4B=16;
+	byteStartBits4B  = (b->bytecfg & 0b11000000) >> 6;
+	byteStartValue4B = (b->bytecfg & 0b00100000) >> 5;
+	byteStopBits4B   = (b->bytecfg & 0b00011000) >> 3;
+	byteStopValue4B  = (b->bytecfg & 0b00000100) >> 2;
+	msb4B = (b->bytecfg & 0b00000001);
 
 	writeHeader4B(ULTRA_SPEED ? 5000 : b->pulses);
 	
