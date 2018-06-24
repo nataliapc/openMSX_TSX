@@ -24,10 +24,12 @@ namespace openmsx {
     * [#12] Pure Tone Block
     * [#13] Pulse sequence Block
     * [#20] Silence Block
+    * [#21] Group start Block
+    * [#22] Group end Block
     * [#30] Text description Block
     * [#32] Archive info Block
     * [#35] Custom info Block
-    * [#4B] MSX implementation of KCS (Kansas City Standard) Block
+    * [#4B] KCS (Kansas City Standard) Block (for MSX, SVI, ...)
     * [#5A] Glue Block
 */
 	static const uint8_t B10_STD_BLOCK      = 0x10;
@@ -35,6 +37,8 @@ namespace openmsx {
 	static const uint8_t B12_PURE_TONE      = 0x12;
 	static const uint8_t B13_PULSE_SEQUENCE = 0x13;
 	static const uint8_t B20_SILENCE_BLOCK  = 0x20;
+	static const uint8_t B21_GRP_START      = 0x21;
+	static const uint8_t B22_GRP_END        = 0x22;
 	static const uint8_t B30_TEXT_DESCRIP   = 0x30;
 	static const uint8_t B32_ARCHIVE_INFO   = 0x32;
 	static const uint8_t B35_CUSTOM_INFO    = 0x35;
@@ -47,8 +51,6 @@ namespace openmsx {
     * [#14] Pure data Block
     * [#15] Direct recording Block
     * [#19] Generalized data block
-    * [#21] Group start Block
-    * [#22] Group end Block
     * [#23] Jump Block
     * [#24] Loop start Block
     * [#25] Loop end Block
@@ -59,8 +61,6 @@ namespace openmsx {
 	static const uint8_t B14_PURE_DATA      = 0x14;
 	static const uint8_t B15_DIRECT_REC     = 0x15;
 	static const uint8_t B19_GEN_DATA       = 0x19;
-	static const uint8_t B21_GRP_START      = 0x21;
-	static const uint8_t B22_GRP_END        = 0x22;
 	static const uint8_t B23_JUMP_BLOCK     = 0x23;
 	static const uint8_t B24_LOOP_START     = 0x24;
 	static const uint8_t B25_LOOP_END       = 0x25;
@@ -91,7 +91,6 @@ inline uint16_t tstates2bytes(uint32_t tstates)
 {
 	return 	( tstates * OUTPUT_FREQ / TZX_Z80_FREQ );
 }
-
 
 TsxImage::TsxImage(const Filename& filename, FilePool& filePool, CliComm& cliComm)
 {
@@ -324,7 +323,7 @@ size_t TsxImage::writeBlock35(Block35 *b)   //Custom info Block
 	return b->len + 21;
 }
 
-size_t TsxImage::writeBlock4B(Block4B *b, CliComm& cliComm) //MSX KCS Block
+size_t TsxImage::writeBlock4B(Block4B *b) //MSX KCS Block
 {
 	pulsePilot4B = ULTRA_SPEED ? TSTATES_MSX_PULSE : b->pilot;
 	pulseOne4B   = ULTRA_SPEED ? TSTATES_MSX_PULSE : b->bit1len;
@@ -434,21 +433,26 @@ void TsxImage::convert(const Filename& filename, FilePool& filePool, CliComm& cl
 #ifdef DEBUG
 				cliComm.printInfo("Block#4B");
 #endif
-				//determine file type
-				if (firstFile && (pos+12+5)<size && b->blockLen-12==16) {
-					FileType type = CassetteImage::UNKNOWN;
-					if (!memcmp(&(b->data), ASCII_HEADER, 10)) {
-						type = CassetteImage::ASCII;
-					} else if (!memcmp(&(b->data), BINARY_HEADER, 10)) {
-						type = CassetteImage::BINARY;
-					} else if (!memcmp(&(b->data), BASIC_HEADER, 10)) {
-						type = CassetteImage::BASIC;
+				//check for autoRun
+				if (firstFile && (pos+12+5+10)<size) {
+					//determine file type
+					if ((b->bitcfg==MSX_BITCFG && b->bytecfg==MSX_BYTECFG && b->blockLen-12==16) ||
+						(b->bitcfg==SVI_BITCFG && b->bytecfg==SVI_BYTECFG && b->blockLen-12>=16 && b->blockLen-12<=18))
+					{
+						FileType type = CassetteImage::UNKNOWN;
+						if (!memcmp(&(b->data), ASCII_HEADER, 10)) {
+							type = CassetteImage::ASCII;
+						} else if (!memcmp(&(b->data), BINARY_HEADER, 10)) {
+							type = CassetteImage::BINARY;
+						} else if (!memcmp(&(b->data), BASIC_HEADER, 10)) {
+							type = CassetteImage::BASIC;
+						}
+						setFirstFileType(type);
+						firstFile = false;
 					}
-					setFirstFileType(type);
-					firstFile = false;
 				}
 				//read the block
-				pos += writeBlock4B(b, cliComm);
+				pos += writeBlock4B(b);
 			} else
 			if (bid == B5A_GLUE_BLOCK) {
 #ifdef DEBUG

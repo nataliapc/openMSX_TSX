@@ -38,6 +38,9 @@ private:
 	const static uint8_t MSX_BITCFG  = 0x24;
 	const static uint8_t MSX_BYTECFG = 0x54;
 
+	const static uint8_t SVI_BITCFG  = 0x22;
+	const static uint8_t SVI_BYTECFG = 0x09;
+
 	struct Block10 {
 		uint8_t  id;
 		UA_L16   pausems;           //Pause after this block in milliseconds
@@ -109,7 +112,7 @@ private:
 	size_t writeBlock30(Block30 *, CliComm& cliComm);
 	size_t writeBlock32(Block32 *, CliComm& cliComm);
 	size_t writeBlock35(Block35 *);
-	size_t writeBlock4B(Block4B *, CliComm& cliComm);
+	size_t writeBlock4B(Block4B *);
 	void writePulse(uint32_t tstates);
 	void writeSilence(int s);
 	void write0();
