@@ -24,6 +24,7 @@
 #include "serialize_constr.hh"
 #include "memory.hh"
 #include <functional>
+#include <utility>
 
 using std::string;
 using std::vector;
@@ -53,7 +54,7 @@ DiskChanger::DiskChanger(MSXMotherBoard& board,
 	, controller(board.getCommandController())
 	, stateChangeDistributor(&board.getStateChangeDistributor())
 	, scheduler(&board.getScheduler())
-	, preChangeCallback(preChangeCallback_)
+	, preChangeCallback(std::move(preChangeCallback_))
 	, driveName(std::move(driveName_))
 	, doubleSidedDrive(doubleSidedDrive_)
 {
@@ -68,7 +69,7 @@ DiskChanger::DiskChanger(Reactor& reactor_, string driveName_)
 	, driveName(std::move(driveName_))
 	, doubleSidedDrive(true) // irrelevant, but needs a value
 {
-	init("", true);
+	init({}, true);
 }
 
 void DiskChanger::init(const string& prefix, bool createCmd)
@@ -303,7 +304,7 @@ bool DiskCommand::needRecord(array_ref<TclObject> tokens) const
 
 static string calcSha1(SectorAccessibleDisk* disk, FilePool& filePool)
 {
-	return disk ? disk->getSha1Sum(filePool).toString() : "";
+	return disk ? disk->getSha1Sum(filePool).toString() : string{};
 }
 
 // version 1:  initial version
@@ -319,7 +320,7 @@ void DiskChanger::serialize(Archive& ar, unsigned version)
 		if (filename.getOriginal() == "ramdisk") {
 			diskname = DiskName(Filename(), "ramdisk");
 		} else {
-			diskname = DiskName(filename, "");
+			diskname = DiskName(filename, {});
 		}
 	} else {
 		ar.serialize("disk", diskname);

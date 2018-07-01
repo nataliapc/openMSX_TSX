@@ -51,7 +51,11 @@ RealDrive::RealDrive(MSXMotherBoard& motherBoard_, EmuDuration::param motorTimeo
 
 RealDrive::~RealDrive()
 {
-	flushTrack();
+	try {
+		flushTrack();
+	} catch (MSXException&) {
+		// ignore
+	}
 	doSetMotor(false, getCurrentTime()); // to send LED event
 
 	const auto& driveName = changer->getDriveName();
@@ -261,7 +265,11 @@ EmuTime RealDrive::getTimeTillIndexPulse(EmuTime::param time, int count)
 
 void RealDrive::invalidateTrack()
 {
-	flushTrack();
+	try {
+		flushTrack();
+	} catch (MSXException&) {
+		// ignore
+	}
 	trackValid = false;
 }
 

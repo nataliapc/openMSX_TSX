@@ -16,6 +16,7 @@
 #include <cstring>
 #include <cassert>
 
+using std::string;
 using std::vector;
 
 namespace openmsx {
@@ -32,7 +33,7 @@ AmdFlash::AmdFlash(const Rom& rom, vector<SectorInfo> sectorInfo_,
 	init(rom.getName() + "_flash", config, load, &rom);
 }
 
-AmdFlash::AmdFlash(const std::string& name, vector<SectorInfo> sectorInfo_,
+AmdFlash::AmdFlash(const string& name, vector<SectorInfo> sectorInfo_,
                    word ID_, bool use12bitAddressing_,
                    const DeviceConfig& config)
 	: motherBoard(config.getMotherBoard())
@@ -52,7 +53,7 @@ static bool sramEmpty(const SRAM& ram)
 	return true;
 }
 
-void AmdFlash::init(const std::string& name, const DeviceConfig& config, bool load, const Rom* rom)
+void AmdFlash::init(const string& name, const DeviceConfig& config, bool load, const Rom* rom)
 {
 	assert(Math::isPowerOfTwo(getSize()));
 
@@ -122,7 +123,7 @@ void AmdFlash::init(const std::string& name, const DeviceConfig& config, bool lo
 		// initial flash content is all 0xFF.
 		try {
 			rom_ = make_unique<Rom>(
-				"", "", // dummy name and description
+				string{}, string{}, // dummy name and description
 				config);
 			rom = rom_.get();
 			config.getCliComm().printInfo(
@@ -276,6 +277,7 @@ void AmdFlash::write(unsigned address, byte value)
 	if (checkCommandManifacturer() ||
 	    checkCommandEraseSector() ||
 	    checkCommandProgram() ||
+	    checkCommandDoubleByteProgram() ||
 	    checkCommandQuadrupleByteProgram() ||
 	    checkCommandEraseChip() ||
 	    checkCommandReset()) {
@@ -349,6 +351,12 @@ bool AmdFlash::checkCommandProgram()
 {
 	static const byte cmdSeq[] = { 0xaa, 0x55, 0xa0 };
 	return checkCommandProgramHelper(1, cmdSeq, countof(cmdSeq));
+}
+
+bool AmdFlash::checkCommandDoubleByteProgram()
+{
+	static const byte cmdSeq[] = { 0x50 };
+	return checkCommandProgramHelper(2, cmdSeq, countof(cmdSeq));
 }
 
 bool AmdFlash::checkCommandQuadrupleByteProgram()

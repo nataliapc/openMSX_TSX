@@ -29,7 +29,7 @@ static string getUserName()
 	return "default";
 #else
 	struct passwd* pw = getpwuid(getuid());
-	return pw->pw_name ? pw->pw_name : "";
+	return pw->pw_name ? pw->pw_name : string{};
 #endif
 }
 
@@ -156,8 +156,10 @@ SOCKET CliServer::createSocket()
 	FileOperations::unlink(socketName); // ignore error
 
 	sockaddr_un addr;
-	strcpy(addr.sun_path, socketName.c_str());
+	strncpy(addr.sun_path, socketName.c_str(), sizeof(addr.sun_path) - 1);
+	addr.sun_path[sizeof(addr.sun_path) - 1] = '\0';
 	addr.sun_family = AF_UNIX;
+
 	if (bind(sd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == -1) {
 		sock_close(sd);
 		throw MSXException("Couldn't bind socket.");
@@ -239,6 +241,9 @@ void CliServer::mainLoop()
 #endif
 		SOCKET sd = accept(listenSock, nullptr, nullptr);
 		if (poller.aborted()) {
+			if (sd != OPENMSX_INVALID_SOCKET) {
+				sock_close(sd);
+			}
 			break;
 		}
 		if (sd == OPENMSX_INVALID_SOCKET) {

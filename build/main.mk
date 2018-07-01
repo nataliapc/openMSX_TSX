@@ -195,6 +195,8 @@ TARGET_FLAGS+=$(shell $(PYTHON) build/cpu2flags.py $(OPENMSX_TARGET_CPU))
 # Load flavour specific settings.
 include build/flavour-$(OPENMSX_FLAVOUR).mk
 
+UNITTEST?=false
+
 
 # Paths
 # =====
@@ -293,6 +295,12 @@ ifneq ($(COMPONENT_ALSAMIDI),true)
 SOURCES_FULL:=$(filter-out src/serial/MidiSessionALSA.cc,$(SOURCES_FULL))
 endif
 
+ifeq ($(UNITTEST),true)
+SOURCES_FULL:=$(filter-out src/main.cc,$(SOURCES_FULL))
+else
+SOURCES_FULL:=$(filter-out src/unittest/%.cc,$(SOURCES_FULL))
+endif
+
 # Apply subset to sources list.
 SOURCES_FULL:=$(filter $(SOURCES_PATH)/$(OPENMSX_SUBSET)%,$(SOURCES_FULL))
 ifeq ($(SOURCES_FULL),)
@@ -329,8 +337,8 @@ CXX?=g++
 WINDRES?=windres
 DEPEND_FLAGS:=
 ifneq ($(filter %clang++,$(CXX))$(filter clang++%,$(CXX)),)
-  # Enable C++11
-  COMPILE_FLAGS+=-std=c++11
+  # Enable C++14 (supported since clang-3.5)
+  COMPILE_FLAGS+=-std=c++14
   # Clang does support -Wunused-macros, but it triggers on SDL's headers,
   # causing way too many false positives that we cannot fix.
   COMPILE_FLAGS+=-Wall -Wextra -Wundef -Wno-invalid-offsetof -Wshadow
@@ -353,6 +361,12 @@ ifneq ($(filter %g++,$(CXX))$(filter g++%,$(CXX))$(findstring /g++-,$(CXX)),)
   COMPILE_FLAGS+=$(shell \
     echo | $(CXX) -E -Wno-missing-field-initializers - >/dev/null 2>&1 \
     && echo -Wno-missing-field-initializers \
+    )
+
+  # When supported use c++14 (gcc-4.8 does not yet support this)
+  COMPILE_FLAGS+=$(shell \
+    echo | $(CXX) -E -std=c++14 - >/dev/null 2>&1 \
+    && echo -std=c++14 \
     )
 
   # -Wzero-as-null-pointer-constant is available from gcc-4.7

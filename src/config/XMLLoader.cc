@@ -78,11 +78,22 @@ void XMLElementParser::start(string_ref name)
 
 void XMLElementParser::attribute(string_ref name, string_ref value)
 {
+	if (current.back()->hasAttribute(name)) {
+		throw XMLException(
+			"Found duplicate attribute \"" + name + "\" in <" +
+			current.back()->getName() + ">.");
+	}
 	current.back()->addAttribute(name, value);
 }
 
 void XMLElementParser::text(string_ref txt)
 {
+	if (current.back()->hasChildren()) {
+		// no mixed-content elements
+		throw XMLException(
+			"Mixed text+subtags in <" + current.back()->getName() +
+			">: \"" + txt + "\".");
+	}
 	current.back()->setData(txt);
 }
 
@@ -95,6 +106,7 @@ void XMLElementParser::doctype(string_ref txt)
 {
 	auto pos1 = txt.find(" SYSTEM ");
 	if (pos1 == string_ref::npos) return;
+	if ((pos1 + 8) >= txt.size()) return;
 	char q = txt[pos1 + 8];
 	if ((q != '"') && (q != '\'')) return;
 	auto t = txt.substr(pos1 + 9);

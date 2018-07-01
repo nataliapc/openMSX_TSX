@@ -78,7 +78,7 @@ private:
 		int volume;	// envelope counter
 		int sl;		// sustain level: sl_tab[SL]
 
-		unsigned* wavetable; // waveform select
+		const unsigned* wavetable; // waveform select
 
 		EnvelopeState state; // EG: phase type
 		unsigned eg_m_ar;// (attack state)
@@ -140,7 +140,7 @@ private:
 	};
 
 	// SoundDevice
-	int getAmplificationFactor() const override;
+	int getAmplificationFactorImpl() const override;
 	void generateChannels(int** bufs, unsigned num) override;
 
 	void callback(byte flag) override;

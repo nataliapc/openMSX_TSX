@@ -45,9 +45,11 @@
 #include "RomDooly.hh"
 #include "RomMSXtra.hh"
 #include "RomRamFile.hh"
+#include "RomColecoMegaCart.hh"
 #include "RomMultiRom.hh"
 #include "Rom.hh"
 #include "Reactor.hh"
+#include "MSXMotherBoard.hh"
 #include "RomDatabase.hh"
 #include "DeviceConfig.hh"
 #include "XMLElement.hh"
@@ -168,13 +170,28 @@ unique_ptr<MSXDevice> create(const DeviceConfig& config)
 		// Guess mapper type, if it was not in DB.
 		const RomInfo* romInfo = config.getReactor().getSoftwareDatabase().fetchRomInfo(rom.getOriginalSHA1());
 		if (!romInfo) {
-			type = guessRomType(rom);
+			auto machineType = config.getMotherBoard().getMachineType();
+			if (machineType == "Coleco") {
+				unsigned size = rom.getSize();
+				if ((size == 128*1024) || (size == 256*1024) ||
+				    (size == 512*1024) || (size == 1024*1024)) {
+					type = ROM_COLECOMEGACART;
+				}
+				else {
+					type = ROM_PAGE23;
+				}
+			} else {
+				type = guessRomType(rom);
+			}
 		} else {
 			type = romInfo->getRomType();
 		}
 	} else {
 		// Use mapper type from config, even if this overrides DB.
 		type = RomInfo::nameToRomType(typestr);
+		if (type == ROM_UNKNOWN) {
+			throw MSXException("Unknown mappertype: " + typestr);
+		}
 	}
 
 	// Store actual detected mapper type in config (override the possible
@@ -382,6 +399,9 @@ unique_ptr<MSXDevice> create(const DeviceConfig& config)
 		break;
 	case ROM_RAMFILE:
 		result = make_unique<RomRamFile>(config, move(rom));
+		break;
+	case ROM_COLECOMEGACART:
+		result = make_unique<RomColecoMegaCart>(config, move(rom));
 		break;
 	default:
 		throw MSXException("Unknown ROM type");

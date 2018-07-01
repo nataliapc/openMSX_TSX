@@ -267,6 +267,16 @@ void MSXMotherBoard::setMachineConfig(HardwareConfig* machineConfig_)
 	msxCpuInterface = make_unique<MSXCPUInterface>(*this);
 }
 
+std::string MSXMotherBoard::getMachineType() const
+{
+	const HardwareConfig* machine = getMachineConfig();
+	if (machine) {
+		return machine->getConfig().getChild("info").getChildData("type");
+	} else {
+		return "";
+	}
+}
+
 bool MSXMotherBoard::isTurboR() const
 {
 	const HardwareConfig* config = getMachineConfig();
@@ -417,7 +427,7 @@ JoystickPortIf& MSXMotherBoard::getJoystickPort(unsigned port)
 		// some MSX machines only have 1 instead of 2 joystick ports
 		string_ref ports = getMachineConfig()->getConfig().getChildData(
 			"JoystickPorts", "AB");
-		if ((ports != "AB") && (ports != "") &&
+		if ((ports != "AB") && (!ports.empty()) &&
 		    (ports != "A") && (ports != "B")) {
 			throw ConfigException(
 				"Invalid JoystickPorts specification, "
@@ -643,7 +653,7 @@ MSXDevice* MSXMotherBoard::findDevice(string_ref name)
 	return nullptr;
 }
 
-MSXMapperIO* MSXMotherBoard::createMapperIO()
+MSXMapperIO& MSXMotherBoard::createMapperIO()
 {
 	if (mapperIOCounter == 0) {
 		mapperIO = DeviceFactory::createMapperIO(*getMachineConfig());
@@ -659,7 +669,7 @@ MSXMapperIO* MSXMotherBoard::createMapperIO()
 		cpuInterface.register_IO_In (0xFF, mapperIO.get());
 	}
 	++mapperIOCounter;
-	return mapperIO.get();
+	return *mapperIO;
 }
 
 void MSXMotherBoard::destroyMapperIO()
@@ -929,10 +939,7 @@ MachineTypeInfo::MachineTypeInfo(MSXMotherBoard& motherBoard_)
 void MachineTypeInfo::execute(array_ref<TclObject> /*tokens*/,
                               TclObject& result) const
 {
-	const HardwareConfig* machine = motherBoard.getMachineConfig();
-	if (machine) {
-		result.setString(machine->getConfig().getChild("info").getChildData("type"));
-	}
+	result.setString(motherBoard.getMachineType());
 }
 
 string MachineTypeInfo::help(const vector<string>& /*tokens*/) const

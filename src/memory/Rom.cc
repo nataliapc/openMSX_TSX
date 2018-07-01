@@ -44,13 +44,13 @@ private:
 
 
 Rom::Rom(string name_, string description_,
-         const DeviceConfig& config, const string& id /*= ""*/)
+         const DeviceConfig& config, const string& id /*= {}*/)
 	: name(std::move(name_)), description(std::move(description_))
 {
 	// Try all <rom> tags with matching "id" attribute.
 	string errors;
 	for (auto& c : config.getXML()->getChildren("rom")) {
-		if (c->getAttribute("id", "") == id) {
+		if (c->getAttribute("id", {}) == id) {
 			try {
 				init(config.getMotherBoard(), *c, config.getFileContext());
 				return;
@@ -209,7 +209,7 @@ void Rom::init(MSXMotherBoard& motherBoard, const XMLElement& config,
 				file.getURL() << "'.");
 		}
 
-		// We loaded an extrenal file, so check.
+		// We loaded an external file, so check.
 		checkResolvedSha1 = true;
 
 	} else {
@@ -259,7 +259,7 @@ void Rom::init(MSXMotherBoard& motherBoard, const XMLElement& config,
 	}
 
 	// TODO fix this, this is a hack that depends heavily on
-	//      HardwareConig::createRomConfig
+	//      HardwareConfig::createRomConfig
 	if (StringOp::startsWith(name, "MSXRom")) {
 		auto& db = motherBoard.getReactor().getSoftwareDatabase();
 		string_ref title;
@@ -274,8 +274,9 @@ void Rom::init(MSXMotherBoard& motherBoard, const XMLElement& config,
 		}
 	}
 
+	// Make name unique wrt all registered debuggables.
+	auto& debugger = motherBoard.getDebugger();
 	if (size) {
-		auto& debugger = motherBoard.getDebugger();
 		if (debugger.findDebuggable(name)) {
 			unsigned n = 0;
 			string tmp;
@@ -284,7 +285,6 @@ void Rom::init(MSXMotherBoard& motherBoard, const XMLElement& config,
 			} while (debugger.findDebuggable(tmp));
 			name = tmp;
 		}
-		romDebuggable = make_unique<RomDebuggable>(debugger, *this);
 	}
 
 	if (checkResolvedSha1) {
@@ -317,6 +317,11 @@ void Rom::init(MSXMotherBoard& motherBoard, const XMLElement& config,
 		}
 		rom = &rom[windowBase];
 		size = windowSize;
+	}
+
+	// Only create the debuggable once all checks succeeded.
+	if (size) {
+		romDebuggable = make_unique<RomDebuggable>(debugger, *this);
 	}
 }
 
@@ -352,7 +357,7 @@ Rom::~Rom() = default;
 
 string Rom::getFilename() const
 {
-	return file.is_open() ? file.getURL() : "";
+	return file.is_open() ? file.getURL() : string{};
 }
 
 const Sha1Sum& Rom::getOriginalSHA1() const

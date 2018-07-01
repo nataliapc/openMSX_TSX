@@ -58,9 +58,15 @@ template <unsigned BANK_SIZE>
 RomBlocks<BANK_SIZE>::~RomBlocks() = default;
 
 template <unsigned BANK_SIZE>
-byte RomBlocks<BANK_SIZE>::readMem(word address, EmuTime::param /*time*/)
+byte RomBlocks<BANK_SIZE>::peekMem(word address, EmuTime::param /*time*/) const
 {
 	return bankPtr[address / BANK_SIZE][address & BANK_MASK];
+}
+
+template <unsigned BANK_SIZE>
+byte RomBlocks<BANK_SIZE>::readMem(word address, EmuTime::param time)
+{
+	return RomBlocks<BANK_SIZE>::peekMem(address, time);
 }
 
 template <unsigned BANK_SIZE>
@@ -97,7 +103,7 @@ void RomBlocks<BANK_SIZE>::setExtraMemory(const byte* mem, unsigned size)
 }
 
 template <unsigned BANK_SIZE>
-void RomBlocks<BANK_SIZE>::setRom(byte region, int block)
+void RomBlocks<BANK_SIZE>::setRom(byte region, unsigned block)
 {
 	// Note: Some cartridges have a number of blocks that is not a power of 2,
 	//       for those we have to make an exception for "block < nrBlocks".

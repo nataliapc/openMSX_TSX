@@ -14,6 +14,7 @@
 #include "unreachable.hh"
 #include "stl.hh"
 #include "xxhash.hh"
+#include <cassert>
 #include <stdexcept>
 
 using std::string;
@@ -110,6 +111,7 @@ void DBParser::start(string_ref tag)
 		return;
 	}
 
+	assert(!tag.empty()); // rapidsax will reject empty tags
 	switch (state) {
 	case BEGIN:
 		if (tag == "softwaredb") {
@@ -372,11 +374,6 @@ String32 DBParser::cIndex(string_ref str)
 // called on </software>
 void DBParser::addEntries()
 {
-	if (!system.empty() && !small_compare<'M','S','X'>(system)) {
-		// skip non-MSX entries
-		return;
-	}
-
 	for (auto& d : dumps) {
 		db.emplace_back(d.hash, RomInfo(
 			title, year, company, country,

@@ -152,6 +152,18 @@ proc vgm_rec_start {} {
 	if {$y8950_logged} {
 		lappend watchpoints [debug set_watchpoint write_io 0xC0 {} {vgm::write_y8950_address}]
 		lappend watchpoints [debug set_watchpoint write_io 0xC1 {} {vgm::write_y8950_data}]
+
+		set y8950_ram [concat [machine_info output_port 0xC0] RAM]
+		if {[lsearch -exact [debug list] $y8950_ram] >= 0} {
+			set y8950_ram_size [debug size $y8950_ram]
+			if {$y8950_ram_size > 0} {
+				append music_data [binary format ccc 0x67 0x66 0x88]
+				append music_data [little_endian_32 [expr $y8950_ram_size + 8]]
+				append music_data [little_endian_32 $y8950_ram_size]
+				append music_data [zeros 4]
+				append music_data [debug read_block $y8950_ram 0 $y8950_ram_size]
+			}
+		}
 	}
 
 	# A thing: for wave to work some bits have to be set through FM2. So
@@ -169,6 +181,18 @@ proc vgm_rec_start {} {
 		lappend watchpoints [debug set_watchpoint write_io 0xC5 {} {vgm::write_opl4_data}]
 		lappend watchpoints [debug set_watchpoint write_io 0xC6 {} {vgm::write_opl4_address_2}]
 		lappend watchpoints [debug set_watchpoint write_io 0xC7 {} {vgm::write_opl4_data}]
+
+		set moonsound_ram [concat [machine_info output_port 0x7E] {wave RAM}]
+		if {[lsearch -exact [debug list] $moonsound_ram] >= 0} {
+			set moonsound_ram_size [debug size $moonsound_ram]
+			if {$moonsound_ram_size > 0} {
+				append music_data [binary format ccc 0x67 0x66 0x87]
+				append music_data [little_endian_32 [expr $moonsound_ram_size + 8]]
+				append music_data [little_endian_32 $moonsound_ram_size]
+				append music_data [zeros 4]
+				append music_data [debug read_block $moonsound_ram 0 $moonsound_ram_size]
+			}
+		}
 	}
 
 	variable scc_logged

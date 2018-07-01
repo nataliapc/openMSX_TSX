@@ -24,6 +24,7 @@
 
 #include "Math.hh"
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 
 namespace gl {
@@ -109,8 +110,18 @@ public:
 	}
 
 	// Access the i-th element of this vector.
-	T  operator[](int i) const { return e[i]; }
-	T& operator[](int i)       { return e[i]; }
+	T  operator[](unsigned i) const {
+		#ifdef DEBUG
+		assert(i < N);
+		#endif
+		return e[i];
+	}
+	T& operator[](unsigned i) {
+		#ifdef DEBUG
+		assert(i < N);
+		#endif
+		return e[i];
+	}
 
 	// Assignment version of the +,-,* operations defined below.
 	vecN& operator+=(const vecN& x) { *this = *this + x; return *this; }
@@ -345,7 +356,9 @@ template<int N, typename T>
 inline vecN<N, int> round(const vecN<N, T>& x)
 {
 	vecN<N, int> r;
-	for (int i = 0; i < N; ++i) r[i] = int(roundf(x[i]));
+	// note: std::lrint() is more generic (e.g. also works with double),
+	// but Dingux doesn't seem to have std::lrint().
+	for (int i = 0; i < N; ++i) r[i] = lrintf(x[i]);
 	return r;
 }
 

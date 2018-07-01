@@ -240,8 +240,8 @@ void HardwareConfig::load(string_ref type)
 	setConfig(loadConfig(filename));
 
 	assert(!userName.empty());
-	const auto& baseName = FileOperations::getBaseName(filename);
-	setFileContext(configFileContext(baseName, hwName, userName));
+	const auto& dirname = FileOperations::getDirName(filename);
+	setFileContext(configFileContext(dirname, hwName, userName));
 }
 
 void HardwareConfig::parseSlots()
@@ -259,12 +259,24 @@ void HardwareConfig::parseSlots()
 				    "Cannot mark unspecified primary slot '" +
 				    primSlot + "' as external");
 			}
+			if (psElem->hasChildren()) {
+				throw MSXException(
+					"Primary slot " + StringOp::toString(ps) +
+					" is marked as external, but that would only "
+					"make sense if its <primary> tag would be "
+					"empty.");
+			}
 			createExternalSlot(ps);
 			continue;
 		}
 		for (auto& ssElem : psElem->getChildren("secondary")) {
 			const auto& secSlot = ssElem->getAttribute("slot");
 			int ss = CartridgeSlotManager::getSlotNum(secSlot);
+			if ((-16 <= ss) && (ss <= -1) && (ss != ps)) {
+				throw MSXException(
+					"Invalid secundary slot specification: \"" +
+					secSlot + "\".");
+			}
 			if (ss < 0) {
 				if ((ss >= -128) && (0 <= ps) && (ps < 4) &&
 				    motherBoard.getCPUInterface().isExpanded(ps)) {
@@ -284,10 +296,38 @@ void HardwareConfig::parseSlots()
 			}
 			createExpandedSlot(ps);
 			if (ssElem->getAttributeAsBool("external", false)) {
+				if (ssElem->hasChildren()) {
+					throw MSXException(
+						"Secondary slot " + StringOp::toString(ps) +
+						"-" + StringOp::toString(ss) + " is marked "
+						"as external, but that would only make sense "
+						"if its <secondary> tag would be empty.");
+				}
 				createExternalSlot(ps, ss);
 			}
 		}
 	}
+}
+
+byte HardwareConfig::parseSlotMap() const
+{
+	byte initialPrimarySlots = 0;
+	if (auto* slotmap = getConfig().findChild("slotmap")) {
+		for (auto* child : slotmap->getChildren("map")) {
+			int page = child->getAttributeAsInt("page", -1);
+			if (page < 0 || page > 3) {
+				throw MSXException("Invalid or missing page in slotmap entry");
+			}
+			int slot = child->getAttributeAsInt("slot", -1);
+			if (slot < 0 || slot > 3) {
+				throw MSXException("Invalid or missing slot in slotmap entry");
+			}
+			unsigned offset = page * 2;
+			initialPrimarySlots &= ~(3 << offset);
+			initialPrimarySlots |= slot << offset;
+		}
+	}
+	return initialPrimarySlots;
 }
 
 void HardwareConfig::createDevices()

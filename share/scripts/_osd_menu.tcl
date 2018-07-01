@@ -731,12 +731,18 @@ proc create_video_setting_menu {} {
 		border-size 2
 		width 210
 		xpos 100
-		ypos 120
+		ypos 110
 	}
 	lappend items { text "Video Settings"
 	         font-size 10
 	         post-spacing 6
 	         selectable false }
+	if {[expr {[lindex [lindex [openmsx_info setting videosource] 2] 1] > 1}]} {
+		lappend items { text "Video source: $videosource"
+			actions { LEFT  { osd_menu::menu_setting [cycle_back videosource] }
+			          RIGHT { osd_menu::menu_setting [cycle      videosource] }}
+				  post-spacing 6}
+	}
 	if {$scaling_available} {
 		lappend items { text "Scaler: $scale_algorithm"
 			actions { LEFT  { osd_menu::menu_setting [cycle_back scale_algorithm] }
@@ -1093,11 +1099,6 @@ proc menu_remove_extension_exec {item} {
 	remove_extension $item
 }
 
-proc get_pluggable_for_connector {connector} {
-	set t [plug $connector]
-	return [string range $t [string first ": " $t]+2 end]
-}
-
 proc menu_create_connectors_list {} {
 	set menu_def {
 	         execute menu_connector_exec
@@ -1116,7 +1117,7 @@ proc menu_create_connectors_list {} {
 	foreach item $items {
 		set plugged [get_pluggable_for_connector $item]
 		set plugged_presentation ""
-		if {$plugged ne "--empty--"} {
+		if {$plugged ne ""} {
 			set plugged_presentation "  ([machine_info pluggable $plugged])"
 		}
 		lappend presentation "[machine_info connector $item]: $plugged$plugged_presentation"
@@ -1152,7 +1153,7 @@ proc create_menu_pluggable_list {connector} {
 	set already_plugged [list]
 	foreach other_connector [machine_info connector] {
 		set other_plugged [get_pluggable_for_connector $other_connector]
-		if {$other_plugged ne "--empty--" && $other_connector ne $connector} {
+		if {$other_plugged ne "" && $other_connector ne $connector} {
 			lappend already_plugged $other_plugged
 		}
 	}
@@ -1171,8 +1172,7 @@ proc create_menu_pluggable_list {connector} {
 	}
 
 	set plugged [get_pluggable_for_connector $connector]
-
-	if {$plugged ne "--empty--"} {
+	if {$plugged ne ""} {
 		set items [linsert $items 0 "--unplug--"]
 		set presentation [linsert $presentation 0 "Nothing, unplug $plugged ([machine_info pluggable $plugged])"]
 	}
@@ -1564,7 +1564,7 @@ proc menu_free_tape_name {} {
 }
 
 proc menu_create_hdd_list {path drive} {
-	return [prepare_menu_list [ls $path "dsk|zip|gz"] \
+	return [prepare_menu_list [ls $path "dsk|zip|gz|hdd"] \
 	                          10 \
 	                          [list execute [list menu_select_hdd $drive]\
 	                            font-size 8 \
