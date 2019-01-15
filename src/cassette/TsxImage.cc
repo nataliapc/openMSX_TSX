@@ -303,10 +303,15 @@ size_t TsxImage::writeBlock15(Block15 *b)   //Direct Recording
 {
 	uint32_t i;
 	int j;
-	for (i = 0; i < b->len; i++) {
+	for (i = 0; i < b->len-1; i++) {
 		for (j = 7; j >= 0; j--) {
 			writeSample(b->bitTstates, ((b->samples[i] >> j) & 1 ? 127 : -127));
 		}
+	}
+	if (b->lastByte == 0) b->lastByte = 1;
+	if (b->lastByte > 8) b->lastByte = 8;
+	for (j = b->lastByte-1; j >= 0; j--) {
+		writeSample(b->bitTstates, ((b->samples[b->len-1] >> j) & 1 ? 127 : -127));
 	}
 	writeSilence(ULTRA_SPEED ? 100 : b->pausems);
 	return b->len + 9;
