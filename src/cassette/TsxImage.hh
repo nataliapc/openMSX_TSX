@@ -70,6 +70,14 @@ private:
 		uint8_t  num;               //Number of pulses
 		UA_L16   pulses[0];         //[Array] Pulses' lengths
 	};
+	struct Block15 {
+		uint8_t  id;
+		UA_L16   bitTstates;        //Number of T-states per sample (bit of data)
+		UA_L16   pausems;           //Pause after this block (ms.) {1000}
+		uint8_t  lastByte;          //Used bits (samples) in last byte of data (1-8)
+		UA_L24   len;               //Length of samples data
+		byte     samples[0];        //[Array] Samples data. Each bit represents a state on the EAR port (i.e. one sample). MSb is played first.
+	};
 	struct Block20 {
 		uint8_t  id;
 		UA_L16   pausems;           //Silence pause in milliseconds
@@ -108,11 +116,13 @@ private:
 	size_t writeBlock11(Block11 *);
 	size_t writeBlock12(Block12 *);
 	size_t writeBlock13(Block13 *);
+	size_t writeBlock15(Block15 *);
 	size_t writeBlock20(Block20 *);
 	size_t writeBlock30(Block30 *, CliComm& cliComm);
 	size_t writeBlock32(Block32 *, CliComm& cliComm);
 	size_t writeBlock35(Block35 *);
 	size_t writeBlock4B(Block4B *);
+	void writeSample(uint32_t tstates, int8_t value);
 	void writePulse(uint32_t tstates);
 	void writeSilence(int s);
 	void write0();
@@ -128,6 +138,7 @@ private:
 	void convert(const Filename& filename, FilePool& filePool, CliComm& cliComm);
 
 	int8_t   currentValue = 127;
+	bool     phaseChanged = false;
 	uint32_t pulsePilot4B = 0;
 	uint32_t pulseOne4B = 0;
 	uint32_t pulseZero4B = 0;

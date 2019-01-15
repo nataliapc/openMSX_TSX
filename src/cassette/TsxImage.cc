@@ -23,9 +23,11 @@ namespace openmsx {
     * [#11] Turbo Speed Block (Turbo speed)
     * [#12] Pure Tone Block
     * [#13] Pulse sequence Block
+    * [#15] Direct recording Block
     * [#20] Silence Block
     * [#21] Group start Block
     * [#22] Group end Block
+    * [#2B] Set signal level
     * [#30] Text description Block
     * [#32] Archive info Block
     * [#35] Custom info Block
@@ -36,9 +38,11 @@ namespace openmsx {
 	static const uint8_t B11_TURBO_BLOCK    = 0x11;
 	static const uint8_t B12_PURE_TONE      = 0x12;
 	static const uint8_t B13_PULSE_SEQUENCE = 0x13;
+	static const uint8_t B15_DIRECT_REC     = 0x15;
 	static const uint8_t B20_SILENCE_BLOCK  = 0x20;
 	static const uint8_t B21_GRP_START      = 0x21;
 	static const uint8_t B22_GRP_END        = 0x22;
+	static const uint8_t B2B_SIGNAL_LEVEL   = 0x2B;
 	static const uint8_t B30_TEXT_DESCRIP   = 0x30;
 	static const uint8_t B32_ARCHIVE_INFO   = 0x32;
 	static const uint8_t B35_CUSTOM_INFO    = 0x35;
@@ -49,7 +53,6 @@ namespace openmsx {
     for MSX tapes:
 
     * [#14] Pure data Block
-    * [#15] Direct recording Block
     * [#19] Generalized data block
     * [#23] Jump Block
     * [#24] Loop start Block
@@ -59,7 +62,6 @@ namespace openmsx {
     * [#31] Message Block
 */
 	static const uint8_t B14_PURE_DATA      = 0x14;
-	static const uint8_t B15_DIRECT_REC     = 0x15;
 	static const uint8_t B19_GEN_DATA       = 0x19;
 	static const uint8_t B23_JUMP_BLOCK     = 0x23;
 	static const uint8_t B24_LOOP_START     = 0x24;
@@ -78,7 +80,7 @@ static const bool     ULTRA_SPEED       = false;    // 3600 bauds / short pilots
 
 // output settings
 static const unsigned TZX_Z80_FREQ      = 3500000;  // 3.5 Mhz
-static const unsigned OUTPUT_FREQ       = 58900;    // ~ = Z80_FREQ*4/TSTATES_MSX_PULSE
+static const unsigned OUTPUT_FREQ       = 96000;//58900;    // ~ = Z80_FREQ*4/TSTATES_MSX_PULSE
 static const float    TSTATES_MSX_PULSE = 238.f;
 
 // headers definitions
@@ -132,11 +134,16 @@ void TsxImage::fillBuffer(unsigned pos, int** bufs, unsigned num) const
 	}
 }
 
-void TsxImage::writePulse(uint32_t tstates)
+void TsxImage::writeSample(uint32_t tstates, int8_t value)
 {
 	acumBytes += tstates2bytes(tstates);
-	output.insert(end(output), int(acumBytes), currentValue);
+	output.insert(end(output), int(acumBytes), value);
 	acumBytes -= int(acumBytes);
+}
+
+void TsxImage::writePulse(uint32_t tstates)
+{
+	writeSample(tstates, currentValue);
 	currentValue = -currentValue;
 }
 
@@ -236,7 +243,10 @@ void TsxImage::writeTurboByte(byte b, uint16_t zerolen=855, uint16_t onelen=1710
 
 size_t TsxImage::writeBlock10(Block10 *b)   //Standard Speed Block
 {
-	currentValue = -127;
+	if (!phaseChanged)
+		currentValue = -127;
+	phaseChanged = false;
+	
 	for (int i=0; i<3223; i++) {
 		writeTurboPilot();
 	}
@@ -253,7 +263,10 @@ size_t TsxImage::writeBlock10(Block10 *b)   //Standard Speed Block
 
 size_t TsxImage::writeBlock11(Block11 *b)   //Turbo Speed Block
 {
-	currentValue = -127;
+	if (!phaseChanged)
+		currentValue = -127;
+	phaseChanged = false;
+
 	for (int i=0; i<b->pilotlen; i++) {
 		writeTurboPilot(b->pilot);
 	}
@@ -284,6 +297,19 @@ size_t TsxImage::writeBlock13(Block13 *b)   //Pulse sequence Block
 		writePulse(tstates2bytes(b->pulses[i]));
 	}
 	return b->num*2 + 2;
+}
+
+size_t TsxImage::writeBlock15(Block15 *b)   //Direct Recording
+{
+	uint32_t i;
+	int j;
+	for (i = 0; i < b->len; i++) {
+		for (j = 7; j >= 0; j--) {
+			writeSample(b->bitTstates, ((b->samples[i] >> j) & 1 ? 127 : -127));
+		}
+	}
+	writeSilence(ULTRA_SPEED ? 100 : b->pausems);
+	return b->len + 9;
 }
 
 size_t TsxImage::writeBlock20(Block20 *b)   //Silence Block
@@ -325,6 +351,10 @@ size_t TsxImage::writeBlock35(Block35 *b)   //Custom info Block
 
 size_t TsxImage::writeBlock4B(Block4B *b) //MSX KCS Block
 {
+	if (!phaseChanged)
+		currentValue = 127;
+	phaseChanged = false;
+
 	pulsePilot4B = ULTRA_SPEED ? TSTATES_MSX_PULSE : b->pilot;
 	pulseOne4B   = ULTRA_SPEED ? TSTATES_MSX_PULSE : b->bit1len;
 	pulseZero4B  = ULTRA_SPEED ? TSTATES_MSX_PULSE*2 : b->bit0len;
@@ -392,6 +422,12 @@ void TsxImage::convert(const Filename& filename, FilePool& filePool, CliComm& cl
 #endif
 				pos += writeBlock13((Block13*)&buf[pos]);
 			} else
+			if (bid == B15_DIRECT_REC) {
+#ifdef DEBUG
+				cliComm.printWarning("Block#15");
+#endif
+				pos += writeBlock15((Block15*)&buf[pos]);
+			} else
 			if (bid == B20_SILENCE_BLOCK) {
 #ifdef DEBUG
 				cliComm.printInfo("Block#20");
@@ -409,6 +445,14 @@ void TsxImage::convert(const Filename& filename, FilePool& filePool, CliComm& cl
 				cliComm.printWarning("Block#22");
 #endif
 				pos += 1;
+			} else
+			if (bid == B2B_SIGNAL_LEVEL) {
+#ifdef DEBUG
+				cliComm.printWarning("Block#2B");
+#endif
+				phaseChanged = true;
+				currentValue = *((uint8_t*)&buf[pos+5]) == 0 ? -127 : 127;
+				pos += 1 + 4 + 1;
 			} else
 			if (bid == B30_TEXT_DESCRIP) {
 #ifdef DEBUG
@@ -463,10 +507,6 @@ void TsxImage::convert(const Filename& filename, FilePool& filePool, CliComm& cl
 			if (bid == B14_PURE_DATA) {
 				cliComm.printWarning("Block#14 Unsupported yet!");
 				pos += *((UA_L24*)&buf[pos+8]) + 11;
-			} else
-			if (bid == B15_DIRECT_REC) {
-				cliComm.printWarning("Block#15 Unsupported yet!");
-				pos += *((UA_L24*)&buf[pos+6]) + 9;
 			} else
 			if (bid == B19_GEN_DATA) {
 				cliComm.printWarning("Block#19 Unsupported yet!");
