@@ -551,11 +551,11 @@ void TsxImage::convert(const Filename& filename, FilePool& filePool, CliComm& cl
 		}
 	}
 	if (!headerFound) {
-		throw MSXException(filename.getOriginal() +
+		throw MSXException(filename.getOriginal(), 
 		                   ": not a valid TSX image");
 	}
 	if (issueWarning) {
-		 cliComm.printWarning("Skipped unhandled data in " +
+		 cliComm.printWarning("Skipped unhandled data in ", 
 		                      filename.getOriginal());
 	}
 
