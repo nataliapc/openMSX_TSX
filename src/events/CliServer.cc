@@ -1,12 +1,11 @@
 #include "CliServer.hh"
 #include "GlobalCliComm.hh"
 #include "CliConnection.hh"
-#include "StringOp.hh"
 #include "FileOperations.hh"
 #include "MSXException.hh"
-#include "memory.hh"
 #include "random.hh"
 #include "statp.hh"
+#include <memory>
 #include <string>
 
 #ifdef _WIN32
@@ -60,7 +59,7 @@ static bool checkSocketDir(const string& dir)
 
 static bool checkSocket(const string& socket)
 {
-	string_ref name = FileOperations::getFilename(socket);
+	string_view name = FileOperations::getFilename(socket);
 	if (!name.starts_with("socket.")) {
 		return false; // wrong name
 	}
@@ -123,12 +122,12 @@ static int openPort(SOCKET listenSock)
 
 SOCKET CliServer::createSocket()
 {
-	string dir = FileOperations::getTempDir() + "/openmsx-" + getUserName();
+	string dir = strCat(FileOperations::getTempDir(), "/openmsx-", getUserName());
 	FileOperations::mkdir(dir, 0700);
 	if (!checkSocketDir(dir)) {
 		throw MSXException("Couldn't create socket directory.");
 	}
-	socketName = StringOp::Builder() << dir << "/socket." << int(getpid());
+	socketName = strCat(dir, "/socket.", int(getpid()));
 
 #ifdef _WIN32
 	SOCKET sd = socket(AF_INET, SOCK_STREAM, 0);
@@ -176,7 +175,7 @@ SOCKET CliServer::createSocket()
 	}
 	if (listen(sd, SOMAXCONN) == SOCKET_ERROR) {
 		sock_close(sd);
-		throw MSXException("Couldn't listen to socket: " + sock_error());
+		throw MSXException("Couldn't listen to socket: ", sock_error());
 	}
 	return sd;
 }
@@ -258,7 +257,7 @@ void CliServer::mainLoop()
 		// does not. To be on the safe side, we explicitly reset file flags.
 		fcntl(sd, F_SETFL, 0);
 #endif
-		cliComm.addListener(make_unique<SocketConnection>(
+		cliComm.addListener(std::make_unique<SocketConnection>(
 			commandController, eventDistributor, sd));
 	}
 }

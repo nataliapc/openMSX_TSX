@@ -15,7 +15,7 @@ namespace openmsx {
 
 static byte calcReadBackMask(MSXMotherBoard& motherBoard)
 {
-	string_ref type = motherBoard.getMachineConfig()->getConfig().getChildData(
+	string_view type = motherBoard.getMachineConfig()->getConfig().getChildData(
 	                               "MapperReadBackBits", "largest");
 	if (type == "largest") {
 		return 0x00; // all bits can be read
@@ -23,10 +23,10 @@ static byte calcReadBackMask(MSXMotherBoard& motherBoard)
 	std::string str = type.str();
 	int bits;
 	if (!StringOp::stringToInt(str, bits)) {
-		throw FatalError("Unknown mapper type: \"" + type + "\".");
+		throw FatalError("Unknown mapper type: \"", type, "\".");
 	}
 	if (bits < 0 || bits > 8) {
-		throw FatalError("MapperReadBackBits out of range: \"" + type + "\".");
+		throw FatalError("MapperReadBackBits out of range: \"", type, "\".");
 	}
 	return unsigned(-1) << bits;
 }

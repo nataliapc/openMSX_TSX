@@ -34,10 +34,10 @@
 #include "FileContext.hh"
 #include "endian.hh"
 #include "serialize.hh"
-#include "memory.hh"
 #include <algorithm>
-#include <vector>
 #include <cstring>
+#include <memory>
+#include <vector>
 
 using std::string;
 using std::vector;
@@ -113,7 +113,7 @@ SCSILS120::SCSILS120(const DeviceConfig& targetconfig,
 	}
 	name[2] = char('a' + id);
 	(*lsInUse)[id] = true;
-	lsxCommand = make_unique<LSXCommand>(
+	lsxCommand = std::make_unique<LSXCommand>(
 		motherBoard.getCommandController(),
 		motherBoard.getStateChangeDistributor(),
 		motherBoard.getScheduler(), *this);
@@ -343,7 +343,7 @@ bool SCSILS120::checkReadOnly()
 
 unsigned SCSILS120::readCapacity()
 {
-	unsigned block = unsigned(getNbSectors());
+	auto block = unsigned(getNbSectors());
 
 	if (block == 0) {
 		// drive not ready
@@ -360,7 +360,7 @@ unsigned SCSILS120::readCapacity()
 
 bool SCSILS120::checkAddress()
 {
-	unsigned total = unsigned(getNbSectors());
+	auto total = unsigned(getNbSectors());
 	if (total == 0) {
 		// drive not ready
 		keycode = SCSI::SENSE_MEDIUM_NOT_PRESENT;
@@ -476,7 +476,7 @@ void SCSILS120::eject()
 	motherBoard.getMSXCliComm().update(CliComm::MEDIA, name, {});
 }
 
-void SCSILS120::insert(string_ref filename)
+void SCSILS120::insert(string_view filename)
 {
 	file = File(filename);
 	mediaChanged = true;
@@ -738,7 +738,7 @@ bool SCSILS120::diskChanged()
 	return mediaChanged; // TODO not reset on read
 }
 
-int SCSILS120::insertDisk(string_ref filename)
+int SCSILS120::insertDisk(string_view filename)
 {
 	try {
 		insert(filename);
@@ -794,8 +794,8 @@ void LSXCommand::execute(array_ref<TclObject> tokens, TclObject& result,
 			ls.insert(filename);
 			// return filename; // Note: the diskX command doesn't do this either, so this has not been converted to TclObject style here
 		} catch (FileException& e) {
-			throw CommandException("Can't change disk image: " +
-					e.getMessage());
+			throw CommandException("Can't change disk image: ",
+			                       e.getMessage());
 		}
 	} else {
 		throw CommandException("Too many or wrong arguments.");
@@ -804,10 +804,11 @@ void LSXCommand::execute(array_ref<TclObject> tokens, TclObject& result,
 
 string LSXCommand::help(const vector<string>& /*tokens*/) const
 {
-	return ls.name + "                   : display the disk image for this LS-120 drive\n" +
-	       ls.name + " eject             : eject the disk image from this LS-120 drive\n" +
-	       ls.name + " insert <filename> : change the disk image for this LS-120 drive\n" +
-	       ls.name + " <filename>        : change the disk image for this LS-120 drive\n";
+	return strCat(
+		ls.name, "                   : display the disk image for this LS-120 drive\n",
+		ls.name, " eject             : eject the disk image from this LS-120 drive\n",
+		ls.name, " insert <filename> : change the disk image for this LS-120 drive\n",
+		ls.name, " <filename>        : change the disk image for this LS-120 drive\n");
 }
 
 void LSXCommand::tabCompletion(vector<string>& tokens) const

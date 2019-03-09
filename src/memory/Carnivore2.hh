@@ -18,7 +18,7 @@ class IDEDevice;
 
 class Carnivore2 final
 	: public MSXDevice
-	, public MSXMapperIOClient<Carnivore2>
+	, public MSXMapperIOClient
 	, public GlobalReadClient<Carnivore2, CT_Interval<0x0000>, CT_Interval<0x4000, 0x4010>>
 {
 public:
@@ -33,9 +33,9 @@ public:
 	void writeMem(word address, byte value, EmuTime::param time) override;
 	void globalRead(word address, EmuTime::param time) override;
 
-	byte readIO(word address, EmuTime::param time) override;
+	byte readIO(word port, EmuTime::param time) override;
 	byte peekIO(word port, EmuTime::param time) const override;
-	void writeIO(word address, byte value, EmuTime::param time) override;
+	void writeIO(word port, byte value, EmuTime::param time) override;
 	byte getSelectedSegment(byte page) const override;
 
 	template<typename Archive>

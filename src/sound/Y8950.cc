@@ -565,7 +565,7 @@ Y8950::Y8950(const std::string& name_, const DeviceConfig& config,
 	}
 
 	float input = Y8950::CLOCK_FREQ / float(Y8950::CLOCK_FREQ_DIV);
-	setInputRate(int(input + 0.5f));
+	setInputRate(lrintf(input));
 
 	reset(time);
 	registerSound(config);
@@ -1222,7 +1222,7 @@ byte Y8950::readStatus(EmuTime::param time)
 byte Y8950::peekStatus(EmuTime::param time) const
 {
 	const_cast<Y8950Adpcm&>(adpcm).sync(time);
-	return (status & (0x80 | statusMask)) | 0x06; // bit 1 and 2 are always 1
+	return (status & (0x87 | statusMask)) | 0x06; // bit 1 and 2 are always 1
 }
 
 void Y8950::callback(byte flag)
@@ -1253,8 +1253,8 @@ byte Y8950::peekRawStatus() const
 void Y8950::changeStatusMask(byte newMask)
 {
 	statusMask = newMask;
-	status &= statusMask;
-	if (status) {
+	status &= 0x87 | statusMask;
+	if (status & statusMask) {
 		status |= 0x80;
 		irq.set();
 	} else {

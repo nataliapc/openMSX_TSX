@@ -73,8 +73,6 @@ class Library(object):
 
 	@classmethod
 	def getCompileFlags(cls, platform, linkStatic, distroRoot):
-		if platform == 'android':
-			return environ['ANDROID_CXXFLAGS']
 		configScript = cls.getConfigScript(platform, linkStatic, distroRoot)
 		if configScript is not None:
 			flags = [ '`%s --cflags`' % configScript ]
@@ -92,8 +90,6 @@ class Library(object):
 
 	@classmethod
 	def getLinkFlags(cls, platform, linkStatic, distroRoot):
-		if platform == 'android':
-			return environ['ANDROID_LDFLAGS']
 		configScript = cls.getConfigScript(platform, linkStatic, distroRoot)
 		if configScript is not None:
 			libsOption = (
@@ -168,7 +164,7 @@ class FreeType(Library):
 
 	@classmethod
 	def isSystemLibrary(cls, platform):
-		return platform in ('android', 'dingux')
+		return platform in ('dingux',)
 
 	@classmethod
 	def getConfigScript(cls, platform, linkStatic, distroRoot):
@@ -176,9 +172,15 @@ class FreeType(Library):
 			if distroRoot == '/usr/local':
 				# FreeType is located in the X11 tree, not the ports tree.
 				distroRoot = '/usr/X11R6'
-		return super(FreeType, cls).getConfigScript(
+		script = super(FreeType, cls).getConfigScript(
 			platform, linkStatic, distroRoot
 			)
+		if isfile(script):
+			return script
+		else:
+			# FreeType 2.9.1 no longer installs the freetype-config script
+			# by default and expects pkg-config to be used instead.
+			return 'pkg-config freetype2'
 
 	@classmethod
 	def getVersion(cls, platform, linkStatic, distroRoot):
@@ -277,7 +279,7 @@ class LibPNG(Library):
 
 	@classmethod
 	def isSystemLibrary(cls, platform):
-		return platform in ('android', 'dingux')
+		return platform in ('dingux',)
 
 class OGG(Library):
 	libName = 'ogg'
@@ -287,7 +289,7 @@ class OGG(Library):
 
 	@classmethod
 	def isSystemLibrary(cls, platform):
-		return platform in ('android', 'dingux')
+		return platform in ('dingux',)
 
 class SDL(Library):
 	libName = 'SDL'
@@ -301,6 +303,31 @@ class SDL(Library):
 	def isSystemLibrary(cls, platform):
 		return platform in ('android', 'dingux')
 
+	@classmethod
+	def getConfigScript(cls, platform, linkStatic, distroRoot):
+		if platform == 'android':
+			return environ['SDL_ANDROID_PORT_PATH'] \
+				+ '/project/jni/application/sdl-config'
+		else:
+			return super(SDL, cls).getConfigScript(
+				platform, linkStatic, distroRoot
+				)
+
+	@classmethod
+	def getLinkFlags(cls, platform, linkStatic, distroRoot):
+		flags = super(SDL, cls).getLinkFlags(
+			platform, linkStatic, distroRoot
+			)
+		if platform == 'android':
+			# On Android, we explicitly add the commander
+			# genius lib folder for SDL
+			flags = '-L%s/project/obj/local/%s %s' % (
+				environ['SDL_ANDROID_PORT_PATH'],
+				environ['TARGET_ABI'],
+				flags
+				)
+		return flags
+
 class SDL_ttf(Library):
 	libName = 'SDL_ttf'
 	makeName = 'SDL_TTF'
@@ -310,7 +337,7 @@ class SDL_ttf(Library):
 
 	@classmethod
 	def isSystemLibrary(cls, platform):
-		return platform in ('android', 'dingux')
+		return platform in ('dingux',)
 
 	@classmethod
 	def getLinkFlags(cls, platform, linkStatic, distroRoot):
@@ -321,6 +348,17 @@ class SDL_ttf(Library):
 			# Because of the SDLmain trickery, we need SDL's link flags too
 			# on some platforms even though we're linking dynamically.
 			flags += ' ' + SDL.getLinkFlags(platform, linkStatic, distroRoot)
+		return flags
+
+	@classmethod
+	def getCompileFlags(cls, platform, linkStatic, distroRoot):
+		flags = super(SDL_ttf, cls).getCompileFlags(
+				platform, linkStatic, distroRoot
+				)
+		if platform == 'android':
+			# On Android, we don't share an install location with SDL,
+			# so SDL's compile flags are insufficient.
+			flags += ' -I%s/include/SDL' % distroRoot
 		return flags
 
 	@classmethod
@@ -339,10 +377,6 @@ class TCL(Library):
 	makeName = 'TCL'
 	header = '<tcl.h>'
 	function = 'Tcl_CreateInterp'
-
-	@classmethod
-	def isSystemLibrary(cls, platform):
-		return platform in ('android',)
 
 	@classmethod
 	def getTclConfig(cls, platform, distroRoot):
@@ -365,36 +399,24 @@ class TCL(Library):
 			if tclpath is not None:
 				yield tclpath
 
-			if platform == 'android':
-				# Under Android, the tcl set-up apparently differs from
-				# other cross-platform setups. the search algorithm to find the
-				# directory that will contain the tclConfig.sh script and the shared libs
-				# is not applicable to Android. Instead, immediately return the correct
-				# subdirectories to the routine that invokes iterLocations()
-				sdl_android_port_path = environ['SDL_ANDROID_PORT_PATH']
-				libpath = sdl_android_port_path + '/project/libs/armeabi'
-				yield libpath
-				tclpath = sdl_android_port_path + '/project/jni/tcl8.5/unix'
-				yield tclpath
-			else:
-				if distroRoot is None or cls.isSystemLibrary(platform):
-					if msysActive():
-						roots = (msysPathToNative('/mingw32'), )
-					else:
-						roots = ('/usr/local', '/usr')
+			if distroRoot is None or cls.isSystemLibrary(platform):
+				if msysActive():
+					roots = (msysPathToNative('/mingw32'), )
 				else:
-					roots = (distroRoot, )
-				for root in roots:
-					if isdir(root):
-						for libdir in ('lib', 'lib64', 'lib/tcl'):
-							libpath = root + '/' + libdir
-							if isdir(libpath):
-								yield libpath
-								for entry in listdir(libpath):
-									if entry.startswith('tcl8.'):
-										tclpath = libpath + '/' + entry
-										if isdir(tclpath):
-											yield tclpath
+					roots = ('/usr/local', '/usr')
+			else:
+				roots = (distroRoot, )
+			for root in roots:
+				if isdir(root):
+					for libdir in ('lib', 'lib64', 'lib/tcl'):
+						libpath = root + '/' + libdir
+						if isdir(libpath):
+							yield libpath
+							for entry in listdir(libpath):
+								if entry.startswith('tcl8.'):
+									tclpath = libpath + '/' + entry
+									if isdir(tclpath):
+										yield tclpath
 
 		tclConfigs = {}
 		log = open('derived/tcl-search.log', 'w')
@@ -463,13 +485,6 @@ class TCL(Library):
 
 	@classmethod
 	def getCompileFlags(cls, platform, linkStatic, distroRoot):
-		if platform == 'android':
-			# Use the current ANDROID cross-compilation flags and not the TCL flags. Otherwise, the
-			# wrong version of libstdc++ will end-up on the include path; the minimal Android NDK
-			# version instead of the more complete GNU version. This is because TCL for Android has
-			# been configured with the minimal libstdc++ on the include path in the C(XX) flags and
-			# not with the more complete GNU version
-			return environ['ANDROID_CXXFLAGS']
 		wantShared = not linkStatic or cls.isSystemLibrary(platform)
 		# The -DSTATIC_BUILD is a hack to avoid including the complete
 		# TCL_DEFS (see 9f1dbddda2) but still being able to link on
@@ -483,10 +498,6 @@ class TCL(Library):
 
 	@classmethod
 	def getLinkFlags(cls, platform, linkStatic, distroRoot):
-		if platform == 'android':
-			# Use the current ANDROID cross-compilation flags and not the TCL flags to
-			# prevent issues with libstdc++ version. See also getCompileFlags()
-			return environ['ANDROID_LDFLAGS']
 		# Tcl can be built as a shared or as a static library, but not both.
 		# Check whether the library type of Tcl matches the one we want.
 		wantShared = not linkStatic or cls.isSystemLibrary(platform)
@@ -555,7 +566,7 @@ class Theora(Library):
 
 	@classmethod
 	def isSystemLibrary(cls, platform):
-		return platform in ('android', 'dingux')
+		return platform in ('dingux',)
 
 class Vorbis(Library):
 	libName = 'vorbis'
@@ -566,7 +577,7 @@ class Vorbis(Library):
 
 	@classmethod
 	def isSystemLibrary(cls, platform):
-		return platform in ('android', 'dingux')
+		return platform in ('dingux',)
 
 class ZLib(Library):
 	libName = 'z'
@@ -576,7 +587,7 @@ class ZLib(Library):
 
 	@classmethod
 	def isSystemLibrary(cls, platform):
-		return platform in ('android', 'dingux')
+		return platform in ('dingux',)
 
 	@classmethod
 	def getVersion(cls, platform, linkStatic, distroRoot):

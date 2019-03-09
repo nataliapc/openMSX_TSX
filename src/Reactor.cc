@@ -42,13 +42,14 @@
 #include "statp.hh"
 #include "stl.hh"
 #include "unreachable.hh"
-#include "memory.hh"
 #include "build-info.hh"
 #include <cassert>
+#include <memory>
 
+using std::make_shared;
+using std::make_unique;
 using std::string;
 using std::vector;
-using std::make_shared;
 
 namespace openmsx {
 
@@ -171,6 +172,17 @@ private:
 	const uint64_t reference;
 };
 
+class SoftwareInfoTopic final : InfoTopic
+{
+public:
+	SoftwareInfoTopic(InfoCommand& openMSXInfoCommand, Reactor& reactor);
+	void execute(array_ref<TclObject> tokens,
+	             TclObject& result) const override;
+	std::string help(const std::vector<std::string>& tokens) const override;
+private:
+	Reactor& reactor;
+};
+
 
 Reactor::Reactor()
 	: activeBoard(nullptr)
@@ -235,6 +247,8 @@ void Reactor::init()
 		getOpenMSXInfoCommand(), "machines");
 	realTimeInfo = make_unique<RealTimeInfo>(
 		getOpenMSXInfoCommand());
+	softwareInfoTopic = make_unique<SoftwareInfoTopic>(
+		getOpenMSXInfoCommand(), *this);
 	tclCallbackMessages = make_unique<TclCallbackMessages>(
 		*globalCliComm, *globalCommandController);
 
@@ -263,8 +277,7 @@ Reactor::~Reactor()
 RomDatabase& Reactor::getSoftwareDatabase()
 {
 	if (!softwareDatabase) {
-		softwareDatabase = make_unique<RomDatabase>(
-		        *globalCommandController, *globalCliComm);
+		softwareDatabase = make_unique<RomDatabase>(*globalCliComm);
 	}
 	return *softwareDatabase;
 }
@@ -289,14 +302,14 @@ InfoCommand& Reactor::getOpenMSXInfoCommand()
 	return globalCommandController->getOpenMSXInfoCommand();
 }
 
-vector<string> Reactor::getHwConfigs(string_ref type)
+vector<string> Reactor::getHwConfigs(string_view type)
 {
 	vector<string> result;
 	for (auto& p : systemFileContext().getPaths()) {
 		const auto& path = FileOperations::join(p, type);
 		ReadDir configsDir(path);
 		while (auto* entry = configsDir.getEntry()) {
-			string_ref name = entry->d_name;
+			string_view name = entry->d_name;
 			const auto& fullname = FileOperations::join(path, name);
 			if (name.ends_with(".xml") &&
 			    FileOperations::isRegularFile(fullname)) {
@@ -343,23 +356,23 @@ string Reactor::getMachineID() const
 	return activeBoard ? activeBoard->getMachineID() : string{};
 }
 
-vector<string_ref> Reactor::getMachineIDs() const
+vector<string_view> Reactor::getMachineIDs() const
 {
-	vector<string_ref> result;
+	vector<string_view> result;
 	for (auto& b : boards) {
 		result.emplace_back(b->getMachineID());
 	}
 	return result;
 }
 
-MSXMotherBoard& Reactor::getMachine(string_ref machineID) const
+MSXMotherBoard& Reactor::getMachine(string_view machineID) const
 {
 	for (auto& b : boards) {
 		if (b->getMachineID() == machineID) {
 			return *b;
 		}
 	}
-	throw CommandException("No machine with ID: " + machineID);
+	throw CommandException("No machine with ID: ", machineID);
 }
 
 Reactor::Board Reactor::createEmptyMotherBoard()
@@ -510,7 +523,7 @@ void Reactor::run(CommandLineParser& parser)
 		try {
 			commandController.source(userFileContext().resolve(s));
 		} catch (FileException& e) {
-			throw FatalError("Couldn't execute script: " +
+			throw FatalError("Couldn't execute script: ",
 			                 e.getMessage());
 		}
 	}
@@ -687,7 +700,7 @@ void MachineCommand::execute(array_ref<TclObject> tokens, TclObject& result)
 		try {
 			reactor.switchMachine(tokens[1].getString().str());
 		} catch (MSXException& e) {
-			throw CommandException("Machine switching failed: " +
+			throw CommandException("Machine switching failed: ",
 			                       e.getMessage());
 		}
 		break;
@@ -877,7 +890,7 @@ StoreMachineCommand::StoreMachineCommand(
 void StoreMachineCommand::execute(array_ref<TclObject> tokens, TclObject& result)
 {
 	string filename;
-	string_ref machineID;
+	string_view machineID;
 	switch (tokens.size()) {
 	case 1:
 		machineID = reactor.getMachineID();
@@ -942,7 +955,7 @@ void RestoreMachineCommand::execute(array_ref<TclObject> tokens,
 		time_t lastTime = 0;
 		ReadDir dir(dirName);
 		while (dirent* d = dir.getEntry()) {
-			int res = stat((dirName + string(d->d_name)).c_str(), &st);
+			int res = stat(strCat(dirName, d->d_name).c_str(), &st);
 			if ((res == 0) && S_ISREG(st.st_mode)) {
 				time_t modTime = st.st_mtime;
 				if (modTime > lastTime) {
@@ -969,9 +982,10 @@ void RestoreMachineCommand::execute(array_ref<TclObject> tokens,
 		XmlInputArchive in(filename);
 		in.serialize("machine", *newBoard);
 	} catch (XMLException& e) {
-		throw CommandException("Cannot load state, bad file format: " + e.getMessage());
+		throw CommandException("Cannot load state, bad file format: ",
+		                       e.getMessage());
 	} catch (MSXException& e) {
-		throw CommandException("Cannot load state: " + e.getMessage());
+		throw CommandException("Cannot load state: ", e.getMessage());
 	}
 
 	// Savestate also contains stuff like the keyboard state at the moment
@@ -985,11 +999,10 @@ void RestoreMachineCommand::execute(array_ref<TclObject> tokens,
 
 string RestoreMachineCommand::help(const vector<string>& /*tokens*/) const
 {
-	return
-		"restore_machine                       Load state from last saved state in default directory\n"
-		"restore_machine <filename>            Load state from indicated file\n"
-		"\n"
-		"This is a low-level command, the 'loadstate' script is easier to use.";
+	return "restore_machine                       Load state from last saved state in default directory\n"
+	       "restore_machine <filename>            Load state from indicated file\n"
+	       "\n"
+	       "This is a low-level command, the 'loadstate' script is easier to use.";
 }
 
 void RestoreMachineCommand::tabCompletion(vector<string>& tokens) const
@@ -1028,7 +1041,7 @@ void ConfigInfo::execute(array_ref<TclObject> tokens, TclObject& result) const
 			}
 		} catch (MSXException& e) {
 			throw CommandException(
-				"Couldn't get config info: " + e.getMessage());
+				"Couldn't get config info: ", e.getMessage());
 		}
 		break;
 	}
@@ -1039,8 +1052,8 @@ void ConfigInfo::execute(array_ref<TclObject> tokens, TclObject& result) const
 
 string ConfigInfo::help(const vector<string>& /*tokens*/) const
 {
-	return "Shows a list of available " + configName + ", "
-	       "or get meta information about the selected item.\n";
+	return strCat("Shows a list of available ", configName, ", "
+	              "or get meta information about the selected item.\n");
 }
 
 void ConfigInfo::tabCompletion(vector<string>& tokens) const
@@ -1067,6 +1080,58 @@ void RealTimeInfo::execute(array_ref<TclObject> /*tokens*/,
 string RealTimeInfo::help(const vector<string>& /*tokens*/) const
 {
 	return "Returns the time in seconds since openMSX was started.";
+}
+
+
+// SoftwareInfoTopic
+
+SoftwareInfoTopic::SoftwareInfoTopic(InfoCommand& openMSXInfoCommand, Reactor& reactor_)
+	: InfoTopic(openMSXInfoCommand, "software")
+	, reactor(reactor_)
+{
+}
+
+void SoftwareInfoTopic::execute(
+	array_ref<TclObject> tokens, TclObject& result) const
+{
+	if (tokens.size() != 3) {
+		throw CommandException("Wrong number of parameters");
+	}
+
+	Sha1Sum sha1sum = Sha1Sum(tokens[2].getString());
+	auto& romDatabase = reactor.getSoftwareDatabase();
+	const RomInfo* romInfo = romDatabase.fetchRomInfo(sha1sum);
+	if (!romInfo) {
+		// no match found
+		throw CommandException(
+			"Software with sha1sum ", sha1sum.toString(), " not found");
+	}
+
+	const char* bufStart = romDatabase.getBufferStart();
+	result.addListElement("title");
+	result.addListElement(romInfo->getTitle(bufStart));
+	result.addListElement("year");
+	result.addListElement(romInfo->getYear(bufStart));
+	result.addListElement("company");
+	result.addListElement(romInfo->getCompany(bufStart));
+	result.addListElement("country");
+	result.addListElement(romInfo->getCountry(bufStart));
+	result.addListElement("orig_type");
+	result.addListElement(romInfo->getOrigType(bufStart));
+	result.addListElement("remark");
+	result.addListElement(romInfo->getRemark(bufStart));
+	result.addListElement("original");
+	result.addListElement(romInfo->getOriginal());
+	result.addListElement("mapper_type_name");
+	result.addListElement(RomInfo::romTypeToName(romInfo->getRomType()));
+	result.addListElement("genmsxid");
+	result.addListElement(romInfo->getGenMSXid());
+}
+
+string SoftwareInfoTopic::help(const vector<string>& /*tokens*/) const
+{
+	return "Returns information about the software "
+	       "given its sha1sum, in a paired list.";
 }
 
 } // namespace openmsx

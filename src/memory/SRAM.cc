@@ -9,8 +9,8 @@
 #include "serialize.hh"
 #include "openmsx.hh"
 #include "vla.hh"
-#include "memory.hh"
 #include <cstring>
+#include <memory>
 
 using std::string;
 
@@ -20,7 +20,7 @@ namespace openmsx {
 
 // Like the constructor below, but doesn't create a debuggable.
 // For use in unittests.
-SRAM::SRAM(int size, const XMLElement& xml, DontLoad)
+SRAM::SRAM(int size, const XMLElement& xml, DontLoadTag)
 	: ram(xml, size)
 	, header(nullptr) // not used
 {
@@ -31,7 +31,7 @@ SRAM::SRAM(int size, const XMLElement& xml, DontLoad)
  * dynamically need to decide whether load/save is needed.
  */
 SRAM::SRAM(const std::string& name, const std::string& description,
-           int size, const DeviceConfig& config_, DontLoad)
+           int size, const DeviceConfig& config_, DontLoadTag)
 	: ram(config_, name, description, size)
 	, header(nullptr) // not used
 {
@@ -39,7 +39,7 @@ SRAM::SRAM(const std::string& name, const std::string& description,
 
 SRAM::SRAM(const string& name, int size,
            const DeviceConfig& config_, const char* header_, bool* loaded)
-	: schedulable(make_unique<SRAMSchedulable>(config_.getReactor().getRTScheduler(), *this))
+	: schedulable(std::make_unique<SRAMSchedulable>(config_.getReactor().getRTScheduler(), *this))
 	, config(config_)
 	, ram(config, name, "sram", size)
 	, header(header_)
@@ -49,7 +49,7 @@ SRAM::SRAM(const string& name, int size,
 
 SRAM::SRAM(const string& name, const string& description, int size,
 	   const DeviceConfig& config_, const char* header_, bool* loaded)
-	: schedulable(make_unique<SRAMSchedulable>(config_.getReactor().getRTScheduler(), *this))
+	: schedulable(std::make_unique<SRAMSchedulable>(config_.getReactor().getRTScheduler(), *this))
 	, config(config_)
 	, ram(config, name, description, size)
 	, header(header_)
@@ -105,16 +105,16 @@ void SRAM::load(bool* loaded)
 			if (loaded) *loaded = true;
 		} else {
 			config.getCliComm().printWarning(
-				"Warning no correct SRAM file: " + filename);
+				"Warning no correct SRAM file: ", filename);
 		}
 	} catch (FileNotFoundException& /*e*/) {
 		config.getCliComm().printInfo(
-			"SRAM file " + filename + " not found" +
-			", assuming blank SRAM content.");
+			"SRAM file ", filename, " not found, "
+			"assuming blank SRAM content.");
 	} catch (FileException& e) {
 		config.getCliComm().printWarning(
-			"Couldn't load SRAM " + filename +
-			" (" + e.getMessage() + ").");
+			"Couldn't load SRAM ", filename,
+			" (", e.getMessage(), ").");
 	}
 }
 
@@ -132,8 +132,8 @@ void SRAM::save()
 		file.write(&ram[0], getSize());
 	} catch (FileException& e) {
 		config.getCliComm().printWarning(
-			"Couldn't save SRAM " + filename +
-			" (" + e.getMessage() + ").");
+			"Couldn't save SRAM ", filename,
+			" (", e.getMessage(), ").");
 	}
 }
 

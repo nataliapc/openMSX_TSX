@@ -47,8 +47,8 @@ static gl::Texture loadTexture(
 	try {
 		return loadTexture(std::move(surface), size, texCoord);
 	} catch (MSXException& e) {
-		throw MSXException("Error loading image " + filename +
-		                   ": " + e.getMessage());
+		throw MSXException("Error loading image ", filename, ": ",
+		                   e.getMessage());
 	}
 }
 
@@ -160,6 +160,7 @@ void GLImage::draw(OutputSurface& /*output*/, ivec2 pos, byte r, byte g, byte b,
 		glEnableVertexAttribArray(1);
 		texture.bind();
 		glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+		glDisableVertexAttribArray(1);
 	} else {
 		assert(r == 255);
 		assert(g == 255);
@@ -194,8 +195,10 @@ void GLImage::draw(OutputSurface& /*output*/, ivec2 pos, byte r, byte g, byte b,
 			glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, 0, col);
 			glEnableVertexAttribArray(1);
 			glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+			glDisableVertexAttribArray(1);
 		}
 	}
+	glDisableVertexAttribArray(0);
 	glDisable(GL_BLEND);
 }
 

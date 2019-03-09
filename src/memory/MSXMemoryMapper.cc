@@ -1,9 +1,7 @@
 #include "MSXMemoryMapper.hh"
 #include "MSXMotherBoard.hh"
-#include "StringOp.hh"
 #include "MSXException.hh"
 #include "serialize.hh"
-#include "memory.hh"
 #include "outer.hh"
 #include "Ram.hh" // because we serialize Ram instead of CheckedRam
 #include "Math.hh"
@@ -14,8 +12,7 @@ unsigned MSXMemoryMapper::getRamSize() const
 {
 	int kSize = getDeviceConfig().getChildDataAsInt("size");
 	if ((kSize % 16) != 0) {
-		throw MSXException(StringOp::Builder() <<
-			"Mapper size is not a multiple of 16K: " << kSize);
+		throw MSXException("Mapper size is not a multiple of 16K: ", kSize);
 	}
 	if (kSize == 0) {
 		throw MSXException("Mapper size must be at least 16kB.");
@@ -25,6 +22,7 @@ unsigned MSXMemoryMapper::getRamSize() const
 
 MSXMemoryMapper::MSXMemoryMapper(const DeviceConfig& config)
 	: MSXDevice(config)
+	, MSXMapperIOClient(getMotherBoard())
 	, checkedRam(config, getName(), "memory mapper", getRamSize())
 	, debuggable(getMotherBoard(), getName())
 {

@@ -63,6 +63,7 @@ void DebugDevice::writeIO(word port, byte value, EmuTime::param time)
 			break;
 		case MULTIBYTE:
 			outputMultiByte(value);
+                        break;
 		default:
 			break;
 		}
@@ -143,7 +144,7 @@ void DebugDevice::displayByte(byte value, DisplayType type)
 	}
 }
 
-void DebugDevice::openOutput(string_ref name)
+void DebugDevice::openOutput(string_view name)
 {
 	fileNameString = name.str();
 	debugOut.close();

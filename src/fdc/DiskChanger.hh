@@ -26,7 +26,7 @@ class DiskChanger final : public DiskContainer, private StateChangeListener
 public:
 	DiskChanger(MSXMotherBoard& board,
 	            std::string driveName,
-	            bool createCommand = true,
+	            bool createCmd = true,
 	            bool doubleSidedDrive = true,
 	            std::function<void()> preChangeCallback = {});
 	DiskChanger(Reactor& reactor,
@@ -45,7 +45,7 @@ public:
 	SectorAccessibleDisk* getSectorAccessibleDisk() override;
 	const std::string& getContainerName() const override;
 	bool diskChanged() override;
-	int insertDisk(string_ref filename) override;
+	int insertDisk(string_view filename) override;
 
 	// for NowindCommand
 	void changeDisk(std::unique_ptr<Disk> newDisk);

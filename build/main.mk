@@ -232,6 +232,12 @@ LIBRARY_FILE:=openmsx$(LIBRARYEXT)
 LIBRARY_PATH:=$(BUILD_PATH)/lib
 LIBRARY_FULL:=$(LIBRARY_PATH)/$(LIBRARY_FILE)
 
+ifeq ($(OPENMSX_TARGET_OS),android)
+MAIN_EXECUTABLE:=$(LIBRARY_FULL)
+else
+MAIN_EXECUTABLE:=$(BINARY_FULL)
+endif
+
 BUILDINFO_SCRIPT:=build/buildinfo2code.py
 CONFIG_HEADER:=$(BUILD_PATH)/config/build-info.hh
 PROBE_SCRIPT:=build/probe.py
@@ -347,7 +353,7 @@ ifneq ($(filter %clang++,$(CXX))$(filter clang++%,$(CXX)),)
   # Hardware descriptions can contain constants that are not used in the code
   # but still useful as documentation.
   COMPILE_FLAGS+=-Wno-unused-const-variable
-  CC:=$(shell clang++ -print-prog-name=clang)
+  CC:=$(subst clang++,clang,$(CXX))
   DEPEND_FLAGS+=-MP
 else
 ifneq ($(filter %g++,$(CXX))$(filter g++%,$(CXX))$(findstring /g++-,$(CXX)),)
@@ -468,37 +474,23 @@ $(COMPONENTS_DEFS): $(COMPONENTS_DEFS_SCRIPT) $(PROBE_MAKE) \
 ifeq ($(OPENMSX_TARGET_OS),darwin)
 all: app
 else
-ifeq ($(OPENMSX_TARGET_OS),android)
-all: $(LIBRARY_FULL)
+all: $(MAIN_EXECUTABLE)
+endif
+
+ifeq ($(COMPONENT_CORE),false)
+# Force new probe.
+config: $(PROBE_MAKE)
+	$(CMD)mv $(PROBE_MAKE) $(PROBE_MAKE).failed
+	@false
 else
-all: $(BINARY_FULL)
-endif
-endif
-
-# This is a workaround for the lack of order-only dependencies in GNU Make
-# versions older than 3.80 (for example Mac OS X 10.3 still ships with 3.79).
-# It creates a dummy file, which is never modified after its initial creation.
-# If a rule that produces a file does not modify that file, Make considers the
-# target to be up-to-date. That way, the targets "init-dummy-file" depends on
-# will always be checked before compilation, but they will not cause all object
-# files to be considered outdated.
-INIT_DUMMY_FILE:=$(BUILD_PATH)/config/init-dummy-file
-$(INIT_DUMMY_FILE): config $(GENERATED_HEADERS)
-	$(CMD)touch -a $@
-
 # Print configuration.
 config:
-ifeq ($(COMPONENT_CORE),false)
-# Do not build if core component dependencies are not met.
-	@echo 'Cannot build openMSX because essential libraries are unavailable.'
-	@echo 'Please install the needed libraries and their header files and rerun "configure"'
-	@false
-endif
 	@echo "Build configuration:"
 	@echo "  Platform: $(PLATFORM)"
 	@echo "  Flavour:  $(OPENMSX_FLAVOUR)"
 	@echo "  Compiler: $(CXX)"
 	@echo "  Subset:   $(if $(OPENMSX_SUBSET),$(OPENMSX_SUBSET)*,full build)"
+endif
 
 # Include dependency files.
 ifneq ($(filter $(DEPEND_TARGETS),$(MAKECMDGOALS)),)
@@ -531,8 +523,8 @@ endif
 
 # Compile and generate dependency files in one go.
 DEPEND_SUBST=$(patsubst $(SOURCES_PATH)/%.cc,$(DEPEND_PATH)/%.d,$<)
-$(OBJECTS_FULL): $(INIT_DUMMY_FILE)
-$(OBJECTS_FULL): $(OBJECTS_PATH)/%.o: $(SOURCES_PATH)/%.cc $(DEPEND_PATH)/%.d
+$(OBJECTS_FULL): $(OBJECTS_PATH)/%.o: $(SOURCES_PATH)/%.cc $(DEPEND_PATH)/%.d \
+		| config $(GENERATED_HEADERS)
 	$(SUM) "Compiling $(patsubst $(SOURCES_PATH)/%,%,$<)..."
 	$(CMD)mkdir -p $(@D)
 	$(CMD)mkdir -p $(patsubst $(OBJECTS_PATH)%,$(DEPEND_PATH)%,$(@D))
@@ -547,7 +539,7 @@ $(DEPEND_FULL):
 
 # Windows resources that are added to the executable.
 ifneq ($(filter mingw%,$(OPENMSX_TARGET_OS)),)
-$(RESOURCE_HEADER): $(INIT_DUMMY_FILE) forceversionextraction
+$(RESOURCE_HEADER): forceversionextraction | config
 	$(CMD)$(PYTHON) $(RESOURCE_SCRIPT) $@
 $(RESOURCE_OBJ): $(RESOURCE_SRC) $(RESOURCE_HEADER)
 	$(SUM) "Compiling resources..."
@@ -577,7 +569,7 @@ endif # subset
 $(LIBRARY_FULL): $(OBJECTS_FULL) $(RESOURCE_OBJ)
 	$(SUM) "Linking $(notdir $@)..."
 	$(CMD)mkdir -p $(@D)
-	$(CMD)$(CXX) -o $@ $(CXXFLAGS) $^ $(LINK_FLAGS)
+	$(CMD)$(CXX) -shared -o $@ $(CXXFLAGS) $^ $(LINK_FLAGS)
 
 # Run executable.
 run: all
@@ -595,7 +587,8 @@ BINDIST_DIR:=$(BUILD_PATH)/bindist
 BINDIST_PACKAGE:=
 
 # Override install locations.
-INSTALL_ROOT:=$(BINDIST_DIR)/install
+DESTDIR:=$(BINDIST_DIR)/install
+INSTALL_ROOT:=
 ifneq ($(filter mingw%,$(OPENMSX_TARGET_OS)),)
 # In Windows the "share" dir is expected at the same level as the executable,
 # so do not put the executable in "bin".
@@ -617,7 +610,7 @@ bindist: install
 # Force removal of old destination dir before installing to new dir.
 install: bindistclean
 
-bindistclean: $(BINARY_FULL)
+bindistclean: $(MAIN_EXECUTABLE)
 	$(SUM) "Removing any old binary package..."
 	$(CMD)rm -rf $(BINDIST_DIR)
 	$(CMD)$(if $(BINDIST_PACKAGE),rm -f $(BINDIST_PACKAGE),)
@@ -646,10 +639,10 @@ endif
 
 # DESTDIR is a convention shared by at least GNU and FreeBSD to specify a path
 # prefix that will be used for all installed files.
-install: $(BINARY_FULL)
+install: $(MAIN_EXECUTABLE)
 	$(CMD)$(PYTHON) build/install.py "$(DESTDIR)" \
-		$(INSTALL_BINARY_DIR) $(INSTALL_SHARE_DIR) $(INSTALL_DOC_DIR) \
-		$(BINARY_FULL) $(OPENMSX_TARGET_OS) \
+		"$(INSTALL_BINARY_DIR)" "$(INSTALL_SHARE_DIR)" "$(INSTALL_DOC_DIR)" \
+		$(MAIN_EXECUTABLE) $(OPENMSX_TARGET_OS) \
 		$(INSTALL_VERBOSE) $(INSTALL_CONTRIB)
 
 

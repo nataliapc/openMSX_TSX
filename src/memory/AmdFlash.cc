@@ -9,12 +9,12 @@
 #include "MSXException.hh"
 #include "Math.hh"
 #include "serialize.hh"
-#include "memory.hh"
 #include "xrange.hh"
 #include "countof.hh"
-#include <numeric>
 #include <cstring>
 #include <cassert>
+#include <memory>
+#include <numeric>
 
 using std::string;
 using std::vector;
@@ -76,7 +76,7 @@ void AmdFlash::init(const string& name, const DeviceConfig& config, bool load, c
 	bool loaded = false;
 	if (writableSize) {
 		if (load) {
-			ram = make_unique<SRAM>(
+			ram = std::make_unique<SRAM>(
 				name, "flash rom",
 				writableSize, config, nullptr, &loaded);
 		} else {
@@ -84,9 +84,9 @@ void AmdFlash::init(const string& name, const DeviceConfig& config, bool load, c
 			// writes are never visible to the MSX (but the flash
 			// is not made write-protected). In this case it doesn't
 			// make sense to load/save the SRAM file.
-			ram = make_unique<SRAM>(
+			ram = std::make_unique<SRAM>(
 				name, "flash rom",
-				writableSize, config, SRAM::DONT_LOAD);
+				writableSize, config, SRAM::DontLoadTag{});
 		}
 	}
 	if (readOnlySize) {
@@ -101,7 +101,7 @@ void AmdFlash::init(const string& name, const DeviceConfig& config, bool load, c
 	// check whether the loaded SRAM is empty, whilst initial content was specified
 	if (!rom && loaded && initialContentSpecified && sramEmpty(*ram)) {
 		config.getCliComm().printInfo(
-			"This flash device (" + config.getHardwareConfig().getName() +
+			"This flash device (", config.getHardwareConfig().getName(),
 			") has initial content specified, but this content "
 			"was not loaded, because there was already content found "
 			"and loaded from persistent storage. However, this "
@@ -109,7 +109,7 @@ void AmdFlash::init(const string& name, const DeviceConfig& config, bool load, c
 			"when the specified initial content could not be loaded "
 			"when this device was used for the first time). If you "
 			"still wish to load the specified initial content, "
-			"please remove the blank persistent storage file: " +
+			"please remove the blank persistent storage file: ",
 			ram->getLoadedFilename());
 	}
 
@@ -122,12 +122,12 @@ void AmdFlash::init(const string& name, const DeviceConfig& config, bool load, c
 		// ships. This ROM is optional, if it's not found, then the
 		// initial flash content is all 0xFF.
 		try {
-			rom_ = make_unique<Rom>(
+			rom_ = std::make_unique<Rom>(
 				string{}, string{}, // dummy name and description
 				config);
 			rom = rom_.get();
 			config.getCliComm().printInfo(
-				"Loaded initial content for flash ROM from " +
+				"Loaded initial content for flash ROM from ",
 				rom->getFilename());
 		} catch (MSXException& e) {
 			// ignore error
@@ -136,7 +136,7 @@ void AmdFlash::init(const string& name, const DeviceConfig& config, bool load, c
 			if (initialContentSpecified) {
 				config.getCliComm().printWarning(
 					"Could not load specified initial content "
-					"for flash ROM: " + e.getMessage());
+					"for flash ROM: ", e.getMessage());
 			}
 		}
 	}

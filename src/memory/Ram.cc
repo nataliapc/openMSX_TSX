@@ -6,10 +6,10 @@
 #include "HexDump.hh"
 #include "MSXException.hh"
 #include "serialize.hh"
-#include "memory.hh"
+#include <zlib.h>
 #include <algorithm>
 #include <cstring>
-#include <zlib.h>
+#include <memory>
 
 using std::string;
 
@@ -32,7 +32,7 @@ Ram::Ram(const DeviceConfig& config, const string& name,
 	: xml(*config.getXML())
 	, ram(size_)
 	, size(size_)
-	, debuggable(make_unique<RamDebuggable>(
+	, debuggable(std::make_unique<RamDebuggable>(
 		config.getMotherBoard(), name, description, *this))
 {
 	clear();
@@ -67,10 +67,14 @@ void Ram::clear(byte c)
 			auto p = (encoding == "hex")
 			       ? HexDump::decode(init->getData())
 			       : Base64 ::decode(init->getData());
+			if (p.second == 0) {
+				throw MSXException("Zero-length initial pattern");
+			}
 			done = std::min(size_t(size), p.second);
 			memcpy(ram.data(), p.first.data(), done);
 		} else {
-			throw MSXException("Unsupported encoding \"" + encoding + "\" for initialContent");
+			throw MSXException("Unsupported encoding \"", encoding,
+			                   "\" for initialContent");
 		}
 
 		// repeat pattern over whole ram

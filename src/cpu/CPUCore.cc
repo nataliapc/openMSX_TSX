@@ -295,7 +295,7 @@ struct CondM  { bool operator()(byte f) const { return  (f & S_FLAG) != 0; } };
 struct CondP  { bool operator()(byte f) const { return !(f & S_FLAG); } };
 struct CondPE { bool operator()(byte f) const { return  (f & V_FLAG) != 0; } };
 struct CondPO { bool operator()(byte f) const { return !(f & V_FLAG); } };
-struct CondTrue { bool operator()(byte) const { return true; } };
+struct CondTrue { bool operator()(byte /*f*/) const { return true; } };
 
 template<class T> CPUCore<T>::CPUCore(
 		MSXMotherBoard& motherboard_, const string& name,
@@ -318,11 +318,11 @@ template<class T> CPUCore<T>::CPUCore(
 		    "right after the CPU accepted an IRQ.")
 	, freqLocked(
 		motherboard.getCommandController(), name + "_freq_locked",
-	        "real (locked) or custom (unlocked) " + name + " frequency",
+	        strCat("real (locked) or custom (unlocked) ", name, " frequency"),
 	        true)
 	, freqValue(
 		motherboard.getCommandController(), name + "_freq",
-		"custom " + name + " frequency (only valid when unlocked)",
+		strCat("custom ", name, " frequency (only valid when unlocked)"),
 		T::CLOCK_FREQ, 1000000, 1000000000)
 	, freq(T::CLOCK_FREQ)
 	, NMIStatus(0)

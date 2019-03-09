@@ -76,7 +76,7 @@ Touchpad::Touchpad(MSXEventDistributor& eventDistributor_,
 			parseTransformMatrix(interp, newValue);
 		} catch (CommandException& e) {
 			throw CommandException(
-				"Invalid transformation matrix: " + e.getMessage());
+				"Invalid transformation matrix: ", e.getMessage());
 		}
 	});
 	try {
@@ -120,7 +120,7 @@ const std::string& Touchpad::getName() const
 	return name;
 }
 
-string_ref Touchpad::getDescription() const
+string_view Touchpad::getDescription() const
 {
 	return "MSX Touchpad";
 }

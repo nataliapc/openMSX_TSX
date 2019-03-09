@@ -1,4 +1,5 @@
 #include "Version.hh"
+#include "strCat.hh"
 
 namespace openmsx {
 
@@ -6,9 +7,10 @@ namespace openmsx {
 
 std::string Version::full()
 {
-	return std::string("openMSX ") + VERSION +
-	       (RELEASE ? std::string{} : (std::string("-") + REVISION)) +
-	       " / TSX rev2.1";
+	std::string result = strCat("openMSX ", VERSION);
+	if (!RELEASE) strAppend(result, '-', REVISION);
+	strAppend(result, " / TSX rev3");
+        return result;
 }
 
 } // namespace openmsx

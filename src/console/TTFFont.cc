@@ -2,13 +2,12 @@
 #include "LocalFileReference.hh"
 #include "MSXException.hh"
 #include "StringOp.hh"
-#include "memory.hh"
 #include "stl.hh"
 #include "xrange.hh"
 #include <SDL_ttf.h>
 #include <algorithm>
-#include <vector>
 #include <cassert>
+#include <vector>
 
 using std::string;
 
@@ -65,8 +64,7 @@ private:
 SDLTTF::SDLTTF()
 {
 	if (TTF_Init() < 0) {
-		throw FatalError(StringOp::Builder() <<
-			"Couldn't initialize SDL_ttf: " << TTF_GetError());
+		throw FatalError("Couldn't initialize SDL_ttf: ", TTF_GetError());
 	}
 }
 
@@ -183,7 +181,7 @@ SDLSurfacePtr TTFFont::render(std::string text, byte r, byte g, byte b) const
 	unsigned lineSkip = getHeight();
 	// We assume that height is the same for all lines.
 	// For the last line we don't include spacing between two lines.
-	unsigned height = unsigned((lines.size() - 1) * lineSkip + lineHeight);
+	auto height = unsigned((lines.size() - 1) * lineSkip + lineHeight);
 
 	// Create destination surface (initial surface is fully transparent)
 	SDLSurfacePtr destination(SDL_CreateRGBSurface(SDL_SWSURFACE, width, height,

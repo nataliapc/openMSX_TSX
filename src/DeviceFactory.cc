@@ -77,13 +77,14 @@
 #include "SensorKid.hh"
 #include "CliComm.hh"
 #include "MSXException.hh"
-#include "memory.hh"
 #include "components.hh"
+#include <memory>
 
 #if COMPONENT_LASERDISC
 #include "PioneerLDControl.hh"
 #endif
 
+using std::make_unique;
 using std::unique_ptr;
 
 namespace openmsx {
@@ -116,7 +117,7 @@ static unique_ptr<MSXDevice> createWD2793BasedFDC(const DeviceConfig& conf)
 	} else if (type == "Victor") {
 		return make_unique<VictorFDC>(conf);
 	}
-	throw MSXException("Unknown WD2793 FDC connection style " + type);
+	throw MSXException("Unknown WD2793 FDC connection style ", type);
 }
 
 unique_ptr<MSXDevice> DeviceFactory::create(const DeviceConfig& conf)
@@ -275,14 +276,14 @@ unique_ptr<MSXDevice> DeviceFactory::create(const DeviceConfig& conf)
 	} else if (type == "T9769") {
 		// Ignore for now. We might want to create a real device for it later.
 	} else {
-		throw MSXException("Unknown device \"" + type +
+		throw MSXException("Unknown device \"", type,
 		                   "\" specified in configuration");
 	}
 	if (result) result->init();
 	return result;
 }
 
-static XMLElement createConfig(string_ref name, string_ref id)
+static XMLElement createConfig(string_view name, string_view id)
 {
 	XMLElement config(name);
 	config.addAttribute("id", id);

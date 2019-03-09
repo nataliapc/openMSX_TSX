@@ -8,13 +8,13 @@
 #include "Math.hh"
 #include "MemBuffer.hh"
 #include "serialize.hh"
-#include "memory.hh"
 #include "vla.hh"
 #include <algorithm>
-#include <vector>
 #include <cassert>
 #include <cmath>
 #include <cstring>
+#include <memory>
+#include <vector>
 
 using std::max;
 using std::min;
@@ -252,16 +252,16 @@ void ImagePrinter::ensurePrintPage()
 		// A4 paper format (210mm x 297mm) at 300dpi
 		// TODO make this configurable
 		int dpi = dpiSetting->getInt();
-		unsigned paperSizeX = unsigned((210 / 25.4) * dpi);
-		unsigned paperSizeY = unsigned((297 / 25.4) * dpi);
+		auto paperSizeX = unsigned((210 / 25.4) * dpi);
+		auto paperSizeY = unsigned((297 / 25.4) * dpi);
 
 		unsigned dotsX, dotsY;
 		getNumberOfDots(dotsX, dotsY);
 		pixelSizeX = double(paperSizeX) / dotsX;
 		pixelSizeY = double(paperSizeY) / dotsY;
 
-		paper = make_unique<Paper>(paperSizeX, paperSizeY,
-		                           pixelSizeX, pixelSizeY);
+		paper = std::make_unique<Paper>(paperSizeX, paperSizeY,
+		                                pixelSizeX, pixelSizeY);
 	}
 }
 
@@ -272,10 +272,10 @@ void ImagePrinter::flushEmulatedPrinter()
 			try {
 				string filename = paper->save();
 				motherBoard.getMSXCliComm().printInfo(
-					"Printed to " + filename);
+					"Printed to ", filename);
 			} catch (MSXException& e) {
 				motherBoard.getMSXCliComm().printWarning(
-					"Failed to print: " + e.getMessage());
+					"Failed to print: ", e.getMessage());
 			}
 			printAreaTop = -1.0;
 			printAreaBottom = 0.0;
@@ -631,7 +631,7 @@ const string& ImagePrinterMSX::getName() const
 	return name;
 }
 
-string_ref ImagePrinterMSX::getDescription() const
+string_view ImagePrinterMSX::getDescription() const
 {
 	// TODO which printer type
 	return "Emulate MSX printer, prints to image.";
@@ -1211,7 +1211,7 @@ const string& ImagePrinterEpson::getName() const
 	return name;
 }
 
-string_ref ImagePrinterEpson::getDescription() const
+string_view ImagePrinterEpson::getDescription() const
 {
 	return "Emulate Epson FX80 printer, prints to image.";
 }

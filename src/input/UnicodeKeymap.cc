@@ -3,18 +3,20 @@
 #include "File.hh"
 #include "FileContext.hh"
 #include "FileException.hh"
-#include "StringOp.hh"
 #include "stl.hh"
 #include <algorithm>
 #include <cstring>
 
 namespace openmsx {
 
+const unsigned UnicodeKeymap::NUM_DEAD_KEYS;
+
+
 /** Parses the given string reference as a hexadecimal integer.
   * If successful, returns the parsed value and sets "ok" to true.
   * If unsuccessful, returns 0 and sets "ok" to false.
   */
-static unsigned parseHex(string_ref str, bool& ok)
+static unsigned parseHex(string_view str, bool& ok)
 {
 	if (str.empty()) {
 		ok = false;
@@ -52,7 +54,7 @@ static inline bool isSep(char c)
 /** Removes separator characters at the start of the given string reference.
   * Characters between a hash mark and the following newline are also skipped.
   */
-static void skipSep(string_ref& str)
+static void skipSep(string_view& str)
 {
 	while (!str.empty()) {
 		const char c = str.front();
@@ -69,7 +71,7 @@ static void skipSep(string_ref& str)
 /** Returns the next token in the given string.
   * The token and any separators preceding it are removed from the string.
   */
-static string_ref nextToken(string_ref& str)
+static string_view nextToken(string_view& str)
 {
 	skipSep(str);
 	auto tokenBegin = str.begin();
@@ -77,22 +79,22 @@ static string_ref nextToken(string_ref& str)
 		// Pop non-separator character.
 		str.pop_front();
 	}
-	return string_ref(tokenBegin, str.begin());
+	return string_view(tokenBegin, str.begin());
 }
 
 
-UnicodeKeymap::UnicodeKeymap(string_ref keyboardType)
+UnicodeKeymap::UnicodeKeymap(string_view keyboardType)
 {
 	auto filename = systemFileContext().resolve(
-		"unicodemaps/unicodemap." + keyboardType);
+		strCat("unicodemaps/unicodemap.", keyboardType));
 	try {
 		File file(filename);
 		size_t size;
 		const byte* buf = file.mmap(size);
 		parseUnicodeKeymapfile(
-			string_ref(reinterpret_cast<const char*>(buf), size));
+			string_view(reinterpret_cast<const char*>(buf), size));
 	} catch (FileException&) {
-		throw MSXException("Couldn't load unicode keymap file: " + filename);
+		throw MSXException("Couldn't load unicode keymap file: ", filename);
 	}
 }
 
@@ -110,7 +112,7 @@ UnicodeKeymap::KeyInfo UnicodeKeymap::getDeadkey(unsigned n) const
 	return deadKeys[n];
 }
 
-void UnicodeKeymap::parseUnicodeKeymapfile(string_ref data)
+void UnicodeKeymap::parseUnicodeKeymapfile(string_view data)
 {
 	memset(relevantMods, 0, sizeof(relevantMods));
 
@@ -120,7 +122,7 @@ void UnicodeKeymap::parseUnicodeKeymapfile(string_ref data)
 			data.pop_front();
 		}
 
-		string_ref token = nextToken(data);
+		string_view token = nextToken(data);
 		if (token.empty()) {
 			// Skip empty line.
 			continue;
@@ -142,9 +144,9 @@ void UnicodeKeymap::parseUnicodeKeymapfile(string_ref data)
 				deadKeyIndex = parseHex(token, ok);
 				deadKeyIndex--; // Make index 0 based instead of 1 based
 				if (!ok || deadKeyIndex >= NUM_DEAD_KEYS) {
-					throw MSXException(StringOp::Builder() <<
+					throw MSXException(
 						"Wrong deadkey number in keymap file. "
-						"It must be 1.." << NUM_DEAD_KEYS);
+						"It must be 1..", NUM_DEAD_KEYS);
 				}
 			}
 		} else {
@@ -160,9 +162,9 @@ void UnicodeKeymap::parseUnicodeKeymapfile(string_ref data)
 		bool ok;
 		unsigned rowcol = parseHex(token, ok);
 		if (!ok || rowcol >= 0x100) {
-			throw MSXException(StringOp::Builder()
-				<< (token.empty() ? "Missing" : "Wrong")
-				<< " <ROW><COL> value in keymap file");
+			throw MSXException(
+				(token.empty() ? "Missing" : "Wrong"),
+				" <ROW><COL> value in keymap file");
 		}
 		if ((rowcol >> 4) >= KeyMatrixPosition::NUM_ROWS) {
 			throw MSXException("Too high row value in keymap file");
@@ -189,8 +191,8 @@ void UnicodeKeymap::parseUnicodeKeymapfile(string_ref data)
 			} else if (token == "CODE") {
 				modmask |= KeyInfo::CODE_MASK;
 			} else {
-				throw MSXException(StringOp::Builder()
-					<< "Invalid modifier \"" << token << "\" in keymap file");
+				throw MSXException(
+					"Invalid modifier \"", token, "\" in keymap file");
 			}
 		}
 

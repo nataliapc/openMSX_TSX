@@ -4,7 +4,7 @@
 namespace openmsx {
 
 KeyCodeSetting::KeyCodeSetting(CommandController& commandController_,
-                               string_ref name_, string_ref description_,
+                               string_view name_, string_view description_,
                                Keys::KeyCode initialValue)
 	: Setting(commandController_, name_, description_,
 	          TclObject(Keys::getName(initialValue)), SAVE)
@@ -12,13 +12,13 @@ KeyCodeSetting::KeyCodeSetting(CommandController& commandController_,
 	setChecker([](TclObject& newValue) {
 		const auto& str = newValue.getString();
 		if (Keys::getCode(str) == Keys::K_NONE) {
-			throw CommandException("Not a valid key: " + str);
+			throw CommandException("Not a valid key: ", str);
 		}
 	});
 	init();
 }
 
-string_ref KeyCodeSetting::getTypeString() const
+string_view KeyCodeSetting::getTypeString() const
 {
 	return "key";
 }

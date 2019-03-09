@@ -4,7 +4,6 @@
 #include "FrameSource.hh"
 #include "FileContext.hh"
 #include "File.hh"
-#include "StringOp.hh"
 #include "vla.hh"
 #include <cstring>
 #include <algorithm>
@@ -37,10 +36,10 @@ GLHQLiteScaler::GLHQLiteScaler(GLScaler& fallback_)
 
 	auto context = systemFileContext();
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	string offsetName = "shaders/HQ_xLiteOffsets.dat";
 	for (int i = 0; i < 3; ++i) {
 		int n = i + 2;
-		string offsetName = StringOp::Builder() <<
-			"shaders/HQ" << n << "xLiteOffsets.dat";
+		offsetName[10] = char('0') + n;
 		File offsetFile(context.resolve(offsetName));
 		offsetTexture[i].bind();
 		size_t size; // dummy
@@ -92,7 +91,7 @@ void GLHQLiteScaler::uploadBlock(
 	unsigned srcStartY, unsigned srcEndY, unsigned lineWidth,
 	FrameSource& paintFrame)
 {
-	if (lineWidth != 320) return;
+	if ((lineWidth != 320) || (srcEndY > 240)) return;
 
 	uint32_t tmpBuf2[320 / 2]; // 2 x uint16_t
 	#ifndef NDEBUG

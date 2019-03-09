@@ -930,9 +930,6 @@
     <ClCompile Include="$(OpenMSXSrcDir)\utils\Base64.cc">
       <Filter>utils</Filter>
     </ClCompile>
-    <ClCompile Include="$(OpenMSXSrcDir)\utils\CircularBuffer.cc">
-      <Filter>utils</Filter>
-    </ClCompile>
     <ClCompile Include="$(OpenMSXSrcDir)\utils\CRC16.cc">
       <Filter>utils</Filter>
     </ClCompile>
@@ -1271,7 +1268,6 @@
     <ClCompile Include="$(OpenMSXSrcDir)\MSXDeviceSwitch.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\MSXE6Timer.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\MSXHiResTimer.cc" />
-    <ClCompile Include="$(OpenMSXSrcDir)\MSXException.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\MSXResetStatusRegister.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\MSXKanji.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\MSXKanji12.cc" />
@@ -1325,7 +1321,7 @@
     <ClCompile Include="$(OpenMSXSrcDir)\input\JoyMega.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\memory\RomDooly.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\sound\ResampledSoundDevice.cc" />
-    <ClCompile Include="$(OpenMSXSrcDir)\utils\string_ref.cc" />
+    <ClCompile Include="$(OpenMSXSrcDir)\utils\string_view.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\utils\rapidsax.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\video\scalers\GLHQLiteScaler.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\video\scalers\GLHQScaler.cc" />
@@ -2404,15 +2400,6 @@
     <None Include="$(OpenMSXSrcDir)\utils\Subject.hh">
       <Filter>utils</Filter>
     </None>
-    <None Include="$(OpenMSXSrcDir)\utils\tuple.hh">
-      <Filter>utils</Filter>
-    </None>
-    <None Include="$(OpenMSXSrcDir)\utils\type_traits.hh">
-      <Filter>utils</Filter>
-    </None>
-    <None Include="$(OpenMSXSrcDir)\utils\TypeInfo.hh">
-      <Filter>utils</Filter>
-    </None>
     <None Include="$(OpenMSXSrcDir)\utils\uint128.hh">
       <Filter>utils</Filter>
     </None>
@@ -2829,7 +2816,8 @@
     <None Include="$(OpenMSXSrcDir)\sound\ResampledSoundDevice.hh" />
     <None Include="$(OpenMSXSrcDir)\utils\hash_map.hh" />
     <None Include="$(OpenMSXSrcDir)\utils\hash_set.hh" />
-    <None Include="$(OpenMSXSrcDir)\utils\string_ref.hh" />
+    <None Include="$(OpenMSXSrcDir)\utils\string_view.hh" />
+    <None Include="$(OpenMSXSrcDir)\utils\strCat.hh" />
     <None Include="$(OpenMSXSrcDir)\utils\rapidsax.hh" />
     <None Include="$(OpenMSXSrcDir)\video\scalers\GLHQLiteScaler.hh" />
     <None Include="$(OpenMSXSrcDir)\video\scalers\GLHQScaler.hh" />

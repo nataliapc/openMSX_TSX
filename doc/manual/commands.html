@@ -707,7 +707,7 @@
       the condition is evaluated. If the condition evaluated to true, the command is executed. The condition and the
       command are similar to the ones in the <code>set_bp</code> subcommand. A watchpoint can either be set on a single memory
       address or I/O port (specify a single value), or on a whole memory or I/O port range (specify a begin/end pair).
-      For example: <code>debug set_watchpoint write_mem {0x8000 0x8FFF}</code></td>
+      For example: <code>debug set_watchpoint write_mem {0x8000 0x8FFF}</code>. During the execution of <code>&lt;cmd&gt;</code>, the following global Tcl variables are set: <code>::wp_last_address</code>, which is the actual address of the mem/io read/write that triggered the watchpoint and <code>::wp_last_value</code>, the actual value that was written by the mem/io write that triggered the watchpoint.</td>
     </tr>
 
     <tr>
@@ -2230,8 +2230,11 @@
   <table>
     <tr>
       <td><code>type "Hello world!"</code></td>
-
       <td>Yet another manifestation of the most famous program</td>
+    </tr>
+    <tr>
+      <td><code>type "PRINT \"Hi!\"\r"</code></td>
+      <td>Executes this basic command directly</td>
     </tr>
   </table>
 
@@ -5303,7 +5306,7 @@
 
   <h3><a id="throttle">throttle</a></h3>
 
-  <p>Sets throttle mode. In throttle mode the emulator tries to run at the specified speed relative to a real MSX (see <a class="internal" href="#speed">speed</a> command). When throttling is turned off the emulator runs as fast as possible.</p>
+  <p>Sets throttle mode. In throttle mode the emulator tries to run at the specified speed relative to a real MSX (see <a class="internal" href="#speed">speed</a> command). When throttling is turned off the emulator runs as fast as possible. The speed may be limited to the framerate of your monitor (e.g. 60fps) due to how the OpenGL driver works, when using the (default) SDLGL-PP renderer. To increase the speed, set the <a class="internal" href="#maxframeskip">maxframeskip</a> setting to a high value (e.g. 100).</p>
 
   <div class="subsectiontitle">
     usage:
@@ -5335,7 +5338,7 @@
   <p>How should software that accesses the VDP-VRAM too fast be emulated?
   Most existing MSX software should not access VRAM too fast, and in that case
   this setting has no effect. But you may want to change it when you e.g.
-  emulate an overclocked Z80 (see <a class="internal" href="z80_freq">
+  emulate an overclocked Z80 (see <a class="internal" href="#z80_freq">
   z80_freq</a>).</p>
 
   <div class="subsectiontitle">

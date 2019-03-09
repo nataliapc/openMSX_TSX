@@ -54,11 +54,12 @@
 #include "DeviceConfig.hh"
 #include "XMLElement.hh"
 #include "MSXException.hh"
-#include "memory.hh"
+#include <memory>
 
-using std::unique_ptr;
+using std::make_unique;
 using std::move;
 using std::string;
+using std::unique_ptr;
 
 namespace openmsx {
 namespace RomFactory {
@@ -165,7 +166,7 @@ unique_ptr<MSXDevice> create(const DeviceConfig& config)
 	RomType type;
 	// if no type is mentioned, we assume 'mirrored' which works for most
 	// plain ROMs...
-	string_ref typestr = config.getChildData("mappertype", "Mirrored");
+	string_view typestr = config.getChildData("mappertype", "Mirrored");
 	if (typestr == "auto") {
 		// Guess mapper type, if it was not in DB.
 		const RomInfo* romInfo = config.getReactor().getSoftwareDatabase().fetchRomInfo(rom.getOriginalSHA1());
@@ -190,7 +191,7 @@ unique_ptr<MSXDevice> create(const DeviceConfig& config)
 		// Use mapper type from config, even if this overrides DB.
 		type = RomInfo::nameToRomType(typestr);
 		if (type == ROM_UNKNOWN) {
-			throw MSXException("Unknown mappertype: " + typestr);
+			throw MSXException("Unknown mappertype: ", typestr);
 		}
 	}
 

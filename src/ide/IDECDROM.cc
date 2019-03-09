@@ -9,10 +9,10 @@
 #include "CliComm.hh"
 #include "endian.hh"
 #include "serialize.hh"
-#include "memory.hh"
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
+#include <memory>
 
 using std::string;
 using std::vector;
@@ -49,7 +49,7 @@ IDECDROM::IDECDROM(const DeviceConfig& config)
 	}
 	name[2] = char('a' + id);
 	(*cdInUse)[id] = true;
-	cdxCommand = make_unique<CDXCommand>(
+	cdxCommand = std::make_unique<CDXCommand>(
 		getMotherBoard().getCommandController(),
 		getMotherBoard().getStateChangeDistributor(),
 		getMotherBoard().getScheduler(), *this);
@@ -369,8 +369,8 @@ void CDXCommand::execute(array_ref<TclObject> tokens, TclObject& result,
 			cd.insert(filename);
 			// return filename; // Note: the diskX command doesn't do this either, so this has not been converted to TclObject style here
 		} catch (FileException& e) {
-			throw CommandException("Can't change cd image: " +
-					e.getMessage());
+			throw CommandException("Can't change cd image: ",
+			                       e.getMessage());
 		}
 	} else {
 		throw CommandException("Too many or wrong arguments.");
@@ -379,10 +379,11 @@ void CDXCommand::execute(array_ref<TclObject> tokens, TclObject& result,
 
 string CDXCommand::help(const vector<string>& /*tokens*/) const
 {
-	return cd.name + "                   : display the cd image for this CDROM drive\n" +
-	       cd.name + " eject             : eject the cd image from this CDROM drive\n" +
-	       cd.name + " insert <filename> : change the cd image for this CDROM drive\n" +
-	       cd.name + " <filename>        : change the cd image for this CDROM drive\n";
+	return strCat(
+		cd.name, "                   : display the cd image for this CDROM drive\n",
+		cd.name, " eject             : eject the cd image from this CDROM drive\n",
+		cd.name, " insert <filename> : change the cd image for this CDROM drive\n",
+		cd.name, " <filename>        : change the cd image for this CDROM drive\n");
 }
 
 void CDXCommand::tabCompletion(vector<string>& tokens) const

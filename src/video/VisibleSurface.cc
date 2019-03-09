@@ -11,10 +11,9 @@
 #include "InputEventGenerator.hh"
 #include "PNG.hh"
 #include "FileContext.hh"
-#include "StringOp.hh"
 #include "CliComm.hh"
-#include "memory.hh"
 #include "build-info.hh"
+#include <memory>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -39,8 +38,7 @@ VisibleSurface::VisibleSurface(
 
 	if (!SDL_WasInit(SDL_INIT_VIDEO) &&
 	    SDL_InitSubSystem(SDL_INIT_VIDEO) < 0) {
-		throw InitException(StringOp::Builder() <<
-			"SDL video init failed: " << SDL_GetError());
+		throw InitException("SDL video init failed: ", SDL_GetError());
 	}
 
 	// set icon
@@ -51,7 +49,9 @@ VisibleSurface::VisibleSurface(
 		try {
 			iconSurf = PNG::load(preferSystemFileContext().resolve("icons/openMSX-logo-256.png"), true);
 		} catch (MSXException& e) {
-			cliComm.printWarning("Falling back to built in 32x32 icon, because failed to load icon: " + e.getMessage());
+			cliComm.printWarning(
+				"Falling back to built in 32x32 icon, because failed to load icon: ",
+				e.getMessage());
 #endif
 			iconSurf.reset(SDL_CreateRGBSurfaceFrom(
 				const_cast<char*>(openMSX_icon.pixel_data),
@@ -126,7 +126,7 @@ void VisibleSurface::createSurface(unsigned width, unsigned height, int flags)
 	if (!surf) {
 		std::string err = SDL_GetError();
 		SDL_QuitSubSystem(SDL_INIT_VIDEO);
-		throw InitException("Could not open any screen: " + err);
+		throw InitException("Could not open any screen: ", err);
 	}
 	getDisplay().setOutputScreenResolution(gl::ivec2(width, height));
 	setSDLSurface(surf);
@@ -182,11 +182,11 @@ void VisibleSurface::updateWindowTitle()
 	SDL_WM_SetCaption(display.getWindowTitle().c_str(), nullptr);
 }
 
-bool VisibleSurface::setFullScreen(bool wantedState)
+bool VisibleSurface::setFullScreen(bool fullscreen)
 {
 	SDL_Surface* surf = getSDLSurface();
 	bool currentState = (surf->flags & SDL_FULLSCREEN) != 0;
-	if (currentState == wantedState) {
+	if (currentState == fullscreen) {
 		// already wanted stated
 		return true;
 	}
@@ -201,7 +201,7 @@ bool VisibleSurface::setFullScreen(bool wantedState)
 	// try to toggle full screen
 	SDL_WM_ToggleFullScreen(surf);
 	bool newState = (surf->flags & SDL_FULLSCREEN) != 0;
-	return newState == wantedState;
+	return newState == fullscreen;
 	*/
 }
 

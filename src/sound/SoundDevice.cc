@@ -10,8 +10,8 @@
 #include "MSXException.hh"
 #include "likely.hh"
 #include "vla.hh"
-#include "memory.hh"
 #include <cassert>
+#include <memory>
 
 using std::string;
 
@@ -28,13 +28,13 @@ static void allocateMixBuffer(unsigned size)
 	}
 }
 
-static string makeUnique(MSXMixer& mixer, string_ref name)
+static string makeUnique(MSXMixer& mixer, string_view name)
 {
 	string result = name.str();
 	if (mixer.findDevice(result)) {
 		unsigned n = 0;
 		do {
-			result = StringOp::Builder() << name << " (" << ++n << ')';
+			result = strCat(name, " (", ++n, ')');
 		} while (mixer.findDevice(result));
 	}
 	return result;
@@ -48,49 +48,13 @@ void SoundDevice::addFill(int*& buf, int val, unsigned num)
 	// method can also be called in the middle of a buffer (so multiple
 	// times per buffer), in such case it does go wrong.
 	assert(num > 0);
-#ifdef __arm__
-	asm volatile (
-		"subs	%[num],%[num],#4\n\t"
-		"bmi	1f\n"
-	"0:\n\t"
-		"ldmia	%[buf],{r3-r6}\n\t"
-		"add	r3,r3,%[val]\n\t"
-		"add	r4,r4,%[val]\n\t"
-		"add	r5,r5,%[val]\n\t"
-		"add	r6,r6,%[val]\n\t"
-		"stmia	%[buf]!,{r3-r6}\n\t"
-		"subs	%[num],%[num],#4\n\t"
-		"bpl	0b\n"
-	"1:\n\t"
-		"tst	%[num],#2\n\t"
-		"beq	2f\n\t"
-		"ldmia	%[buf],{r3-r4}\n\t"
-		"add	r3,r3,%[val]\n\t"
-		"add	r4,r4,%[val]\n\t"
-		"stmia	%[buf]!,{r3-r4}\n"
-	"2:\n\t"
-		"tst	%[num],#1\n\t"
-		"beq	3f\n\t"
-		"ldr	r3,[%[buf]]\n\t"
-		"add	r3,r3,%[val]\n\t"
-		"str	r3,[%[buf]],#4\n"
-	"3:\n\t"
-		: [buf] "=r"    (buf)
-		, [num] "=r"    (num)
-		:       "[buf]" (buf)
-		, [val] "r"     (val)
-		,       "[num]" (num)
-		: "memory", "r3","r4","r5","r6"
-	);
-	return;
-#endif
 	do {
 		*buf++ += val;
 	} while (--num);
 }
 
-SoundDevice::SoundDevice(MSXMixer& mixer_, string_ref name_,
-			 string_ref description_,
+SoundDevice::SoundDevice(MSXMixer& mixer_, string_view name_,
+			 string_view description_,
 			 unsigned numChannels_, bool stereo_)
 	: mixer(mixer_)
 	, name(makeUnique(mixer, name_))
@@ -127,7 +91,7 @@ void SoundDevice::registerSound(const DeviceConfig& config)
 	const XMLElement& soundConfig = config.getChild("sound");
 	float volume = soundConfig.getChildDataAsInt("volume") / 32767.0f;
 	int devBalance = 0;
-	string_ref mode = soundConfig.getChildData("mode", "mono");
+	string_view mode = soundConfig.getChildData("mode", "mono");
 	if (mode == "mono") {
 		devBalance = 0;
 	} else if (mode == "left") {
@@ -135,7 +99,7 @@ void SoundDevice::registerSound(const DeviceConfig& config)
 	} else if (mode == "right") {
 		devBalance = 100;
 	} else {
-		throw MSXException("balance \"" + mode + "\" illegal");
+		throw MSXException("balance \"", mode, "\" illegal");
 	}
 
 	for (auto& b : soundConfig.getChildren("balance")) {
@@ -148,8 +112,7 @@ void SoundDevice::registerSound(const DeviceConfig& config)
 
 		// TODO Support other balances
 		if (balance != 0 && balance != -100 && balance != 100) {
-			throw MSXException(StringOp::Builder() <<
-			                   "balance " << balance << " illegal");
+			throw MSXException("balance ", balance, " illegal");
 		}
 		if (balance != 0) {
 			balanceCenter = false;
@@ -176,8 +139,14 @@ void SoundDevice::updateStream(EmuTime::param time)
 
 void SoundDevice::setSoftwareVolume(VolumeType volume, EmuTime::param time)
 {
+	setSoftwareVolume(volume, volume, time);
+}
+
+void SoundDevice::setSoftwareVolume(VolumeType left, VolumeType right, EmuTime::param time)
+{
 	updateStream(time);
-	softwareVolume = volume;
+	softwareVolumeLeft  = left;
+	softwareVolumeRight = right;
 	mixer.updateSoftwareVolume(*this);
 }
 
@@ -186,7 +155,7 @@ void SoundDevice::recordChannel(unsigned channel, const Filename& filename)
 	assert(channel < numChannels);
 	bool wasRecording = writer[channel] != nullptr;
 	if (!filename.empty()) {
-		writer[channel] = make_unique<Wav16Writer>(
+		writer[channel] = std::make_unique<Wav16Writer>(
 			filename, stereo, inputSampleRate);
 	} else {
 		writer[channel].reset();
@@ -279,8 +248,11 @@ bool SoundDevice::mixChannels(int* dataOut, unsigned samples)
 		if (writer[i]) {
 			assert(bufs[i] != dataOut);
 			if (bufs[i]) {
+				auto amp = getAmplificationFactor();
 				writer[i]->write(
-					bufs[i], stereo, samples, getAmplificationFactor().toInt());
+					bufs[i], stereo, samples,
+					amp.first.toFloat(),
+					amp.second.toFloat());
 			} else {
 				writer[i]->writeSilence(stereo, samples);
 			}

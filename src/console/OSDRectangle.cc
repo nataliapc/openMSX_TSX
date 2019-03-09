@@ -5,9 +5,9 @@
 #include "FileOperations.hh"
 #include "TclObject.hh"
 #include "components.hh"
-#include "memory.hh"
 #include <cassert>
 #include <cmath>
+#include <memory>
 #if COMPONENT_GL
 #include "GLImage.hh"
 #endif
@@ -25,7 +25,7 @@ OSDRectangle::OSDRectangle(Display& display_, const TclObject& name_)
 {
 }
 
-vector<string_ref> OSDRectangle::getProperties() const
+vector<string_view> OSDRectangle::getProperties() const
 {
 	auto result = OSDImageBasedWidget::getProperties();
 	static const char* const vals[] = {
@@ -37,7 +37,7 @@ vector<string_ref> OSDRectangle::getProperties() const
 }
 
 void OSDRectangle::setProperty(
-	Interpreter& interp, string_ref propName, const TclObject& value)
+	Interpreter& interp, string_view propName, const TclObject& value)
 {
 	if (propName == "-w") {
 		float w = value.getDouble(interp);
@@ -73,7 +73,7 @@ void OSDRectangle::setProperty(
 		string val = value.getString().str();
 		if (imageName != val) {
 			if (!val.empty() && !FileOperations::isRegularFile(val)) {
-				throw CommandException("Not a valid image file: " + val);
+				throw CommandException("Not a valid image file: ", val);
 			}
 			imageName = val;
 			invalidateRecursive();
@@ -101,7 +101,7 @@ void OSDRectangle::setProperty(
 	}
 }
 
-void OSDRectangle::getProperty(string_ref propName, TclObject& result) const
+void OSDRectangle::getProperty(string_view propName, TclObject& result) const
 {
 	if (propName == "-w") {
 		result.setDouble(size[0]);
@@ -126,7 +126,7 @@ void OSDRectangle::getProperty(string_ref propName, TclObject& result) const
 	}
 }
 
-string_ref OSDRectangle::getType() const
+string_view OSDRectangle::getType() const
 {
 	return "rectangle";
 }
@@ -170,15 +170,15 @@ template <typename IMAGE> std::unique_ptr<BaseImage> OSDRectangle::create(
 		float factor = getScaleFactor(output) * scale;
 		int bs = lrintf(factor * borderSize + iSize[0] * relBorderSize);
 		assert(bs >= 0);
-		return make_unique<IMAGE>(iSize, getRGBA4(), bs, borderRGBA);
+		return std::make_unique<IMAGE>(iSize, getRGBA4(), bs, borderRGBA);
 	} else {
 		string file = systemFileContext().resolve(imageName);
 		if (takeImageDimensions()) {
 			float factor = getScaleFactor(output) * scale;
-			return make_unique<IMAGE>(file, factor);
+			return std::make_unique<IMAGE>(file, factor);
 		} else {
 			ivec2 iSize = round(getSize(output));
-			return make_unique<IMAGE>(file, iSize);
+			return std::make_unique<IMAGE>(file, iSize);
 		}
 	}
 }

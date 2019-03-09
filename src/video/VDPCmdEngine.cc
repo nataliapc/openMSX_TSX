@@ -38,10 +38,9 @@ TODO:
 #include "VDPVRAM.hh"
 #include "serialize.hh"
 #include "unreachable.hh"
-#include "memory.hh"
-#include <iostream>
-#include <cassert>
 #include <algorithm>
+#include <cassert>
+#include <iostream>
 
 using std::min;
 using std::max;
@@ -617,7 +616,7 @@ struct IncrShift4
 	IncrShift4(unsigned sx, unsigned dx)
 		: shift(((dx - sx) & 1) * 4)
 	{
-	};
+	}
 	byte doShift(byte color) const
 	{
 		return (color >> shift) | (color << shift);
@@ -631,7 +630,7 @@ struct IncrShift5
 	IncrShift5(unsigned sx, unsigned dx)
 		: shift(((dx - sx) & 3) * 2)
 	{
-	};
+	}
 	byte doShift(byte color) const
 	{
 		return (color >> shift) | (color << (8 - shift));

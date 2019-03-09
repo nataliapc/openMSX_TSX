@@ -14,18 +14,17 @@
 #include "Filename.hh"
 #include "CliComm.hh"
 #include "Math.hh"
-#include "StringOp.hh"
-#include "memory.hh"
 #include "stl.hh"
 #include "aligned.hh"
 #include "outer.hh"
 #include "unreachable.hh"
 #include "vla.hh"
 #include <algorithm>
-#include <tuple>
+#include <cassert>
 #include <cmath>
 #include <cstring>
-#include <cassert>
+#include <memory>
+#include <tuple>
 
 #ifdef __SSE2__
 #include "emmintrin.h"
@@ -85,10 +84,10 @@ void MSXMixer::registerSound(SoundDevice& device, float volume,
 	SoundDeviceInfo info;
 	info.device = &device;
 	info.defaultVolume = volume;
-	info.volumeSetting = make_unique<IntegerSetting>(
+	info.volumeSetting = std::make_unique<IntegerSetting>(
 		commandController, name + "_volume",
 		"the volume of this sound chip", 75, 0, 100);
-	info.balanceSetting = make_unique<IntegerSetting>(
+	info.balanceSetting = std::make_unique<IntegerSetting>(
 		commandController, name + "_balance",
 		"the balance of this sound chip", balance, -100, 100);
 
@@ -97,15 +96,15 @@ void MSXMixer::registerSound(SoundDevice& device, float volume,
 
 	for (unsigned i = 0; i < numChannels; ++i) {
 		SoundDeviceInfo::ChannelSettings channelSettings;
-		string ch_name = StringOp::Builder() << name << "_ch" << i + 1;
+		string ch_name = strCat(name, "_ch", i + 1);
 
-		channelSettings.recordSetting = make_unique<StringSetting>(
+		channelSettings.recordSetting = std::make_unique<StringSetting>(
 			commandController, ch_name + "_record",
 			"filename to record this channel to",
-			string_ref{}, Setting::DONT_SAVE);
+			string_view{}, Setting::DONT_SAVE);
 		channelSettings.recordSetting->attach(*this);
 
-		channelSettings.muteSetting = make_unique<BooleanSetting>(
+		channelSettings.muteSetting = std::make_unique<BooleanSetting>(
 			commandController, ch_name + "_mute",
 			"sets mute-status of individual sound channels",
 			false, Setting::DONT_SAVE);
@@ -196,29 +195,6 @@ void MSXMixer::updateStream(EmuTime::param time)
 // buf[0:n] *= f
 static inline void mul(int32_t* buf, int n, int f)
 {
-#ifdef __arm__
-	// ARM assembly version
-	int32_t dummy1, dummy2;
-	asm volatile (
-	"0:\n\t"
-		"ldmia	%[buf],{r3-r6}\n\t"
-		"mul	r3,%[f],r3\n\t"
-		"mul	r4,%[f],r4\n\t"
-		"mul	r5,%[f],r5\n\t"
-		"mul	r6,%[f],r6\n\t"
-		"stmia	%[buf]!,{r3-r6}\n\t"
-		"subs	%[n],%[n],#4\n\t"
-		"bgt	0b\n\t"
-		: [buf] "=r"    (dummy1)
-		, [n]   "=r"    (dummy2)
-		:       "[buf]" (buf)
-		,       "[n]"   (n)
-		, [f]   "r"     (f)
-		: "memory", "r3","r4","r5","r6"
-	);
-	return;
-#endif
-
 	// C++ version, unrolled 4x,
 	//   this allows gcc/clang to do much better auto-vectorization
 	// Note that this can process upto 3 samples too many, but that's OK.
@@ -237,34 +213,6 @@ static inline void mul(int32_t* buf, int n, int f)
 static inline void mulAcc(
 	int32_t* __restrict acc, const int32_t* __restrict mul, int n, int f)
 {
-#ifdef __arm__
-	// ARM assembly version
-	int32_t dummy1, dummy2, dummy3;
-	asm volatile (
-	"0:\n\t"
-		"ldmia	%[in]!,{r3,r4,r5,r6}\n\t"
-		"ldmia	%[out],{r8,r9,r10,r12}\n\t"
-		"mla	r3,%[f],r3,r8\n\t"
-		"mla	r4,%[f],r4,r9\n\t"
-		"mla	r5,%[f],r5,r10\n\t"
-		"mla	r6,%[f],r6,r12\n\t"
-		"stmia	%[out]!,{r3,r4,r5,r6}\n\t"
-		"subs	%[n],%[n],#4\n\t"
-		"bgt	0b\n\t"
-		: [in]  "=r"    (dummy1)
-		, [out] "=r"    (dummy2)
-		, [n]   "=r"    (dummy3)
-		:       "[in]"  (mul)
-		,       "[out]" (acc)
-		,       "[n]"   (n)
-		, [f]   "r"     (f)
-		: "memory"
-		, "r3","r4","r5","r6"
-		, "r8","r9","r10","r12"
-	);
-	return;
-#endif
-
 	// C++ version, unrolled 4x, see comments above.
 	assume_SSE_aligned(acc);
 	assume_SSE_aligned(mul);
@@ -755,11 +703,13 @@ void MSXMixer::updateVolumeParams(SoundDeviceInfo& info)
 	// 512 (9 bits) because in the DC filter we also have a factor 512, and
 	// using the same allows to fold both (later) divisions into one.
 	static_assert((1 << AMP_BITS) == 512, "");
-	int amp = info.device->getAmplificationFactor().getRawValue();
-	info.left1  = int(l1 * amp);
-	info.right1 = int(r1 * amp);
-	info.left2  = int(l2 * amp);
-	info.right2 = int(r2 * amp);
+	auto amp = info.device->getAmplificationFactor();
+	auto ampL = amp.first .getRawValue();
+	auto ampR = amp.second.getRawValue();
+	info.left1  = lrintf(l1 * ampL);
+	info.right1 = lrintf(r1 * ampR);
+	info.left2  = lrintf(l2 * ampL);
+	info.right2 = lrintf(r2 * ampR);
 }
 
 void MSXMixer::updateMasterVolume()
@@ -794,7 +744,7 @@ void MSXMixer::executeUntil(EmuTime::param time)
 
 // Sound device info
 
-SoundDevice* MSXMixer::findDevice(string_ref name) const
+SoundDevice* MSXMixer::findDevice(string_view name) const
 {
 	auto it = find_if(begin(infos), end(infos),
 		[&](const SoundDeviceInfo& i) {
@@ -839,7 +789,7 @@ string MSXMixer::SoundDeviceInfoTopic::help(const vector<string>& /*tokens*/) co
 void MSXMixer::SoundDeviceInfoTopic::tabCompletion(vector<string>& tokens) const
 {
 	if (tokens.size() == 3) {
-		vector<string_ref> devices;
+		vector<string_view> devices;
 		auto& msxMixer = OUTER(MSXMixer, soundDeviceInfo);
 		for (auto& info : msxMixer.infos) {
 			devices.emplace_back(info.device->getName());

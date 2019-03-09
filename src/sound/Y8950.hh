@@ -45,6 +45,7 @@ public:
 	static constexpr int R04_IRQ_RESET    = 0x80;
 
 	// Bitmask for status register
+	static constexpr int STATUS_PCM_BSY = 0x01;
 	static constexpr int STATUS_EOS     = R04_MASK_EOS;
 	static constexpr int STATUS_BUF_RDY = R04_MASK_BUF_RDY;
 	static constexpr int STATUS_T2      = R04_MASK_T2;
@@ -57,9 +58,9 @@ public:
 	void setEnabled(bool enabled, EmuTime::param time);
 	void clearRam();
 	void reset(EmuTime::param time);
-	void writeReg(byte reg, byte data, EmuTime::param time);
-	byte readReg(byte reg, EmuTime::param time);
-	byte peekReg(byte reg, EmuTime::param time) const;
+	void writeReg(byte rg, byte data, EmuTime::param time);
+	byte readReg(byte rg, EmuTime::param time);
+	byte peekReg(byte rg, EmuTime::param time) const;
 	byte readStatus(EmuTime::param time);
 	byte peekStatus(EmuTime::param time) const;
 
