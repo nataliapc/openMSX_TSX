@@ -324,7 +324,7 @@ void CassettePlayer::insertTape(const Filename& filename)
 					motherBoard.getMSXCliComm());
 			} catch (MSXException& e2) {
 				try {
-					playImage = make_unique<TsxImage>(
+					playImage = std::make_unique<TsxImage>(
 						filename, filePool,
 						motherBoard.getMSXCliComm());
 				} catch (MSXException& e3) {
