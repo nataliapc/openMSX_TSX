@@ -133,7 +133,7 @@ private:
 	void writeTurboSync(uint16_t sync1, uint16_t sync2);
 	void writeTurbo0(uint16_t tstates);
 	void writeTurbo1(uint16_t tstates);
-	void writeTurboByte(byte b, uint16_t zerolen, uint16_t onelen);
+	void writeTurboByte(byte b, uint8_t bits, uint16_t zerolen, uint16_t onelen);
 
 	void convert(const Filename& filename, FilePool& filePool, CliComm& cliComm);
 

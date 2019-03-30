@@ -228,11 +228,11 @@ void TsxImage::writeTurbo1(uint16_t tstates=1710)
 	writePulse(tstates);
 }
 
-// write a turbo #10 byte
-void TsxImage::writeTurboByte(byte b, uint16_t zerolen=855, uint16_t onelen=1710)
+// write a turbo #10 #11 byte
+void TsxImage::writeTurboByte(byte b, uint8_t bits=8, uint16_t zerolen=855, uint16_t onelen=1710)
 {
 	// eight data bits
-	for (auto i : xrange(8)) {
+	for (auto i : xrange(bits)) {
 		if (b & (128 >> i)) {
 			writeTurbo1(onelen);
 		} else {
@@ -252,11 +252,12 @@ size_t TsxImage::writeBlock10(Block10 *b)   //Standard Speed Block
 	}
 	writeTurboSync();
 	
-	uint16_t size = b->len;
+	uint16_t size = (uint32_t)b->len;
 	byte *data = b->data;
 	while (size--) {
 		writeTurboByte(*data++);
 	}
+	if (b->pausems!=0) writePulse(2000);
 	writeSilence(ULTRA_SPEED ? 100 : b->pausems);
 	return b->len + 5;
 }
@@ -272,11 +273,12 @@ size_t TsxImage::writeBlock11(Block11 *b)   //Turbo Speed Block
 	}
 	writeTurboSync(b->sync1, b->sync2);
 	
-	uint32_t size = b->len;
+	uint32_t size = (uint32_t)b->len;
 	byte *data = b->data;
 	while (size--) {
-		writeTurboByte(*data++, b->zero, b->one);
+		writeTurboByte(*data++, 8, b->zero, b->one);
 	}
+	if (b->pausems!=0) writePulse(2000);
 	writeSilence(ULTRA_SPEED ? 100 : b->pausems);
 	return b->len + sizeof(Block11);
 }
