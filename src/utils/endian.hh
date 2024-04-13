@@ -10,6 +10,7 @@
 #include <concepts>
 #include <cstdint>
 #include <cstring>
+#include <cassert>
 
 namespace Endian {
 
@@ -280,6 +281,23 @@ private:
 	std::array<uint8_t, 3> x;
 };
 
+class UA_L24 {
+public:
+	UA_L24(uint32_t x) {
+		assert(x < 0x1000000);
+		v[0] = (x >>  0) & 0xff;
+		v[1] = (x >>  8) & 0xff;
+		v[2] = (x >> 16) & 0xff;
+	}
+	operator uint32_t() {
+		return (v[0] <<  0) |
+		       (v[1] <<  8) |
+		       (v[2] << 16);
+	}
+private:
+	uint8_t v[3];
+};
+
 class UA_B32 {
 public:
 	[[nodiscard]] inline operator uint32_t() const { return read_UA_B32(x.data()); }
@@ -310,7 +328,7 @@ static_assert(alignof(UA_L32) == 1, "must have alignment 1");
 // Template meta-programming.
 // Get a type of the same size of the given type that stores the value in a
 // specific endianess. Typically used in template functions that can work on
-// either 16 or 32 bit values.
+// either 16, 24 or 32 bit values.
 //  usage:
 //    using LE_T = typename Endian::Little<T>::type;
 //  The type LE_T is now a type that stores values of the same size as 'T'
