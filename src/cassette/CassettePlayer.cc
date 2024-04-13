@@ -33,6 +33,7 @@
 #include "ReverseManager.hh"
 #include "WavImage.hh"
 #include "CasImage.hh"
+#include "TsxImage.hh"
 #include "MSXCliComm.hh"
 #include "MSXMotherBoard.hh"
 #include "Reactor.hh"
@@ -352,11 +353,19 @@ void CassettePlayer::insertTape(const Filename& filename, EmuTime::param time)
 					filename, filePool,
 					motherBoard.getMSXCliComm());
 			} catch (MSXException& e2) {
+            try {
+				playImage = std::make_unique<TsxImage>(
+					filename, filePool,
+					motherBoard.getMSXCliComm());
+			} catch (MSXException& e3) {
 				throw MSXException(
 					"Failed to insert WAV image: \"",
 					e.getMessage(),
-					"\" and also failed to insert CAS image: \"",
-					e2.getMessage(), '\"');
+					"\" also failed to insert CAS image: \"",
+					e2.getMessage(),
+					"\" and also failed to insert TSX image: \"",
+					e3.getMessage(), '\"');
+				}
 			}
 		}
 	} else {
