@@ -275,14 +275,6 @@ private:
 
 class UA_L24 {
 public:
-	inline operator uint32_t() const     { return read_UA_L24(x.data()); }
-	inline UA_L24& operator=(uint32_t a) { write_UA_L24(x.data(), a); return *this; }
-private:
-	std::array<uint8_t, 3> x;
-};
-
-class UA_L24 {
-public:
 	UA_L24(uint32_t x) {
 		assert(x < 0x1000000);
 		v[0] = (x >>  0) & 0xff;
