@@ -7,9 +7,7 @@
 #include "TclObject.hh"
 #include "VideoSystem.hh"
 
-#include "checked_cast.hh"
 #include "narrow.hh"
-#include "ranges.hh"
 #include "stl.hh"
 
 #include <SDL.h>
@@ -23,14 +21,13 @@ using namespace gl;
 namespace openmsx {
 
 // intersect two rectangles
-struct IntersectResult { int x, y, w, h; };
-static constexpr IntersectResult intersect(int xa, int ya, int wa, int ha,
-                                           int xb, int yb, int wb, int hb)
+struct Rectangle { int x, y, w, h; };
+static constexpr Rectangle intersect(const Rectangle& a, const Rectangle& b)
 {
-	int x1 = std::max<int>(xa, xb);
-	int y1 = std::max<int>(ya, yb);
-	int x2 = std::min<int>(xa + wa, xb + wb);
-	int y2 = std::min<int>(ya + ha, yb + hb);
+	int x1 = std::max<int>(a.x, b.x);
+	int y1 = std::max<int>(a.y, b.y);
+	int x2 = std::min<int>(a.x + a.w, b.x + b.w);
+	int y2 = std::min<int>(a.y + a.h, b.y + b.h);
 	int w = std::max(0, x2 - x1);
 	int h = std::max(0, y2 - y1);
 	return {x1, y1, w, h};
@@ -50,16 +47,18 @@ static constexpr void normalize(T& x, T& w)
 class GLScopedClip
 {
 public:
-	GLScopedClip(OutputSurface& output, vec2 xy, vec2 wh);
-	~GLScopedClip();
+	GLScopedClip(const OutputSurface& output, vec2 xy, vec2 wh);
 	GLScopedClip(const GLScopedClip&) = delete;
+	GLScopedClip(GLScopedClip&&) = delete;
 	GLScopedClip& operator=(const GLScopedClip&) = delete;
+	GLScopedClip& operator=(GLScopedClip&&) = delete;
+	~GLScopedClip();
 private:
 	std::optional<std::array<GLint, 4>> origClip; // x, y, w, h;
 };
 
 
-GLScopedClip::GLScopedClip(OutputSurface& output, vec2 xy, vec2 wh)
+GLScopedClip::GLScopedClip(const OutputSurface& output, vec2 xy, vec2 wh)
 {
 	auto& [x, y] = xy;
 	auto& [w, h] = wh;
@@ -75,8 +74,8 @@ GLScopedClip::GLScopedClip(OutputSurface& output, vec2 xy, vec2 wh)
 		origClip.emplace();
 		glGetIntegerv(GL_SCISSOR_BOX, origClip->data());
 		auto [xn, yn, wn, hn] = intersect(
-			(*origClip)[0], (*origClip)[1], (*origClip)[2], (*origClip)[3],
-			ix, iy, iw, ih);
+			Rectangle{(*origClip)[0], (*origClip)[1], (*origClip)[2], (*origClip)[3]},
+			Rectangle{ix, iy, iw, ih});
 		glScissor(xn, yn, wn, hn);
 	} else {
 		glScissor(ix, iy, iw, ih);
@@ -131,7 +130,7 @@ void OSDWidget::deleteWidget(OSDWidget& widget)
 	subWidgets.erase(it);
 }
 
-void OSDWidget::resortUp(OSDWidget* elem)
+void OSDWidget::resortUp(const OSDWidget* elem)
 {
 	// z-coordinate was increased, first search for elements current position
 	auto it1 = begin(subWidgets);
@@ -147,7 +146,7 @@ void OSDWidget::resortUp(OSDWidget* elem)
 	assert(ranges::is_sorted(subWidgets, {}, &OSDWidget::getZ));
 #endif
 }
-void OSDWidget::resortDown(OSDWidget* elem)
+void OSDWidget::resortDown(const OSDWidget* elem)
 {
 	// z-coordinate was decreased, first search for new position
 	auto it1 = begin(subWidgets);
@@ -272,8 +271,7 @@ void OSDWidget::paintRecursive(OutputSurface& output)
 
 	std::optional<GLScopedClip> scopedClip;
 	if (clip) {
-		vec2 clipPos, size;
-		getBoundingBox(output, clipPos, size);
+		auto [clipPos, size] = getBoundingBox(output);
 		scopedClip.emplace(output, clipPos, size);
 	}
 
@@ -355,13 +353,11 @@ vec2 OSDWidget::getMouseCoord() const
 	return out / size;
 }
 
-void OSDWidget::getBoundingBox(const OutputSurface& output,
-                               vec2& bbPos, vec2& bbSize) const
+OSDWidget::BoundingBox OSDWidget::getBoundingBox(const OutputSurface& output) const
 {
 	vec2 topLeft     = transformPos(output, vec2(), vec2(0.0f));
 	vec2 bottomRight = transformPos(output, vec2(), vec2(1.0f));
-	bbPos  = topLeft;
-	bbSize = bottomRight - topLeft;
+	return {topLeft, bottomRight - topLeft};
 }
 
 } // namespace openmsx

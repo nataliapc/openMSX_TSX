@@ -5,9 +5,9 @@ variable is_android [string match android "[openmsx_info platform]"]
 
 variable default_auto_enable_reverse
 if {$is_dingux || $is_android} {
-	set default_auto_enable_reverse "off"
+	set default_auto_enable_reverse "false"
 } else {
-	set default_auto_enable_reverse "on"
+	set default_auto_enable_reverse "true"
 }
 
 proc after_switch {} {
@@ -15,8 +15,7 @@ proc after_switch {} {
 	# machine (e.g. because the last machine is removed or because
 	# you explictly switch to an empty machine)
 	catch {
-		# Also handle 'gui' for backwards compatibility
-		if {$::auto_enable_reverse in "on gui"} {
+		if {$::auto_enable_reverse} {
 			auto_enable
 		}
 	}
@@ -26,14 +25,12 @@ proc after_switch {} {
 } ;# namespace reverse
 
 
-user_setting create string "auto_enable_reverse" \
-{Controls whether the reverse feature is automatically enabled on startup.
-Internally the reverse feature takes regular snapshots of the MSX state,
-this has a (small) cost in memory and in performance. On small systems you
-don't want this cost, so we don't enable the reverse feature by default.
-Possible values for this setting:
-  off   Reverse not enabled on startup
-  on    Reverse enabled on startup
+user_setting create boolean "auto_enable_reverse" \
+{Controls whether the reverse feature is automatically enabled on startup (or
+whenever a new machine is created). Internally the reverse feature takes
+regular snapshots of the MSX state, this has a (small) cost in memory and in
+performance. On small systems you may not want this cost, so for these the
+reverse feature can be disabled by default using this setting.
 } $reverse::default_auto_enable_reverse
 
 user_setting create boolean "auto_save_replay" \

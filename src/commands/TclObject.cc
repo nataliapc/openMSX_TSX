@@ -39,8 +39,7 @@ void TclObject::addListElement(Tcl_Obj* element)
 
 void TclObject::addListElementsImpl(std::initializer_list<Tcl_Obj*> l)
 {
-	Tcl_Obj* const* objv = l.begin();
-	addListElementsImpl(int(l.size()), objv);
+	addListElementsImpl(int(l.size()), l.begin());
 }
 
 void TclObject::addListElementsImpl(int objc, Tcl_Obj* const* objv)
@@ -250,8 +249,7 @@ TclObject TclObject::executeCommand(Interpreter& interp_, bool compile)
 {
 	auto* interp = interp_.interp;
 	int flags = compile ? 0 : TCL_EVAL_DIRECT;
-	int success = Tcl_EvalObjEx(interp, obj, flags);
-	if (success != TCL_OK) {
+	if (Tcl_EvalObjEx(interp, obj, flags) != TCL_OK) {
 		throw CommandException(Tcl_GetStringResult(interp));
 	}
 	return TclObject(Tcl_GetObjResult(interp));

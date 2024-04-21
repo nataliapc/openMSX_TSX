@@ -60,8 +60,7 @@ public:
 	 */
 	inline void schedule(EmuTime::param limit)
 	{
-		EmuTime next = getNext();
-		if (limit >= next) [[unlikely]] {
+		if (EmuTime next = getNext(); limit >= next) [[unlikely]] {
 			scheduleHelper(limit, next); // slow path not inlined
 		}
 		scheduleTime = limit;
@@ -93,11 +92,11 @@ private: // -> intended for Schedulable
 	 * removed.
 	 * Returns false <=> if there was no match (so nothing removed)
 	 */
-	bool removeSyncPoint(Schedulable& device);
+	bool removeSyncPoint(const Schedulable& device);
 
 	/** Remove all sync-points for the given device.
 	  */
-	void removeSyncPoints(Schedulable& device);
+	void removeSyncPoints(const Schedulable& device);
 
 	/**
 	 * Is there a pending syncPoint for this device?

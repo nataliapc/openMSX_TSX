@@ -16,9 +16,8 @@ public:
 
 private:
 	[[nodiscard]] unsigned getLineWidth(unsigned line) const override;
-	[[nodiscard]] const void* getLineInfo(
-		unsigned line, unsigned& width,
-		void* buf, unsigned bufWidth) const override;
+	[[nodiscard]] std::span<const Pixel> getUnscaledLine(
+		unsigned line, std::span<Pixel> helpBuf) const override;
 
 private:
 	/** The original frame whose data will be doubled.

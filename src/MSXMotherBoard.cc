@@ -63,9 +63,11 @@ class AddRemoveUpdate
 {
 public:
 	explicit AddRemoveUpdate(MSXMotherBoard& motherBoard);
-	~AddRemoveUpdate();
 	AddRemoveUpdate(const AddRemoveUpdate&) = delete;
+	AddRemoveUpdate(AddRemoveUpdate&&) = delete;
 	AddRemoveUpdate& operator=(const AddRemoveUpdate&) = delete;
+	AddRemoveUpdate& operator=(AddRemoveUpdate&&) = delete;
+	~AddRemoveUpdate();
 private:
 	MSXMotherBoard& motherBoard;
 };
@@ -163,6 +165,8 @@ public:
 	void unregisterProvider(MediaInfoProvider& provider);
 private:
 	struct ProviderInfo {
+		ProviderInfo(std::string_view n, MediaInfoProvider* p)
+			: name(n), provider(p) {} // clang-15 workaround
 		std::string_view name;
 		MediaInfoProvider* provider;
 	};
@@ -1098,7 +1102,7 @@ void MachineMediaInfo::registerProvider(std::string_view name, MediaInfoProvider
 {
 	assert(!contains(providers, name, &ProviderInfo::name));
 	assert(!contains(providers, &provider, &ProviderInfo::provider));
-	providers.push_back(ProviderInfo{name, &provider});
+	providers.emplace_back(name, &provider);
 }
 
 void MachineMediaInfo::unregisterProvider(MediaInfoProvider& provider)
@@ -1243,8 +1247,8 @@ void MSXMotherBoard::serialize(Archive& ar, unsigned version)
 
 	if (mapperIO) ar.serialize("mapperIO", *mapperIO);
 
-	MSXDeviceSwitch& devSwitch = getDeviceSwitch();
-	if (devSwitch.hasRegisteredDevices()) {
+	if (auto& devSwitch = getDeviceSwitch();
+	    devSwitch.hasRegisteredDevices()) {
 		ar.serialize("deviceSwitch", devSwitch);
 	}
 

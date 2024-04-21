@@ -145,7 +145,7 @@ struct ParseAddrResult { // TODO c++23 std::expected might be a good fit here
 	unsigned addr = 0;
 };
 [[nodiscard]] static ParseAddrResult parseAddressExpr(
-	std::string_view str, SymbolManager& symbolManager, Interpreter& interp)
+	std::string_view str, const SymbolManager& symbolManager, Interpreter& interp)
 {
 	ParseAddrResult r;
 	if (str.empty()) return r;
@@ -243,7 +243,6 @@ void DebuggableEditor::drawContents(const Sizes& s, Debuggable& debuggable, unsi
 	// Move cursor but only apply on next frame so scrolling with be synchronized (because currently we can't change the scrolling while the window is being rendered)
 	if (addrMode == CURSOR) {
 		auto& shortcuts = manager.getShortcuts();
-		using enum Shortcuts::Type;
 		if ((int(currentAddr) >= columns) &&
 		    shortcuts.checkShortcut({.keyChord = ImGuiKey_UpArrow, .repeat = true})) {
 			nextAddr = currentAddr - columns;
@@ -764,9 +763,9 @@ void DebuggableEditor::drawPreviewLine(const Sizes& s, Debuggable& debuggable, u
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth((s.glyphWidth * 10.0f) + style.FramePadding.x * 2.0f + style.ItemInnerSpacing.x);
 	if (ImGui::BeginCombo("##combo_type", DataTypeGetDesc(previewDataType), ImGuiComboFlags_HeightLargest)) {
-		for (int n = 0; n < (ImGuiDataType_COUNT - 2); ++n) {
-			if (ImGui::Selectable(DataTypeGetDesc((ImGuiDataType)n), previewDataType == n)) {
-				previewDataType = ImGuiDataType(n);
+		for (ImGuiDataType n = 0; n < (ImGuiDataType_COUNT - 2); ++n) {
+			if (ImGui::Selectable(DataTypeGetDesc(n), previewDataType == n)) {
+				previewDataType = n;
 			}
 		}
 		ImGui::EndCombo();
@@ -783,8 +782,8 @@ void DebuggableEditor::drawPreviewLine(const Sizes& s, Debuggable& debuggable, u
 	}
 
 	static constexpr bool nativeIsLittle = std::endian::native == std::endian::little;
-	bool previewIsLittle = previewEndianess == LE;
-	if (nativeIsLittle != previewIsLittle) {
+	if (bool previewIsLittle = previewEndianess == LE;
+	    nativeIsLittle != previewIsLittle) {
 		std::reverse(dataBuf.begin(), dataBuf.begin() + elemSize);
 	}
 

@@ -38,6 +38,10 @@ class FilePoolCore
 {
 public:
 	struct Dir {
+		Dir() = default;
+		Dir(std::string_view p, FileType t)
+			: path(p), types(t) {} // clang-15 workaround
+
 		std::string_view path;
 		FileType types;
 	};
@@ -124,14 +128,14 @@ private:
 		}
 	};
 	// Hash indexed by filename, points to a full object in 'pool'
-	using FilenameIndex = SimpleHashSet<Index, Index(-1), FilenameIndexHash, FilenameIndexEqual>;
+	using FilenameIndex = SimpleHashSet<Index(-1), FilenameIndexHash, FilenameIndexEqual>;
 
 private:
 	void insert(const Sha1Sum& sum, time_t time, const std::string& filename);
-	[[nodiscard]] Sha1Index::iterator getSha1Iterator(Index idx, Entry& entry);
+	[[nodiscard]] Sha1Index::iterator getSha1Iterator(Index idx, const Entry& entry);
 	void remove(Sha1Index::iterator it);
 	void remove(Index idx);
-	void remove(Index idx, Entry& entry);
+	void remove(Index idx, const Entry& entry);
 	bool adjustSha1(Sha1Index::iterator it, Entry& entry, const Sha1Sum& newSum);
 	bool adjustSha1(Index idx,              Entry& entry, const Sha1Sum& newSum);
 

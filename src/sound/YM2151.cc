@@ -463,15 +463,13 @@ void YM2151::keyOff(YM2151Operator& op, unsigned keyClear) const
 {
 	if (op.key) {
 		op.key &= keyClear;
-		if (!op.key) {
-			if (op.state > EG_REL) {
-				op.state = EG_REL; /* KEY OFF = release */
-			}
+		if (!op.key && (op.state > EG_REL)) {
+			op.state = EG_REL; // KEY OFF = release
 		}
 	}
 }
 
-void YM2151::envelopeKONKOFF(std::span<YM2151Operator, 4> op, int v)
+void YM2151::envelopeKONKOFF(std::span<YM2151Operator, 4> op, int v) const
 {
 	if (v & 0x08) { // M1
 		keyOn (op[0], 1);
@@ -970,7 +968,7 @@ void YM2151::reset(EmuTime::param time)
 	irq.reset();
 }
 
-int YM2151::opCalc(YM2151Operator& op, unsigned env, int pm) const
+int YM2151::opCalc(const YM2151Operator& op, unsigned env, int pm) const
 {
 	unsigned p = (env << 3) + sin_tab[(int((op.phase & ~FREQ_MASK) + (pm << 15)) >> FREQ_SH) & SIN_MASK];
 	if (p >= TL_TAB_LEN) {
@@ -979,7 +977,7 @@ int YM2151::opCalc(YM2151Operator& op, unsigned env, int pm) const
 	return tl_tab[p];
 }
 
-int YM2151::opCalc1(YM2151Operator& op, unsigned env, int pm) const
+int YM2151::opCalc1(const YM2151Operator& op, unsigned env, int pm) const
 {
 	int i = (narrow_cast<int>(op.phase) & ~FREQ_MASK) + pm;
 	unsigned p = (env << 3) + sin_tab[(i >> FREQ_SH) & SIN_MASK];
@@ -989,7 +987,7 @@ int YM2151::opCalc1(YM2151Operator& op, unsigned env, int pm) const
 	return tl_tab[p];
 }
 
-unsigned YM2151::volumeCalc(YM2151Operator& op, unsigned AM) const
+unsigned YM2151::volumeCalc(const YM2151Operator& op, unsigned AM) const
 {
 	return op.tl + unsigned(op.volume) + (AM & op.AMmask);
 }

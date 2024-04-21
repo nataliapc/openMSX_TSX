@@ -25,11 +25,17 @@ class Wav16Writer;
 class AviRecorder
 {
 public:
+	static constexpr std::string_view VIDEO_DIR = "videos";
+	static constexpr std::string_view AUDIO_DIR = "soundlogs";
+	static constexpr std::string_view VIDEO_EXTENSION = ".avi";
+	static constexpr std::string_view AUDIO_EXTENSION = ".wav";
+
+public:
 	explicit AviRecorder(Reactor& reactor);
 	~AviRecorder();
 
 	void addWave(std::span<const StereoFloat> data);
-	void addImage(FrameSource* frame, EmuTime::param time);
+	void addImage(const FrameSource* frame, EmuTime::param time);
 	void stop();
 	[[nodiscard]] unsigned getFrameHeight() const;
 	[[nodiscard]] bool isRecording() const;

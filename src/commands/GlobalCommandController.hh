@@ -39,12 +39,13 @@ class GlobalCommandController final : private GlobalCommandControllerBase
                                     , public CommandController
 {
 public:
-	GlobalCommandController(const GlobalCommandController&) = delete;
-	GlobalCommandController& operator=(const GlobalCommandController&) = delete;
-
 	GlobalCommandController(EventDistributor& eventDistributor,
 	                        GlobalCliComm& cliComm,
 	                        Reactor& reactor);
+	GlobalCommandController(const GlobalCommandController&) = delete;
+	GlobalCommandController(GlobalCommandController&&) = delete;
+	GlobalCommandController& operator=(const GlobalCommandController&) = delete;
+	GlobalCommandController& operator=(GlobalCommandController&&) = delete;
 	~GlobalCommandController();
 
 	[[nodiscard]] InfoCommand& getOpenMSXInfoCommand() { return openMSXInfoCommand; }
@@ -57,8 +58,8 @@ public:
 	void registerProxyCommand(std::string_view name);
 	void unregisterProxyCommand(std::string_view name);
 
-	void registerProxySetting(Setting& setting);
-	void unregisterProxySetting(Setting& setting);
+	void registerProxySetting(const Setting& setting);
+	void unregisterProxySetting(const Setting& setting);
 
 	// CommandController
 	void   registerCompleter(CommandCompleter& completer,

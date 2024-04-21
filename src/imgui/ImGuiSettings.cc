@@ -6,7 +6,6 @@
 #include "ImGuiOsdIcons.hh"
 #include "ImGuiSoundChip.hh"
 #include "ImGuiUtils.hh"
-#include "Shortcuts.hh"
 
 #include "BooleanInput.hh"
 #include "BooleanSetting.hh"
@@ -304,7 +303,7 @@ void ImGuiSettings::showMenu(MSXMotherBoard* motherBoard)
 				if (auto* mappingModeSetting = dynamic_cast<EnumSetting<KeyboardSettings::MappingMode>*>(controller.findSetting("kbd_mapping_mode"))) {
 					ComboBox("Keyboard mapping mode", *mappingModeSetting, kbdModeToolTips);
 				}
-			};
+			}
 			ImGui::MenuItem("Configure MSX joysticks...", nullptr, &showConfigureJoystick);
 		});
 		im::Menu("GUI", [&]{
@@ -394,7 +393,7 @@ void ImGuiSettings::showMenu(MSXMotherBoard* motherBoard)
 				}
 			});
 			ImGui::MenuItem("Select font...", nullptr, &showFont);
-			ImGui::MenuItem("Select shortcuts...", nullptr, &showShortcut);
+			ImGui::MenuItem("Edit shortcuts...", nullptr, &showShortcut);
 		});
 		im::Menu("Misc", [&]{
 			ImGui::MenuItem("Configure OSD icons...", nullptr, &manager.osdIcons->showConfigureIcons);
@@ -1136,83 +1135,138 @@ void ImGuiSettings::paintFont()
 	});
 }
 
-static void paintShortcutTableRow(Shortcuts& shortcuts, Shortcuts::ID id)
+[[nodiscard]] static std::string formatShortcutWithAnnotations(const Shortcuts::Shortcut& shortcut)
+{
+	auto result = getKeyChordName(shortcut.keyChord);
+	// don't show the 'ALWAYS_xxx' values
+	if (shortcut.type == Shortcuts::Type::GLOBAL) result += ", global";
+	return result;
+}
+
+[[nodiscard]] static gl::vec2 buttonSize(std::string_view text, float defaultSize_)
+{
+	const auto& style = ImGui::GetStyle();
+	auto textSize = ImGui::CalcTextSize(text).x + 2.0f * style.FramePadding.x;
+	auto defaultSize = ImGui::GetFontSize() * defaultSize_;
+	return {std::max(textSize, defaultSize), 0.0f};
+}
+
+void ImGuiSettings::paintEditShortcut()
 {
 	using enum Shortcuts::Type;
 
-	auto shortcut = shortcuts.getShortcut(id);
+	bool editShortcutWindow = editShortcutId != Shortcuts::ID::INVALID;
+	if (!editShortcutWindow) return;
 
-	if (ImGui::TableNextColumn()) {
-		bool global = shortcut.type == GLOBAL;
-		if (ImGui::Checkbox("global", &global)) {
-			shortcut.type = global ? GLOBAL : LOCAL;
-			shortcuts.setShortcut(id, shortcut);
-		}
-	}
-	if (ImGui::TableNextColumn()) {
-		if (ImGui::Checkbox("repeat", &shortcut.repeat)) {
-			shortcuts.setShortcut(id, shortcut);
-		}
-	}
-	if (ImGui::TableNextColumn()) {
-		if (ImGui::Button(getKeyChordName(shortcut.keyChord).c_str(), ImVec2(-1.0f, 0.0f))) {
-			ImGui::OpenPopup("modal");
-		}
-	}
-	if (ImGui::TableNextColumn()) {
-		ImGui::TextUnformatted(Shortcuts::getShortcutDescription(id));
-	}
+	im::Window("Edit shortcut", &editShortcutWindow, ImGuiWindowFlags_AlwaysAutoResize, [&]{
+		auto& shortcuts = manager.getShortcuts();
+		auto shortcut = shortcuts.getShortcut(editShortcutId);
 
-	// Always center this window when appearing
-	ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-	ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-	im::PopupModal("modal", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize, [&]{
-		bool done = false;
+		im::Table("table", 2, [&]{
+			ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed);
+			ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthStretch);
 
-		ImGui::TextUnformatted(
-			"Press key combination to capture it as a short cut.\n"
-			"The \"Default\" button restores short cut to default setting.\n"
-			"The \"Clear\" button dissociates short cut from action.\n"
-			"The \"Cancel\" button returns without changes."sv);
+			if (ImGui::TableNextColumn()) {
+				ImGui::AlignTextToFramePadding();
+				ImGui::TextUnformatted("key");
+			}
+			static constexpr auto waitKeyTitle = "Waiting for key";
+			if (ImGui::TableNextColumn()) {
+				auto text = getKeyChordName(shortcut.keyChord);
+				if (ImGui::Button(text.c_str(), buttonSize(text, 4.0f))) {
+					popupTimeout = 10.0f;
+					centerNextWindowOverCurrent();
+					ImGui::OpenPopup(waitKeyTitle);
+				}
+			}
+			bool isOpen = true;
+			im::PopupModal(waitKeyTitle, &isOpen, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize, [&]{
+				ImGui::Text("Enter key combination for shortcut '%s'",
+					Shortcuts::getShortcutDescription(editShortcutId).c_str());
+				ImGui::Text("Timeout in %d seconds.", int(popupTimeout));
+
+				popupTimeout -= ImGui::GetIO().DeltaTime;
+				if (!isOpen || popupTimeout <= 0.0f) {
+					ImGui::CloseCurrentPopup();
+				}
+				if (auto keyChord = getCurrentlyPressedKeyChord(); keyChord != ImGuiKey_None) {
+					shortcut.keyChord = keyChord;
+					shortcuts.setShortcut(editShortcutId, shortcut);
+					editShortcutWindow = false;
+					ImGui::CloseCurrentPopup();
+				}
+			});
+
+			if (shortcut.type == one_of(LOCAL, GLOBAL)) { // don't edit the 'ALWAYS_xxx' values
+				if (ImGui::TableNextColumn()) {
+					ImGui::AlignTextToFramePadding();
+					ImGui::TextUnformatted("global");
+				}
+				if (ImGui::TableNextColumn()) {
+					bool global = shortcut.type == GLOBAL;
+					if (ImGui::Checkbox("##global", &global)) {
+						shortcut.type = global ? GLOBAL : LOCAL;
+						shortcuts.setShortcut(editShortcutId, shortcut);
+					}
+					simpleToolTip(
+						"Global shortcuts react when any GUI window has focus.\n"
+						"Local shortcuts only react when the specific GUI window has focus.\n"sv);
+				}
+			}
+		});
 		ImGui::Separator();
-		if (ImGui::Button("Default")) {
-			shortcuts.setShortcut(id, shortcuts.getDefaultShortcut(id));
-			done = true;
-		}
+		const auto& defaultShortcut = Shortcuts::getDefaultShortcut(editShortcutId);
+		im::Disabled(shortcut == defaultShortcut, [&]{
+			if (ImGui::Button("Restore default")) {
+				shortcuts.setShortcut(editShortcutId, defaultShortcut);
+				editShortcutWindow = false;
+			}
+			simpleToolTip([&]{ return formatShortcutWithAnnotations(defaultShortcut); });
+		});
+
 		ImGui::SameLine();
-		if (ImGui::Button("Clear")) {
-			shortcuts.setShortcut(id, Shortcuts::Shortcut{});
-			done = true;
-		}
-		ImGui::SameLine();
-		done |= ImGui::Button("Cancel");
-		if (auto keyChord = getCurrentlyPressedKeyChord(); keyChord != ImGuiKey_None) {
-			shortcut.keyChord = keyChord;
-			shortcuts.setShortcut(id, shortcut);
-			done = true;
-		}
-		if (done) {
-			ImGui::CloseCurrentPopup();
-		}
+		im::Disabled(shortcut == Shortcuts::Shortcut{}, [&]{
+			if (ImGui::Button("Set None")) {
+				shortcuts.setShortcut(editShortcutId, Shortcuts::Shortcut{});
+				editShortcutWindow = false;
+			}
+			simpleToolTip("Set no binding for this shortcut"sv);
+		});
 	});
+	if (!editShortcutWindow) editShortcutId = Shortcuts::ID::INVALID;
 }
 
 void ImGuiSettings::paintShortcut()
 {
-	im::Window("Select shortcuts", &showShortcut, ImGuiWindowFlags_AlwaysAutoResize, [&]{
-		im::Table("table", 4, ImGuiTableFlags_SizingFixedFit, [&]{
-			ImGui::TableSetupColumn("1", ImGuiTableColumnFlags_None, 0);
-			ImGui::TableSetupColumn("2", ImGuiTableColumnFlags_None, 0);
-			ImGui::TableSetupColumn("3", ImGuiTableColumnFlags_WidthFixed, 150);
-			auto size = ImGui::CalcTextSize(Shortcuts::getLargerDescription()).x;
-			ImGui::TableSetupColumn("4", ImGuiTableColumnFlags_WidthFixed, size);
+	im::Window("Edit shortcuts", &showShortcut, [&]{
+		int flags = ImGuiTableFlags_Resizable
+		          | ImGuiTableFlags_RowBg
+		          | ImGuiTableFlags_NoBordersInBodyUntilResize
+		          | ImGuiTableFlags_SizingStretchProp;
+		im::Table("table", 2, flags, {-FLT_MIN, 0.0f}, [&]{
+			ImGui::TableSetupColumn("description");
+			ImGui::TableSetupColumn("key");
 
 			auto& shortcuts = manager.getShortcuts();
 			im::ID_for_range(Shortcuts::ID::NUM_SHORTCUTS, [&](int i) {
-				paintShortcutTableRow(shortcuts, static_cast<Shortcuts::ID>(i));
+				auto id = static_cast<Shortcuts::ID>(i);
+				auto shortcut = shortcuts.getShortcut(id);
+
+				if (ImGui::TableNextColumn()) {
+					ImGui::AlignTextToFramePadding();
+					ImGui::TextUnformatted(Shortcuts::getShortcutDescription(id));
+				}
+				if (ImGui::TableNextColumn()) {
+					auto text = formatShortcutWithAnnotations(shortcut);
+					if (ImGui::Button(text.c_str(), buttonSize(text, 9.0f))) {
+						editShortcutId = id;
+						centerNextWindowOverCurrent();
+					}
+				}
 			});
 		});
 	});
+	paintEditShortcut();
 }
 
 void ImGuiSettings::paint(MSXMotherBoard* motherBoard)
@@ -1230,7 +1284,7 @@ void ImGuiSettings::paint(MSXMotherBoard* motherBoard)
 std::span<const std::string> ImGuiSettings::getAvailableFonts()
 {
 	if (availableFonts.empty()) {
-		auto context = systemFileContext();
+		const auto& context = systemFileContext();
 		for (const auto& path : context.getPaths()) {
 			foreach_file(FileOperations::join(path, "skins"), [&](const std::string& /*fullName*/, std::string_view name) {
 				if (name.ends_with(".ttf.gz") || name.ends_with(".ttf")) {
@@ -1303,11 +1357,9 @@ void ImGuiSettings::initListener()
 
 	auto& distributor = manager.getReactor().getEventDistributor();
 	// highest priority (higher than HOTKEY and IMGUI)
-	for (auto type : {EventType::KEY_DOWN,
-	                  EventType::MOUSE_BUTTON_DOWN,
-	                  EventType::JOY_BUTTON_DOWN,
-	                  EventType::JOY_HAT,
-	                  EventType::JOY_AXIS_MOTION}) {
+	using enum EventType;
+	for (auto type : {KEY_DOWN, MOUSE_BUTTON_DOWN,
+	                  JOY_BUTTON_DOWN, JOY_HAT, JOY_AXIS_MOTION}) {
 		distributor.registerEventListener(type, *this);
 	}
 }
@@ -1318,11 +1370,9 @@ void ImGuiSettings::deinitListener()
 	listening = false;
 
 	auto& distributor = manager.getReactor().getEventDistributor();
-	for (auto type : {EventType::JOY_AXIS_MOTION,
-	                  EventType::JOY_HAT,
-	                  EventType::JOY_BUTTON_DOWN,
-	                  EventType::MOUSE_BUTTON_DOWN,
-	                  EventType::KEY_DOWN}) {
+	using enum EventType;
+	for (auto type : {JOY_AXIS_MOTION, JOY_HAT, JOY_BUTTON_DOWN,
+	                  MOUSE_BUTTON_DOWN, KEY_DOWN}) {
 		distributor.unregisterEventListener(type, *this);
 	}
 }

@@ -151,11 +151,11 @@ inline void AY8910::ToneGenerator::reset()
 	output = false;
 }
 
-int AY8910::ToneGenerator::getDetune(AY8910& ay8910)
+int AY8910::ToneGenerator::getDetune(const AY8910& ay8910)
 {
 	int result = 0;
-	float vibPerc = ay8910.vibratoPercent.getFloat();
-	if (vibPerc != 0.0f) {
+	if (float vibPerc = ay8910.vibratoPercent.getFloat();
+	    vibPerc != 0.0f) {
 		auto vibratoPeriod = int(
 			NATIVE_FREQ_FLOAT /
 			ay8910.vibratoFrequency.getFloat());
@@ -165,8 +165,8 @@ int AY8910::ToneGenerator::getDetune(AY8910& ay8910)
 			sinf((float(2 * Math::pi) * narrow_cast<float>(vibratoCount)) / narrow_cast<float>(vibratoPeriod))
 			* vibPerc * 0.01f * narrow_cast<float>(period));
 	}
-	float detunePerc = ay8910.detunePercent.getFloat();
-	if (detunePerc != 0.0f) {
+	if (float detunePerc = ay8910.detunePercent.getFloat();
+	    detunePerc != 0.0f) {
 		float detunePeriod = NATIVE_FREQ_FLOAT /
 			ay8910.detuneFrequency.getFloat();
 		detuneCount += period;
@@ -190,7 +190,7 @@ inline void AY8910::ToneGenerator::advance(unsigned duration)
 	}
 }
 
-inline void AY8910::ToneGenerator::doNextEvent(AY8910& ay8910)
+inline void AY8910::ToneGenerator::doNextEvent(const AY8910& ay8910)
 {
 	if (ay8910.doDetune) [[unlikely]] {
 		count = getDetune(ay8910);
@@ -670,7 +670,7 @@ void AY8910::wrtReg(unsigned reg, uint8_t value, EmuTime::param time)
 }
 [[nodiscard]] static inline float calc(bool b1, bool b2, float f)
 {
-	return narrow<float>(b1 * b2) * f;
+	return narrow<float>(b1 && b2) * f;
 }
 
 void AY8910::generateChannels(std::span<float*> bufs, unsigned num)

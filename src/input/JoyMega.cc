@@ -84,10 +84,10 @@ JoyMega::JoyMega(CommandController& commandController_,
 	, description(strCat("JoyMega based Mega Drive controller ", id_, ". Mapping is fully configurable."))
 	, id(id_)
 {
-	configSetting.setChecker([this](TclObject& newValue) {
+	configSetting.setChecker([this](const TclObject& newValue) {
 		this->checkJoystickConfig(newValue); });
 	// fill in 'bindings'
-	checkJoystickConfig(const_cast<TclObject&>(configSetting.getValue()));
+	checkJoystickConfig(configSetting.getValue());
 }
 
 JoyMega::~JoyMega()
@@ -97,7 +97,7 @@ JoyMega::~JoyMega()
 	}
 }
 
-void JoyMega::checkJoystickConfig(TclObject& newValue)
+void JoyMega::checkJoystickConfig(const TclObject& newValue)
 {
 	std::array<std::vector<BooleanInput>, 12> newBindings;
 

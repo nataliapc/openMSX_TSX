@@ -367,8 +367,8 @@ void V9990::writeIO(word port, byte val, EmuTime::param time)
 			status = byte((status & 0xFB) | ((val & 1) << 2));
 			syncAtNextLine(syncSetMode, time);
 
-			bool newSystemReset = (val & 2) != 0;
-			if (newSystemReset != systemReset) {
+			if (bool newSystemReset = (val & 2) != 0;
+			    newSystemReset != systemReset) {
 				systemReset = newSystemReset;
 				if (systemReset) {
 					// Enter systemReset mode
@@ -477,7 +477,7 @@ void V9990::postVideoSystemChange() noexcept
 // RegDebug
 // -------------------------------------------------------------------------
 
-V9990::RegDebug::RegDebug(V9990& v9990_)
+V9990::RegDebug::RegDebug(const V9990& v9990_)
 	: SimpleDebuggable(v9990_.getMotherBoard(),
 	                   v9990_.getName() + " regs", "V9990 registers", 0x40)
 {
@@ -499,7 +499,7 @@ void V9990::RegDebug::write(unsigned address, byte value, EmuTime::param time)
 // PalDebug
 // -------------------------------------------------------------------------
 
-V9990::PalDebug::PalDebug(V9990& v9990_)
+V9990::PalDebug::PalDebug(const V9990& v9990_)
 	: SimpleDebuggable(v9990_.getMotherBoard(),
 	                   v9990_.getName() + " palette",
 	                   "V9990 palette (format is R, G, B, 0).", 0x100)
@@ -558,7 +558,7 @@ byte V9990::readRegister(byte reg, EmuTime::param time) const
 	}
 }
 
-void V9990::syncAtNextLine(SyncBase& type, EmuTime::param time)
+void V9990::syncAtNextLine(SyncBase& type, EmuTime::param time) const
 {
 	int line = getUCTicksThisFrame(time) / V9990DisplayTiming::UC_TICKS_PER_LINE;
 	int ticks = (line + 1) * V9990DisplayTiming::UC_TICKS_PER_LINE;
@@ -709,8 +709,8 @@ void V9990::frameStart(EmuTime::param time)
 	setVerticalTiming();
 	status ^= 0x02; // flip EO bit
 
-	bool newSuperimposing = (regs[CONTROL] & 0x20) && externalVideoSource;
-	if (superimposing != newSuperimposing) {
+	if (bool newSuperimposing = (regs[CONTROL] & 0x20) && externalVideoSource;
+	    superimposing != newSuperimposing) {
 		superimposing = newSuperimposing;
 		renderer->updateSuperimposing(superimposing, time);
 	}

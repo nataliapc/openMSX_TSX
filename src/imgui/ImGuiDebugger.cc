@@ -222,7 +222,7 @@ void ImGuiDebugger::drawControl(MSXCPUInterface& cpuInterface)
 		};
 
 		auto& shortcuts = manager.getShortcuts();
-		bool breaked = cpuInterface.isBreaked();
+		bool breaked = MSXCPUInterface::isBreaked();
 		using enum Shortcuts::ID;
 		if (breaked) {
 			if (shortcuts.checkShortcut(BREAK)) {
@@ -269,6 +269,16 @@ void ImGuiDebugger::drawControl(MSXCPUInterface& cpuInterface)
 	});
 }
 
+[[nodiscard]] static std::pair<const MSXRom*, Debuggable*> getRomBlocks(Debugger& debugger, const MSXDevice* device)
+{
+	Debuggable* debuggable = nullptr;
+	const auto* rom = dynamic_cast<const MSXRom*>(device);
+	if (rom && !dynamic_cast<const RomPlain*>(rom)) {
+		debuggable = debugger.findDebuggable(rom->getName() + " romblocks");
+	}
+	return {rom, debuggable};
+}
+
 struct CurrentSlot {
 	int ps;
 	std::optional<int> ss;
@@ -287,11 +297,9 @@ struct CurrentSlot {
 	}
 	if (wantSeg) {
 		const auto* device = cpuInterface.getVisibleMSXDevice(page);
-		Debuggable* romBlocks = nullptr;
 		if (const auto* mapper = dynamic_cast<const MSXMemoryMapperBase*>(device)) {
 			result.seg = mapper->getSelectedSegment(narrow<uint8_t>(page));
-		} else if (!dynamic_cast<const RomPlain*>(device) &&
-		           (romBlocks = debugger.findDebuggable(device->getName() + " romblocks"))) {
+		} else if (auto [_, romBlocks] = getRomBlocks(debugger, device); romBlocks) {
 			result.seg = romBlocks->read(addr);
 		}
 	}
@@ -360,7 +368,7 @@ void ImGuiDebugger::drawDisassembly(CPURegs& regs, MSXCPUInterface& cpuInterface
 		std::optional<unsigned> removeBpId;
 
 		auto pc = regs.getPC();
-		if (followPC && !cpuInterface.isBreaked()) {
+		if (followPC && !MSXCPUInterface::isBreaked()) {
 			gotoTarget = pc;
 		}
 
@@ -405,8 +413,8 @@ void ImGuiDebugger::drawDisassembly(CPURegs& regs, MSXCPUInterface& cpuInterface
 							ImGui::SetScrollHereY(0.25f);
 						}
 
-						bool rowAtPc = !syncDisassemblyWithPC && (addr == pc);
-						if (rowAtPc) {
+						if (bool rowAtPc = !syncDisassemblyWithPC && (addr == pc);
+						    rowAtPc) {
 							ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1, getColor(imColor::YELLOW_BG));
 						}
 						bool bpRightClick = false;
@@ -691,13 +699,10 @@ void ImGuiDebugger::drawSlots(MSXCPUInterface& cpuInterface, Debugger& debugger)
 					}
 				}
 				if (ImGui::TableNextColumn()) { // segment
-					auto* device = cpuInterface.getVisibleMSXDevice(page);
-					Debuggable* romBlocks = nullptr;
-					MSXRom *rom = nullptr;
-					if (auto* mapper = dynamic_cast<MSXMemoryMapperBase*>(device)) {
+					const auto* device = cpuInterface.getVisibleMSXDevice(page);
+					if (const auto* mapper = dynamic_cast<const MSXMemoryMapperBase*>(device)) {
 						ImGui::StrCat(mapper->getSelectedSegment(page));
-					} else if ((rom = dynamic_cast<MSXRom*>(device)) &&
-						(romBlocks = debugger.findDebuggable(device->getName() + " romblocks"))) {
+					} else if (auto [rom, romBlocks] = getRomBlocks(debugger, device); romBlocks) {
 						if (unsigned blockSize = RomInfo::getBlockSize(rom->getRomType())) {
 							std::string text;
 							char separator = 'R';
@@ -718,7 +723,7 @@ void ImGuiDebugger::drawSlots(MSXCPUInterface& cpuInterface, Debugger& debugger)
 	});
 }
 
-void ImGuiDebugger::drawStack(CPURegs& regs, MSXCPUInterface& cpuInterface, EmuTime::param time)
+void ImGuiDebugger::drawStack(const CPURegs& regs, const MSXCPUInterface& cpuInterface, EmuTime::param time)
 {
 	if (!showStack) return;
 
@@ -839,15 +844,15 @@ void ImGuiDebugger::drawRegisters(CPURegs& regs)
 		ImGui::TextUnformatted("IM"sv);
 		ImGui::SameLine();
 		ImGui::SetNextItemWidth(width16);
-		uint8_t im = regs.getIM();
-		if (ImGui::InputScalar("##IM", ImGuiDataType_U8, &im, nullptr, nullptr, "%d")) {
+		if (uint8_t im = regs.getIM();
+		    ImGui::InputScalar("##IM", ImGuiDataType_U8, &im, nullptr, nullptr, "%d")) {
 			if (im <= 2) regs.setIM(im);
 		}
 
 		ImGui::SameLine(0.0f, 20.0f);
 		ImGui::AlignTextToFramePadding();
-		bool ei = regs.getIFF1();
-		if (ImGui::Selectable(ei ? "EI" : "DI", false, ImGuiSelectableFlags_AllowDoubleClick)) {
+		if (bool ei = regs.getIFF1();
+		    ImGui::Selectable(ei ? "EI" : "DI", false, ImGuiSelectableFlags_AllowDoubleClick)) {
 			if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
 				regs.setIFF1(!ei);
 				regs.setIFF2(!ei);

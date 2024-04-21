@@ -204,8 +204,8 @@ void SettingsConfig::saveSetting(std::string filename)
 	xml.with_tag("settings", [&]{
 		xml.with_tag("settings", [&]{
 			for (const auto& [name_, value_] : settingValues) {
-				auto name = name_;    // clang-15 workaround
-				auto value = value_;  // fixed in clang-16
+				const auto& name = name_;    // clang-15 workaround
+				const auto& value = value_;  // fixed in clang-16
 				xml.with_tag("setting", [&]{
 					xml.attribute("id", name);
 					xml.data(value);
@@ -375,8 +375,6 @@ void SettingsParser::attribute(std::string_view name, std::string_view value)
 			} else {
 				std::cerr << "Parse error: invalid shortcut type \"" << value << "\"\n";
 			}
-		} else if (name == "repeat") {
-			currentShortcut.shortcut.repeat = StringOp::stringToBool(value);
 		}
 		break;
 	case BIND:

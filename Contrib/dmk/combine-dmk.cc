@@ -158,9 +158,8 @@ static int analyzeTrack(std::vector<uint8_t>& buffer)
 		updateCrc(addrCrc, h);
 		updateCrc(addrCrc, r);
 		updateCrc(addrCrc, n);
-		uint16_t onDiskAddrCrc = 256 * ch + cl;
-
-		if (onDiskAddrCrc != addrCrc) {
+		if (uint16_t onDiskAddrCrc = 256 * ch + cl;
+		    onDiskAddrCrc != addrCrc) {
 			// only mark address mark as in-use
 			gaps.addInterval(addrIdx, addrIdx + 10);
 			continue;
@@ -269,10 +268,10 @@ done_read:
 	// most often).
 	unsigned maxCount = 0;
 	unsigned trackSize = 0;
-	for (const auto& p : sizes) {
-		if (p.second >= maxCount) {
-			maxCount = p.second;
-			trackSize = p.first;
+	for (const auto& [length, count] : sizes) {
+		if (count >= maxCount) {
+			maxCount = count;
+			trackSize = length;
 		}
 	}
 

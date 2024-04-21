@@ -58,10 +58,11 @@ class SettingsConfig;
 class ImGuiManager final : public ImGuiPartInterface, private EventListener, private Observer<Setting>
 {
 public:
+	ImGuiManager(Reactor& reactor_, SettingsConfig& config_);
 	ImGuiManager(const ImGuiManager&) = delete;
+	ImGuiManager(ImGuiManager&&) = delete;
 	ImGuiManager& operator=(const ImGuiManager&) = delete;
-
-	explicit ImGuiManager(Reactor& reactor_, SettingsConfig& config_);
+	ImGuiManager& operator=(ImGuiManager&&) = delete;
 	~ImGuiManager();
 
 	void   registerPart(ImGuiPartInterface* part);
@@ -74,10 +75,10 @@ public:
 	std::optional<TclObject> execute(TclObject command);
 	void executeDelayed(std::function<void()> action);
 	void executeDelayed(TclObject command,
-	                    std::function<void(const TclObject&)> ok,
-	                    std::function<void(const std::string&)> error);
+	                    const std::function<void(const TclObject&)>& ok,
+	                    const std::function<void(const std::string&)>& error);
 	void executeDelayed(TclObject command,
-	                    std::function<void(const TclObject&)> ok = {});
+	                    const std::function<void(const TclObject&)>& ok = {});
 
 	void printError(std::string_view message);
 	template<typename... Ts> void printError(Ts&&... ts) {

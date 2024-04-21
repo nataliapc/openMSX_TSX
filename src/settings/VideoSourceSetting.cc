@@ -14,7 +14,7 @@ VideoSourceSetting::VideoSourceSetting(CommandController& commandController_)
 {
 	sources = { { "none", 0 } };
 
-	setChecker([this](TclObject& newValue) {
+	setChecker([this](const TclObject& newValue) {
 		checkSetValue(newValue.getString()); // may throw
 	});
 	init();
@@ -34,8 +34,8 @@ void VideoSourceSetting::checkSetValue(std::string_view newValue) const
 int VideoSourceSetting::getSource() noexcept
 {
 	// Always try to find a better value than "none".
-	std::string_view str = getValue().getString();
-	if (str != "none") {
+	if (std::string_view str = getValue().getString();
+	    str != "none") {
 		// If current value is allowed, then keep it.
 		if (int id = has(str)) {
 			return id;
@@ -102,7 +102,7 @@ int VideoSourceSetting::registerVideoSource(const std::string& source)
 	static int counter = 0; // id's are globally unique
 
 	assert(!has(source));
-	sources.emplace_back(Source{source, ++counter});
+	sources.emplace_back(source, ++counter);
 
 	// First announce extended set of allowed values before announcing a
 	// (possibly) different value.

@@ -55,7 +55,7 @@ void FilePoolCore::insert(const Sha1Sum& sum, time_t time, const std::string& fi
 	needWrite = true;
 }
 
-FilePoolCore::Sha1Index::iterator FilePoolCore::getSha1Iterator(Index idx, Entry& entry)
+FilePoolCore::Sha1Index::iterator FilePoolCore::getSha1Iterator(Index idx, const Entry& entry)
 {
 	// There can be multiple entries for the same sha1, look for the specific one.
 	for (auto [b, e] = ranges::equal_range(sha1Index, entry.sum, {}, GetSha1{pool}); b != e; ++b) {
@@ -75,7 +75,7 @@ void FilePoolCore::remove(Sha1Index::iterator it)
 	needWrite = true;
 }
 
-void FilePoolCore::remove(Index idx, Entry& entry)
+void FilePoolCore::remove(Index idx, const Entry& entry)
 {
 	remove(getSha1Iterator(idx, entry));
 }
@@ -389,8 +389,8 @@ File FilePoolCore::scanFile(const Sha1Sum& sha1sum, const std::string& filename,
 {
 	++progress.amountScanned;
 	// Periodically send a progress message with the current filename
-	auto now = Timer::getTime();
-	if (now > (progress.lastTime + 250'000)) { // 4Hz
+	if (auto now = Timer::getTime();
+	    now > (progress.lastTime + 250'000)) { // 4Hz
 		progress.lastTime = now;
 		progress.printed = true;
 		reportProgress(tmpStrCat(
@@ -463,12 +463,10 @@ Sha1Sum FilePoolCore::getSha1Sum(File& file)
 	const std::string& filename = file.getURL();
 
 	auto [idx, entry] = findInDatabase(filename);
-	if (idx != Index(-1)) {
-		if (entry->getTime() == time) {
-			// in database and modification time matches,
-			// assume sha1sum also matches
-			return entry->sum;
-		}
+	if ((idx != Index(-1)) && (entry->getTime() == time)) {
+		// in database and modification time matches,
+		// assume sha1sum also matches
+		return entry->sum;
 	}
 
 	// not in database or timestamp mismatch

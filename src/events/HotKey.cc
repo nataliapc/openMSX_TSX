@@ -57,21 +57,11 @@ HotKey::Listener::Listener(HotKey& hotKey_, EventDistributor::Priority priority_
 	: hotKey(hotKey_), priority(priority_)
 {
 	auto& distributor = hotKey.eventDistributor;
-	for (auto type : {
-			EventType::KEY_DOWN,
-			EventType::KEY_UP,
-			EventType::MOUSE_MOTION,
-			EventType::MOUSE_BUTTON_DOWN,
-			EventType::MOUSE_BUTTON_UP,
-			EventType::MOUSE_WHEEL,
-			EventType::JOY_BUTTON_DOWN,
-			EventType::JOY_BUTTON_UP,
-			EventType::JOY_AXIS_MOTION,
-			EventType::JOY_HAT,
-			EventType::WINDOW,
-			EventType::FILE_DROP,
-			EventType::OSD_CONTROL_RELEASE,
-			EventType::OSD_CONTROL_PRESS}) {
+	using enum EventType;
+	for (auto type : {KEY_DOWN, KEY_UP,
+	                  MOUSE_MOTION, MOUSE_BUTTON_DOWN, MOUSE_BUTTON_UP, MOUSE_WHEEL,
+	                  JOY_BUTTON_DOWN, JOY_BUTTON_UP, JOY_AXIS_MOTION, JOY_HAT,
+	                  WINDOW, FILE_DROP, OSD_CONTROL_RELEASE, OSD_CONTROL_PRESS}) {
 		distributor.registerEventListener(type, *this, priority);
 	}
 }
@@ -79,21 +69,11 @@ HotKey::Listener::Listener(HotKey& hotKey_, EventDistributor::Priority priority_
 HotKey::Listener::~Listener()
 {
 	auto& distributor = hotKey.eventDistributor;
-	for (auto type : {
-			EventType::OSD_CONTROL_PRESS,
-			EventType::OSD_CONTROL_RELEASE,
-			EventType::FILE_DROP,
-			EventType::WINDOW,
-			EventType::JOY_BUTTON_UP,
-			EventType::JOY_BUTTON_DOWN,
-			EventType::JOY_AXIS_MOTION,
-			EventType::JOY_HAT,
-			EventType::MOUSE_WHEEL,
-			EventType::MOUSE_BUTTON_UP,
-			EventType::MOUSE_BUTTON_DOWN,
-			EventType::MOUSE_MOTION,
-			EventType::KEY_UP,
-			EventType::KEY_DOWN}) {
+	using enum EventType;
+	for (auto type : {OSD_CONTROL_PRESS, OSD_CONTROL_RELEASE, FILE_DROP, WINDOW,
+	                  JOY_BUTTON_UP, JOY_BUTTON_DOWN, JOY_AXIS_MOTION, JOY_HAT,
+	                  MOUSE_WHEEL, MOUSE_BUTTON_UP, MOUSE_BUTTON_DOWN, MOUSE_MOTION,
+	                  KEY_UP, KEY_DOWN}) {
 		distributor.unregisterEventListener(type, *this);
 	}
 }
@@ -144,13 +124,11 @@ void HotKey::initDefaultBindings()
 static Event createEvent(const TclObject& obj, Interpreter& interp)
 {
 	auto event = InputEventFactory::createInputEvent(obj, interp);
-	if (getType(event) != one_of(EventType::KEY_UP, EventType::KEY_DOWN,
-	                             EventType::MOUSE_BUTTON_UP, EventType::MOUSE_BUTTON_DOWN,
-				     EventType::GROUP,
-				     EventType::JOY_BUTTON_UP, EventType::JOY_BUTTON_DOWN,
-				     EventType::JOY_AXIS_MOTION, EventType::JOY_HAT,
-				     EventType::OSD_CONTROL_PRESS, EventType::OSD_CONTROL_RELEASE,
-				     EventType::WINDOW)) {
+	using enum EventType;
+	if (getType(event) != one_of(KEY_UP, KEY_DOWN,
+	                             MOUSE_BUTTON_UP, MOUSE_BUTTON_DOWN, GROUP,
+	                             JOY_BUTTON_UP, JOY_BUTTON_DOWN, JOY_AXIS_MOTION, JOY_HAT,
+	                             OSD_CONTROL_PRESS, OSD_CONTROL_RELEASE, WINDOW)) {
 		throw CommandException("Unsupported event type");
 	}
 	return event;
@@ -286,7 +264,7 @@ void HotKey::activateLayer(std::string layer, bool blocking)
 	// (it's not an error if the same layer was already active, in such
 	// as case it will now appear twice in the list of active layer,
 	// and it must also be deactivated twice).
-	activeLayers.push_back({std::move(layer), blocking});
+	activeLayers.emplace_back(std::move(layer), blocking);
 }
 
 void HotKey::deactivateLayer(std::string_view layer)

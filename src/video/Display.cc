@@ -55,10 +55,8 @@ Display::Display(Reactor& reactor_)
 	prevTimeStamp = Timer::getTime();
 
 	EventDistributor& eventDistributor = reactor.getEventDistributor();
-	for (auto type : {EventType::FINISH_FRAME,
-	                  EventType::SWITCH_RENDERER,
-	                  EventType::MACHINE_LOADED,
-	                  EventType::WINDOW}) {
+	using enum EventType;
+	for (auto type : {FINISH_FRAME, SWITCH_RENDERER, MACHINE_LOADED, WINDOW}) {
 		eventDistributor.registerEventListener(type, *this);
 	}
 
@@ -70,10 +68,8 @@ Display::~Display()
 	renderSettings.getRendererSetting().detach(*this);
 
 	EventDistributor& eventDistributor = reactor.getEventDistributor();
-	for (auto type : {EventType::WINDOW,
-	                  EventType::MACHINE_LOADED,
-	                  EventType::SWITCH_RENDERER,
-	                  EventType::FINISH_FRAME}) {
+	using enum EventType;
+	for (auto type : {WINDOW, MACHINE_LOADED, SWITCH_RENDERER, FINISH_FRAME}) {
 		eventDistributor.unregisterEventListener(type, *this);
 	}
 
@@ -385,7 +381,7 @@ void Display::repaintDelayed(uint64_t delta)
 void Display::addLayer(Layer& layer)
 {
 	int z = layer.getZ();
-	auto it = ranges::find_if(layers, [&](Layer* l) { return l->getZ() > z; });
+	auto it = ranges::find_if(layers, [&](const Layer* l) { return l->getZ() > z; });
 	layers.insert(it, &layer);
 	layer.setDisplay(*this);
 }
@@ -456,10 +452,10 @@ void Display::ScreenShotCmd::execute(std::span<const TclObject> tokens, TclObjec
 		throw SyntaxError();
 	}
 	string filename = FileOperations::parseCommandFileArgument(
-		fname, "screenshots", prefix, ".png");
+		fname, SCREENSHOT_DIR, prefix, SCREENSHOT_EXTENSION);
 
 	if (!rawShot) {
-		// include all layers (OSD stuff, console)
+		// take screenshot as displayed, possibly with other layers (OSD stuff, ImGUI)
 		try {
 			display.getVideoSystem().takeScreenShot(filename, withOsd);
 		} catch (MSXException& e) {

@@ -57,7 +57,7 @@ namespace FAT12 {
 		unsigned operator()(Free) const { return FAT::FREE; }
 		unsigned operator()(EndOfChain) const { return END_OF_CHAIN; }
 		unsigned operator()(Cluster cluster) const { return FAT::FIRST_CLUSTER + cluster.index; }
-	} toClusterNumber;
+	};
 }
 
 namespace FAT16 {
@@ -71,7 +71,7 @@ namespace FAT16 {
 		unsigned operator()(Free) const { return FAT::FREE; }
 		unsigned operator()(EndOfChain) const { return END_OF_CHAIN; }
 		unsigned operator()(Cluster cluster) const { return FAT::FIRST_CLUSTER + cluster.index; }
-	} toClusterNumber;
+	};
 }
 
 static constexpr unsigned SECTOR_SIZE = sizeof(SectorBuffer);
@@ -300,12 +300,12 @@ void MSXtar::writeFAT(Cluster cluster, FatCluster value)
 	}
 
 	if (fat16) {
-		unsigned fatValue = std::visit(FAT16::toClusterNumber, value);
+		unsigned fatValue = std::visit(FAT16::ToClusterNumber{}, value);
 		auto p = subspan<2>(data, index * 2);
 		p[0] = narrow_cast<uint8_t>(fatValue);
 		p[1] = narrow_cast<uint8_t>(fatValue >> 8);
 	} else {
-		unsigned fatValue = std::visit(FAT12::toClusterNumber, value);
+		unsigned fatValue = std::visit(FAT12::ToClusterNumber{}, value);
 		auto p = subspan<2>(data, (index * 3) / 2);
 		if (index & 1) {
 			p[0] = narrow_cast<uint8_t>((p[0] & 0x0F) + (fatValue << 4));
@@ -381,9 +381,9 @@ void MSXtar::setStartCluster(MSXDirEntry& entry, DirCluster cluster) const
 	// * Anything but FREE or a valid cluster number is rejected.
 	assert(!std::holds_alternative<Cluster>(cluster) || std::get<Cluster>(cluster).index < clusterCount);
 	if (fat16) {
-		entry.startCluster = narrow<uint16_t>(std::visit(FAT16::toClusterNumber, cluster));
+		entry.startCluster = narrow<uint16_t>(std::visit(FAT16::ToClusterNumber{}, cluster));
 	} else {
-		entry.startCluster = narrow<uint16_t>(std::visit(FAT12::toClusterNumber, cluster));
+		entry.startCluster = narrow<uint16_t>(std::visit(FAT12::ToClusterNumber{}, cluster));
 	}
 }
 
@@ -709,8 +709,8 @@ void MSXtar::deleteEntry(MSXDirEntry& msxDirEntry)
 	if (msxDirEntry.attrib & MSXDirEntry::Attrib::DIRECTORY) {
 		// If we're deleting a directory then also (recursively)
 		// delete the files/directories in this directory.
-		const auto& msxName = msxDirEntry.filename;
-		if (ranges::equal(msxName, std::string_view(".          ")) ||
+		if (const auto& msxName = msxDirEntry.filename;
+		    ranges::equal(msxName, std::string_view(".          ")) ||
 		    ranges::equal(msxName, std::string_view("..         "))) {
 			// But skip the "." and ".." entries.
 			return;
@@ -757,8 +757,8 @@ std::string MSXtar::renameItem(std::string_view currentName, std::string_view ne
 	SectorBuffer buf;
 
 	FileName newMsxName = hostToMSXFileName(newName);
-	auto newEntry = findEntryInDir(newMsxName, chrootSector, buf);
-	if (newEntry.sector != 0) {
+	if (auto newEntry = findEntryInDir(newMsxName, chrootSector, buf);
+	    newEntry.sector != 0) {
 		return "another entry with new name already exists";
 	}
 
@@ -806,8 +806,8 @@ string MSXtar::addFileToDSK(const string& fullHostName, unsigned rootSector, Add
 
 	// first find out if the filename already exists in current dir
 	SectorBuffer dummy;
-	DirEntry fullMsxDirEntry = findEntryInDir(msxName, rootSector, dummy);
-	if (fullMsxDirEntry.sector != 0) {
+	if (DirEntry fullMsxDirEntry = findEntryInDir(msxName, rootSector, dummy);
+	    fullMsxDirEntry.sector != 0) {
 		if (add == Add::PRESERVE) {
 			return strCat("Warning: preserving entry ", hostName, '\n');
 		} else {
@@ -846,8 +846,8 @@ std::string MSXtar::addOrCreateSubdir(zstring_view hostDirName, unsigned sector,
 	FileName msxFileName = hostToMSXFileName(hostDirName);
 	auto printableFilename = msxToHostFileName(msxFileName);
 	SectorBuffer buf;
-	DirEntry entry = findEntryInDir(msxFileName, sector, buf);
-	if (entry.sector != 0) {
+	if (DirEntry entry = findEntryInDir(msxFileName, sector, buf);
+	    entry.sector != 0) {
 		// entry already exists ..
 		auto& msxDirEntry = buf.dirEntry[entry.index];
 		if (msxDirEntry.attrib & MSXDirEntry::Attrib::DIRECTORY) {

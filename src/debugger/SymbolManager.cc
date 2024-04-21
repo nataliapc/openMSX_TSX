@@ -22,26 +22,28 @@ namespace openmsx {
 zstring_view SymbolFile::toString(Type type)
 {
 	switch (type) {
-		case Type::AUTO_DETECT: return "auto-detect";
-		case Type::ASMSX:       return "asMSX";
-		case Type::GENERIC:     return "generic";
-		case Type::HTC:         return "htc";
-		case Type::LINKMAP:     return "linkmap";
-		case Type::NOICE:       return "NoICE";
-		case Type::VASM:        return "vasm";
+		using enum Type;
+		case AUTO_DETECT: return "auto-detect";
+		case ASMSX:       return "asMSX";
+		case GENERIC:     return "generic";
+		case HTC:         return "htc";
+		case LINKMAP:     return "linkmap";
+		case NOICE:       return "NoICE";
+		case VASM:        return "vasm";
 		default: UNREACHABLE;
 	}
 }
 
 std::optional<SymbolFile::Type> SymbolFile::parseType(std::string_view str)
 {
-	if (str == "auto-detect") return Type::AUTO_DETECT;
-	if (str == "asMSX")       return Type::ASMSX;
-	if (str == "generic")     return Type::GENERIC;
-	if (str == "htc")         return Type::HTC;
-	if (str == "linkmap")     return Type::LINKMAP;
-	if (str == "NoICE")       return Type::NOICE;
-	if (str == "vasm")        return Type::VASM;
+	using enum Type;
+	if (str == "auto-detect") return AUTO_DETECT;
+	if (str == "asMSX")       return ASMSX;
+	if (str == "generic")     return GENERIC;
+	if (str == "htc")         return HTC;
+	if (str == "linkmap")     return LINKMAP;
+	if (str == "NoICE")       return NOICE;
+	if (str == "vasm")        return VASM;
 	return {};
 }
 
@@ -52,31 +54,32 @@ SymbolManager::SymbolManager(CommandController& commandController_)
 }
 
 // detection logic taken from old openmsx-debugger, could probably be improved.
-[[nodiscard]] SymbolFile::Type SymbolManager::detectType(const std::string& filename, std::string_view buffer)
+[[nodiscard]] SymbolFile::Type SymbolManager::detectType(std::string_view filename, std::string_view buffer)
 {
 	auto fname = StringOp::toLower(filename);
 
+	using enum SymbolFile::Type;
 	if (fname.ends_with(".noi")) {
 		// NoICE command file
-		return SymbolFile::Type::NOICE;
+		return NOICE;
 	} else if (fname.ends_with(".map")) {
 		// HiTech link map file
-		return SymbolFile::Type::LINKMAP;
+		return LINKMAP;
 	} else if (fname.ends_with(".sym")) {
 		// auto detect which sym file
 		auto [line, _] = StringOp::splitOnFirst(buffer, "\n\r");
 		if (line.starts_with("; Symbol table")) {
-			return SymbolFile::Type::ASMSX;
+			return ASMSX;
 		} else if (StringOp::containsCaseInsensitive(line, " %equ ")) { // TNIASM1
-			return SymbolFile::Type::GENERIC;
+			return GENERIC;
 		} else if (StringOp::containsCaseInsensitive(line, " equ ")) {
-			return SymbolFile::Type::GENERIC;
+			return GENERIC;
 		} else if (StringOp::containsCaseInsensitive(line, "Sections:")) {
-			return SymbolFile::Type::VASM;
+			return VASM;
 		} else {
 			// this is a blunt conclusion but I don't know a way
 			// to detect this file type
-			return SymbolFile::Type::HTC;
+			return HTC;
 		}
 	} else if (fname.ends_with(".symbol") || fname.ends_with(".publics") || fname.ends_with(".sys")) {
 		/* They are the same type of file. For some reason the Debian
@@ -84,13 +87,13 @@ SymbolManager::SymbolManager(CommandController& commandController_)
 			* pasmo doc -> pasmo [options] file.asm file.bin [file.symbol [file.publics] ]
 			* pasmo manpage in Debian -> pasmo [options]  file.asm file.bin [file.sys]
 		*/
-		return SymbolFile::Type::GENERIC; // pasmo
+		return GENERIC; // pasmo
 	}
-	return SymbolFile::Type::GENERIC;
+	return GENERIC;
 }
 
 [[nodiscard]] SymbolFile SymbolManager::loadLines(
-	const std::string& filename, std::string_view buffer, SymbolFile::Type type,
+	std::string_view filename, std::string_view buffer, SymbolFile::Type type,
 	function_ref<std::optional<Symbol>(std::span<std::string_view>)> lineParser)
 {
 	SymbolFile result;
@@ -148,7 +151,7 @@ SymbolManager::SymbolManager(CommandController& commandController_)
 	return {};
 }
 
-[[nodiscard]] SymbolFile SymbolManager::loadGeneric(const std::string& filename, std::string_view buffer)
+[[nodiscard]] SymbolFile SymbolManager::loadGeneric(std::string_view filename, std::string_view buffer)
 {
 	auto parseLine = [](std::span<std::string_view> tokens) -> std::optional<Symbol> {
 		if (tokens.size() != 3) return {};
@@ -163,21 +166,20 @@ SymbolManager::SymbolManager(CommandController& commandController_)
 	return loadLines(filename, buffer, SymbolFile::Type::GENERIC, parseLine);
 }
 
-[[nodiscard]] SymbolFile SymbolManager::loadNoICE(const std::string& filename, std::string_view buffer)
+[[nodiscard]] SymbolFile SymbolManager::loadNoICE(std::string_view filename, std::string_view buffer)
 {
 	auto parseLine = [](std::span<std::string_view> tokens) -> std::optional<Symbol> {
 		if (tokens.size() != 3) return {};
 		auto def   = tokens[0];
 		auto label = tokens[1];
 		auto value = tokens[2];
-		StringOp::casecmp cmp;
-		if (!cmp(def, "def")) return {};
+		if (StringOp::casecmp cmp; !cmp(def, "def")) return {};
 		return checkLabelAndValue(label, value);
 	};
 	return loadLines(filename, buffer, SymbolFile::Type::NOICE, parseLine);
 }
 
-[[nodiscard]] SymbolFile SymbolManager::loadHTC(const std::string& filename, std::string_view buffer)
+[[nodiscard]] SymbolFile SymbolManager::loadHTC(std::string_view filename, std::string_view buffer)
 {
 	// TODO check with real HTC file
 	auto parseLine = [](std::span<std::string_view> tokens) -> std::optional<Symbol> {
@@ -193,7 +195,7 @@ SymbolManager::SymbolManager(CommandController& commandController_)
 	return loadLines(filename, buffer, SymbolFile::Type::HTC, parseLine);
 }
 
-[[nodiscard]] SymbolFile SymbolManager::loadVASM(const std::string& filename, std::string_view buffer)
+[[nodiscard]] SymbolFile SymbolManager::loadVASM(std::string_view filename, std::string_view buffer)
 {
 	SymbolFile result;
 	result.filename = filename;
@@ -225,7 +227,7 @@ SymbolManager::SymbolManager(CommandController& commandController_)
 	return result;
 }
 
-[[nodiscard]] SymbolFile SymbolManager::loadASMSX(const std::string& filename, std::string_view buffer)
+[[nodiscard]] SymbolFile SymbolManager::loadASMSX(std::string_view filename, std::string_view buffer)
 {
 	SymbolFile result;
 	result.filename = filename;
@@ -284,7 +286,7 @@ SymbolManager::SymbolManager(CommandController& commandController_)
 	return narrow<uint16_t>(value);
 }
 
-[[nodiscard]] SymbolFile SymbolManager::loadLinkMap(const std::string& filename, std::string_view buffer)
+[[nodiscard]] SymbolFile SymbolManager::loadLinkMap(std::string_view filename, std::string_view buffer)
 {
 	// Hi-Tech C link map file. Here's an example of such a file:
 	//    https://github.com/artrag/C-experiments-for-msx/blob/master/START.MAP
@@ -322,7 +324,7 @@ SymbolManager::SymbolManager(CommandController& commandController_)
 			if (it == et) break;
 			auto value = *it++; // this could either be the psect or the value column
 			if (auto val = is4DigitHex(value)) {
-				result.symbols.push_back(Symbol{std::string(label), *val});
+				result.symbols.emplace_back(std::string(label), *val);
 				continue;
 			}
 
@@ -330,7 +332,7 @@ SymbolManager::SymbolManager(CommandController& commandController_)
 			value = *it++; // try again with 3rd column
 			auto val = is4DigitHex(value);
 			if (!val) break; // if this also doesn't work there's something wrong, skip this line
-			result.symbols.push_back(Symbol{std::string(label), *val});
+			result.symbols.emplace_back(std::string(label), *val);
 		}
 	}
 
@@ -343,23 +345,24 @@ SymbolManager::SymbolManager(CommandController& commandController_)
 	auto buf = file.mmap();
 	std::string_view buffer(std::bit_cast<const char*>(buf.data()), buf.size());
 
-	if (type == SymbolFile::Type::AUTO_DETECT) {
+	using enum SymbolFile::Type;
+	if (type == AUTO_DETECT) {
 		type = detectType(filename, buffer);
 	}
-	assert(type != SymbolFile::Type::AUTO_DETECT);
+	assert(type != AUTO_DETECT);
 
 	switch (type) {
-		case SymbolFile::Type::ASMSX:
+		case ASMSX:
 			return loadASMSX(filename, buffer);
-		case SymbolFile::Type::GENERIC:
+		case GENERIC:
 			return loadGeneric(filename, buffer);
-		case SymbolFile::Type::HTC:
+		case HTC:
 			return loadHTC(filename, buffer);
-		case SymbolFile::Type::LINKMAP:
+		case LINKMAP:
 			return loadLinkMap(filename, buffer);
-		case SymbolFile::Type::NOICE:
+		case NOICE:
 			return loadNoICE(filename, buffer);
-		case SymbolFile::Type::VASM:
+		case VASM:
 			return loadVASM(filename, buffer);
 		default: UNREACHABLE;
 	}
@@ -388,8 +391,8 @@ bool SymbolManager::reloadFile(const std::string& filename, LoadEmpty loadEmpty,
 	auto file = loadSymbolFile(filename, type); // might throw
 	if (file.symbols.empty() && loadEmpty == LoadEmpty::NOT_ALLOWED) return false;
 
-	auto it = ranges::find(files, filename, &SymbolFile::filename);
-	if (it == files.end()) {
+	if (auto it = ranges::find(files, filename, &SymbolFile::filename);
+	    it == files.end()) {
 		files.push_back(std::move(file));
 	} else {
 		*it = std::move(file);
@@ -465,20 +468,21 @@ std::string SymbolManager::getFileFilters()
 
 SymbolFile::Type SymbolManager::getTypeForFilter(std::string_view filter)
 {
+	using enum SymbolFile::Type;
 	if (filter.starts_with("Auto")) {
-		return SymbolFile::Type::AUTO_DETECT;
+		return AUTO_DETECT;
 	} else if (filter.starts_with("asMSX")) {
-		return SymbolFile::Type::ASMSX;
+		return ASMSX;
 	} else if (filter.starts_with("HiTechC link")) {
-		return SymbolFile::Type::LINKMAP;
+		return LINKMAP;
 	} else if (filter.starts_with("HiTechC symbol")) {
-		return SymbolFile::Type::HTC;
+		return HTC;
 	} else if (filter.starts_with("NoICE")) {
-		return SymbolFile::Type::NOICE;
+		return NOICE;
 	} else if (filter.starts_with("vasm")) {
-		return SymbolFile::Type::VASM;
+		return VASM;
 	} else {
-		return SymbolFile::Type::GENERIC;
+		return GENERIC;
 	}
 }
 

@@ -87,6 +87,15 @@ void simpleToolTip(std::invocable<> auto descFunc)
 
 void HelpMarker(std::string_view desc);
 
+inline void centerNextWindowOverCurrent()
+{
+	static constexpr gl::vec2 center{0.5f, 0.5f};
+	gl::vec2 windowPos = ImGui::GetWindowPos();
+	gl::vec2 windowSize = ImGui::GetWindowSize();
+	auto windowCenter = windowPos + center * windowSize;
+	ImGui::SetNextWindowPos(windowCenter, ImGuiCond_Appearing, center);
+}
+
 void drawURL(std::string_view text, zstring_view url);
 
 struct GetSettingDescription {
@@ -120,8 +129,8 @@ void comboHexSequence(const char* label, int* value, int mult, int offset = 0) {
 	auto preview = tmpStrCat("0x", hex_string<HexDigits>(*value | offset));
 	im::Combo(label, preview.c_str(), [&]{
 		for (int addr = 0; addr < 0x1ffff; addr += mult) {
-			auto str = tmpStrCat("0x", hex_string<HexDigits>(addr | offset));
-			if (ImGui::Selectable(str.c_str(), *value == addr)) {
+			if (auto str = tmpStrCat("0x", hex_string<HexDigits>(addr | offset));
+			    ImGui::Selectable(str.c_str(), *value == addr)) {
 				*value = addr;
 			}
 			if (*value == addr) {
@@ -189,7 +198,7 @@ void displayFilterCombo(std::string& selection, zstring_view key, const std::vec
 }
 
 template<typename T>
-void applyComboFilter(std::string_view key, const std::string& value, const std::vector<T>& items, std::vector<size_t>& indices)
+void applyComboFilter(std::string_view key, std::string_view value, const std::vector<T>& items, std::vector<size_t>& indices)
 {
 	if (value.empty()) return;
 	std::erase_if(indices, [&](auto idx) {

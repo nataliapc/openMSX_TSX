@@ -436,7 +436,7 @@ void SDLRasterizer::drawDisplay(
 	int screenY = fromY - lineRenderTop;
 	if (screenY < 0) {
 		displayY -= screenY;
-		fromY = lineRenderTop;
+		//fromY = lineRenderTop;
 		screenY = 0;
 	}
 	displayHeight = screenLimitY - screenY;
@@ -468,8 +468,8 @@ void SDLRasterizer::drawDisplay(
 	}();
 	// Because SDL blits do not wrap, unlike GL textures, the pageBorder is
 	// also used if multi page is disabled.
-	int pageSplit = narrow<int>(lineWidth - hScroll);
-	if (pageSplit < pageBorder) {
+	if (int pageSplit = narrow<int>(lineWidth - hScroll);
+	    pageSplit < pageBorder) {
 		pageBorder = pageSplit;
 	}
 

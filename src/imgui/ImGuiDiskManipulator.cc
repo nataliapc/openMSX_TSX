@@ -182,7 +182,8 @@ void ImGuiDiskManipulator::checkSort(std::vector<FileInfo>& files, bool& forceSo
 	}
 }
 
-ImGuiDiskManipulator::Action ImGuiDiskManipulator::drawTable(std::vector<FileInfo>& files, int& lastClickIdx, bool& forceSort, bool msxSide)
+ImGuiDiskManipulator::Action ImGuiDiskManipulator::drawTable(
+	std::vector<FileInfo>& files, int& lastClickIdx, bool& forceSort, bool msxSide) const
 {
 	auto clearSelection = [&]{
 		for (auto& file : files) file.isSelected = false;
@@ -347,8 +348,8 @@ void ImGuiDiskManipulator::paint(MSXMotherBoard* /*motherBoard*/)
 			bool driveOk = false;
 			im::Combo("##drive", driveDisplayName(selectedDrive).c_str(), [&]{
 				auto& diskManipulator = manager.getReactor().getDiskManipulator();
-				auto drives = diskManipulator.getDriveNamesForCurrentMachine();
-				for (const auto& drive : drives) {
+				for (auto drives = diskManipulator.getDriveNamesForCurrentMachine();
+				     const auto& drive : drives) {
 					if (selectedDrive == drive) driveOk = true;
 					auto display = driveDisplayName(drive);
 					if (display.empty()) continue;
@@ -861,13 +862,7 @@ bool ImGuiDiskManipulator::setupTransferHostToMsx(DrivePartitionTar& stuff)
 		if (it == msxFileCache.end()) continue;
 		(it->isDirectory ? existingDirs : existingFiles).push_back(*it);
 	}
-	for (auto it = duplicateEntries.begin(); it != duplicateEntries.end(); /**/) {
-		if (it->second.size() < 2) {
-			it = duplicateEntries.erase(it);
-		} else {
-			++it;
-		}
-	}
+	std::erase_if(duplicateEntries, [](const auto& entry) { return entry.second.size() < 2; });
 	if (existingDirs.empty() && existingFiles.empty() && duplicateEntries.empty()) {
 		transferHostToMsxPhase = EXECUTE_PRESERVE;
 		executeTransferHostToMsx(stuff);

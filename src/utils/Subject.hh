@@ -4,7 +4,7 @@
 #include "Observer.hh"
 #include "ranges.hh"
 #include "stl.hh"
-#include <algorithm>
+
 #include <vector>
 #include <cassert>
 
@@ -17,6 +17,11 @@ namespace openmsx {
 template<typename T> class Subject
 {
 public:
+	Subject(const Subject&) = delete;
+	Subject(Subject&&) = delete;
+	Subject& operator=(const Subject&) = delete;
+	Subject& operator=(Subject&&) = delete;
+
 	void attach(Observer<T>& observer);
 	void detach(Observer<T>& observer);
 	[[nodiscard]] bool anyObservers() const { return !observers.empty(); }
@@ -40,8 +45,7 @@ private:
 template<typename T> Subject<T>::~Subject()
 {
 	assert(notifyState == IDLE);
-	auto copy = observers;
-	for (auto& o : copy) {
+	for (auto copy = observers; auto& o : copy) {
 		o->subjectDeleted(*static_cast<const T*>(this));
 	}
 	assert(observers.empty());

@@ -198,8 +198,7 @@ void NowindHost::executeCommand()
 			state = STATE_SYNC1;
 			return;
 		}
-		byte reg_f = cmdData[6];
-		if (reg_f & 1) { // carry flag
+		if (byte reg_f = cmdData[6]; reg_f & 1) { // carry flag
 			diskWriteInit(*disk);
 		} else {
 			diskReadInit(*disk);
@@ -352,7 +351,7 @@ unsigned NowindHost::getCurrentAddress() const
 }
 
 
-void NowindHost::diskReadInit(SectorAccessibleDisk& disk)
+void NowindHost::diskReadInit(const SectorAccessibleDisk& disk)
 {
 	unsigned sectorAmount = getSectorAmount();
 	buffer.resize(sectorAmount);
@@ -452,8 +451,8 @@ void NowindHost::transferSectors(unsigned transferAddress, unsigned amount)
 	send16(narrow_cast<uint16_t>(amount));
 
 	std::span fullBuf{buffer[0].raw.data(), buffer.size() * SECTOR_SIZE};
-	auto buf = fullBuf.subspan(transferred, amount);
-	for (auto b : buf) {
+	for (auto buf = fullBuf.subspan(transferred, amount);
+	     auto b : buf) {
 		send(b);
 	}
 	send(0xAF);
@@ -469,8 +468,8 @@ void NowindHost::transferSectorsBackwards(unsigned transferAddress, unsigned amo
 	send(narrow_cast<uint8_t>(amount / 64));
 
 	std::span fullBuf{buffer[0].raw.data(), buffer.size() * SECTOR_SIZE};
-	auto buf = fullBuf.subspan(transferred, amount);
-	for (auto b : view::reverse(buf)) {
+	for (auto buf = fullBuf.subspan(transferred, amount);
+	     auto b : view::reverse(buf)) {
 		send(b);
 	}
 	send(0xAF);
@@ -478,7 +477,7 @@ void NowindHost::transferSectorsBackwards(unsigned transferAddress, unsigned amo
 }
 
 
-void NowindHost::diskWriteInit(SectorAccessibleDisk& disk)
+void NowindHost::diskWriteInit(const SectorAccessibleDisk& disk)
 {
 	if (disk.isWriteProtected()) {
 		sendHeader();
@@ -538,7 +537,6 @@ void NowindHost::doDiskWrite1()
 void NowindHost::doDiskWrite2()
 {
 	assert(recvCount == (transferSize + 2));
-	//auto* buf = &buffer[0].raw[transferred];
 	std::span fullBuf{buffer[0].raw.data(), buffer.size() * SECTOR_SIZE};
 	auto dst = fullBuf.subspan(transferred, transferSize);
 	auto src = subspan(extraData, 1, transferSize);

@@ -130,29 +130,27 @@ void PostProcessor::executeUntil(EmuTime::param /*time*/)
 		getVideoSource(), getVideoSourceSetting(), false));
 }
 
-using WorkBuffer = std::vector<MemBuffer<char, SSE_ALIGNMENT>>;
-static void getScaledFrame(FrameSource& paintFrame,
-                           std::span<const void*> lines,
+using WorkBuffer = std::vector<MemBuffer<FrameSource::Pixel, SSE_ALIGNMENT>>;
+static void getScaledFrame(const FrameSource& paintFrame,
+                           std::span<const FrameSource::Pixel*> lines,
                            WorkBuffer& workBuffer)
 {
 	auto height = narrow<unsigned>(lines.size());
 	unsigned width = (height == 240) ? 320 : 640;
-	unsigned pitch = width * 4;
-	const void* linePtr = nullptr;
-	void* work = nullptr;
+	const FrameSource::Pixel* linePtr = nullptr;
+	FrameSource::Pixel* work = nullptr;
 	for (auto i : xrange(height)) {
 		if (linePtr == work) {
 			// If work buffer was used in previous iteration,
 			// then allocate a new one.
-			work = workBuffer.emplace_back(pitch).data();
+			work = workBuffer.emplace_back(width).data();
 		}
-		auto* work2 = static_cast<uint32_t*>(work);
 		if (height == 240) {
-			auto line = paintFrame.getLinePtr320_240(i, std::span<uint32_t, 320>{work2, 320});
+			auto line = paintFrame.getLinePtr320_240(i, std::span<uint32_t, 320>{work, 320});
 			linePtr = line.data();
 		} else {
 			assert (height == 480);
-			auto line = paintFrame.getLinePtr640_480(i, std::span<uint32_t, 640>{work2, 640});
+			auto line = paintFrame.getLinePtr640_480(i, std::span<uint32_t, 640>{work, 640});
 			linePtr = line.data();
 		}
 		lines[i] = linePtr;
@@ -165,7 +163,7 @@ void PostProcessor::takeRawScreenShot(unsigned height2, const std::string& filen
 		throw CommandException("TODO");
 	}
 
-	VLA(const void*, lines, height2);
+	VLA(const FrameSource::Pixel*, lines, height2);
 	WorkBuffer workBuffer;
 	getScaledFrame(*paintFrame, lines, workBuffer);
 	unsigned width = (height2 == 240) ? 320 : 640;
@@ -237,8 +235,8 @@ void PostProcessor::paint(OutputSurface& /*output*/)
 	}
 
 	// New scaler algorithm selected?
-	auto algo = renderSettings.getScaleAlgorithm();
-	if (scaleAlgorithm != algo) {
+	if (auto algo = renderSettings.getScaleAlgorithm();
+	    scaleAlgorithm != algo) {
 		scaleAlgorithm = algo;
 		currScaler = GLScalerFactory::createScaler(renderSettings);
 
@@ -275,8 +273,6 @@ void PostProcessor::paint(OutputSurface& /*output*/)
 	renderedFrame.fbo.push();
 
 	for (auto& r : regions) {
-		//fprintf(stderr, "post processing lines %d-%d: %d\n",
-		//	r.srcStartY, r.srcEndY, r.lineWidth);
 		auto it = find_unguarded(textures, r.lineWidth, &TextureData::width);
 		auto* superImpose = superImposeVideoFrame
 		                  ? &superImposeTex : nullptr;
@@ -637,7 +633,7 @@ void PostProcessor::preCalcNoise(float factor)
 #endif
 }
 
-void PostProcessor::drawNoise()
+void PostProcessor::drawNoise() const
 {
 	if (renderSettings.getNoise() == 0.0f) return;
 

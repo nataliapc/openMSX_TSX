@@ -106,8 +106,9 @@ const XMLAttribute* XMLElement::findAttribute(std::string_view attrName) const
 // Throws when not found.
 const XMLAttribute& XMLElement::getAttribute(std::string_view attrName) const
 {
-	const auto* result = findAttribute(attrName);
-	if (result) return *result;
+	if (const auto* result = findAttribute(attrName)) {
+		return *result;
+	}
 	throw ConfigException("Missing attribute \"", attrName, "\".");
 }
 
@@ -508,7 +509,7 @@ XMLElement* XMLDocument::clone(const OldXMLElement& inElem)
 	return outElem;
 }
 
-void XMLDocument::load(OldXMLElement& elem)
+void XMLDocument::load(const OldXMLElement& elem)
 {
 	root = clone(elem);
 }

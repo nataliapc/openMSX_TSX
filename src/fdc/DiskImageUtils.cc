@@ -46,7 +46,7 @@ static constexpr std::array<char, 11> NEXTOR_PARTITION_TABLE_HEADER = {
 	return {};
 }
 
-bool hasPartitionTable(SectorAccessibleDisk& disk)
+bool hasPartitionTable(const SectorAccessibleDisk& disk)
 {
 	SectorBuffer buf;
 	disk.readSector(0, buf);
@@ -55,7 +55,7 @@ bool hasPartitionTable(SectorAccessibleDisk& disk)
 
 // Get partition from Nextor extended boot record (standard EBR) chain.
 static Partition& getPartitionNextorExtended(
-	SectorAccessibleDisk& disk, unsigned partition, SectorBuffer& buf,
+	const SectorAccessibleDisk& disk, unsigned partition, SectorBuffer& buf,
 	unsigned remaining, unsigned ebrOuterSector)
 {
 	unsigned ebrSector = ebrOuterSector;
@@ -88,7 +88,7 @@ static Partition& getPartitionNextorExtended(
 
 // Get partition from Nextor master boot record (standard MBR).
 static Partition& getPartitionNextor(
-	SectorAccessibleDisk& disk, unsigned partition, SectorBuffer& buf)
+	const SectorAccessibleDisk& disk, unsigned partition, SectorBuffer& buf)
 {
 	unsigned remaining = partition - 1;
 	for (auto& p : buf.ptNextor.part) {
@@ -121,7 +121,7 @@ static Partition& getPartitionSunrise(unsigned partition, SectorBuffer& buf)
 	return p;
 }
 
-Partition& getPartition(SectorAccessibleDisk& disk, unsigned partition, SectorBuffer& buf)
+Partition& getPartition(const SectorAccessibleDisk& disk, unsigned partition, SectorBuffer& buf)
 {
 	// check drive has a partition table
 	// check valid partition number and return the entry
@@ -136,7 +136,7 @@ Partition& getPartition(SectorAccessibleDisk& disk, unsigned partition, SectorBu
 	}
 }
 
-void checkSupportedPartition(SectorAccessibleDisk& disk, unsigned partition)
+void checkSupportedPartition(const SectorAccessibleDisk& disk, unsigned partition)
 {
 	SectorBuffer buf;
 	Partition& p = getPartition(disk, partition, buf);

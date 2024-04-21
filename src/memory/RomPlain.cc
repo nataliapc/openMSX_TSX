@@ -114,10 +114,10 @@ RomPlain::RomPlain(const DeviceConfig& config, Rom&& rom_, RomType type)
 
 void RomPlain::guessHelper(unsigned offset, std::span<int, 3> pages) const
 {
-	if ((rom[offset++] == 'A') && (rom[offset++] =='B')) {
+	if ((rom[offset + 0] == 'A') && (rom[offset + 1] == 'B')) {
 		for (auto i : xrange(4)) {
-			if (auto addr = rom[offset + 2 * i + 0] +
-			                rom[offset + 2 * i + 1] * 256) {
+			if (auto addr = rom[offset + 2 + 2 * i + 0] +
+			                rom[offset + 2 + 2 * i + 1] * 256) {
 				unsigned page = (addr >> 14) - (offset >> 14);
 				if (page <= 2) {
 					pages[page]++;
@@ -127,7 +127,7 @@ void RomPlain::guessHelper(unsigned offset, std::span<int, 3> pages) const
 	}
 }
 
-unsigned RomPlain::guessLocation(unsigned windowBase, unsigned windowSize)
+unsigned RomPlain::guessLocation(unsigned windowBase, unsigned windowSize) const
 {
 	std::array<int, 3> pages = {0, 0, 0};
 

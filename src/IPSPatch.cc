@@ -45,8 +45,8 @@ std::vector<IPSPatch::Chunk> IPSPatch::parseChunks() const
 			--b;
 			if (b->stopAddress() < offset) ++b;
 		}
-		auto e = ranges::upper_bound(result, offset + v.size(), {}, &Chunk::startAddress);
-		if (b != e) {
+		if (auto e = ranges::upper_bound(result, offset + v.size(), {}, &Chunk::startAddress);
+		    b != e) {
 			// remove overlapping regions, merge adjacent regions
 			--e;
 			auto start = std::min(b->startAddress, offset);
@@ -62,7 +62,7 @@ std::vector<IPSPatch::Chunk> IPSPatch::parseChunks() const
 			result.erase(b + 1, e);
 		} else {
 			// add new region
-			result.emplace(b, Chunk{offset, std::move(v)});
+			result.emplace(b, offset, std::move(v));
 		}
 
 		ipsFile.read(offsetBuf);
@@ -113,8 +113,8 @@ void IPSPatch::copyBlock(size_t src, std::span<uint8_t> dst) const
 		}
 		// calc chunkSize
 		assert(src <= chunkStart);
-		auto overflow = int(chunkStart - src + chunkSize - dst.size());
-		if (overflow > 0) {
+		if (auto overflow = int(chunkStart - src + chunkSize - dst.size());
+		    overflow > 0) {
 			assert(chunkSize > overflow);
 			chunkSize -= overflow;
 		}

@@ -60,9 +60,8 @@ void ImGuiOpenFile::setBookmarks()
 	auto& filePool = manager.getReactor().getFilePool();
 	std::vector<std::string> existingNames;
 	for (const auto& dir : filePool.getDirectories()) {
-		//using enum FileType; // c++20, but needs gcc-11
-		//if ((dir.types & (ROM | DISK | TAPE)) == NONE) continue;
-		if ((dir.types & (FileType::ROM | FileType::DISK | FileType::TAPE)) == FileType::NONE) continue;
+		using enum FileType;
+		if ((dir.types & (ROM | DISK | TAPE)) == NONE) continue;
 
 		auto path = FileOperations::getNativePath(std::string(dir.path));
 		if (!FileOperations::isDirectory(path)) continue;
@@ -89,7 +88,7 @@ std::string ImGuiOpenFile::getStartPath(zstring_view lastLocationHint)
 }
 
 void ImGuiOpenFile::selectFile(const std::string& title, std::string filters,
-                               std::function<void(const std::string&)> callback,
+                               const std::function<void(const std::string&)>& callback,
                                zstring_view lastLocationHint,
                                Painter painter_)
 {
@@ -101,7 +100,7 @@ void ImGuiOpenFile::selectFile(const std::string& title, std::string filters,
 }
 
 void ImGuiOpenFile::selectNewFile(const std::string& title, std::string filters,
-                                  std::function<void(const std::string&)> callback,
+                                  const std::function<void(const std::string&)>& callback,
                                   zstring_view lastLocationHint,
                                   Painter painter_)
 {
@@ -115,7 +114,7 @@ void ImGuiOpenFile::selectNewFile(const std::string& title, std::string filters,
 }
 
 void ImGuiOpenFile::selectDirectory(const std::string& title,
-                                    std::function<void(const std::string&)> callback,
+                                    const std::function<void(const std::string&)>& callback,
                                     zstring_view lastLocationHint,
                                     Painter painter_)
 {
@@ -124,7 +123,7 @@ void ImGuiOpenFile::selectDirectory(const std::string& title,
 }
 
 void ImGuiOpenFile::common(const std::string& title, const char* filters,
-                           std::function<void(const std::string&)> callback,
+                           const std::function<void(const std::string&)>& callback,
                            zstring_view lastLocationHint,
                            Painter painter_,
                            int extraFlags)

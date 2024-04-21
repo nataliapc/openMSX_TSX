@@ -408,8 +408,8 @@ static constexpr bool overlap(
 	//       VRAM region cannot wrap around.
 ) {
 	if (displayY0 <= displayY1) {
-		if (vramLine1 > displayY0) {
-			if (vramLine0 <= displayY1) return true;
+		if ((vramLine1 > displayY0) && (vramLine0 <= displayY1)) {
+			return true;
 		}
 	} else {
 		if (vramLine1 > displayY0) return true;
@@ -512,8 +512,6 @@ void PixelRenderer::updateVRAM(unsigned offset, EmuTime::param time)
 	// Note: No need to sync if display is disabled, because then the
 	//       output does not depend on VRAM (only on background color).
 	if (renderFrame && displayEnabled && checkSync(offset, time)) {
-		//fprintf(stderr, "vram sync @ line %d\n",
-		//	vdp.getTicksThisFrame(time) / VDP::TICKS_PER_LINE);
 		renderUntil(time);
 	}
 }

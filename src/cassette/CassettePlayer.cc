@@ -379,8 +379,8 @@ void CassettePlayer::insertTape(const Filename& filename, EmuTime::param time)
 	}
 
 	// possibly recreate resampler
-	unsigned inputRate = playImage ? playImage->getFrequency() : 44100;
-	if (inputRate != getInputRate()) {
+	if (unsigned inputRate = playImage ? playImage->getFrequency() : 44100;
+	    inputRate != getInputRate()) {
 		setInputRate(inputRate);
 		createResampler();
 	}
@@ -506,8 +506,7 @@ void CassettePlayer::generateRecordOutput(EmuDuration::param duration)
 
 	double out = lastOutput ? OUTPUT_AMP : -OUTPUT_AMP;
 	double samples = duration.toDouble() * RECORD_FREQ;
-	double rest = 1.0 - partialInterval;
-	if (rest <= samples) {
+	if (auto rest = 1.0 - partialInterval; rest <= samples) {
 		// enough to fill next interval
 		partialOut += out * rest;
 		fillBuf(1, partialOut);
@@ -611,15 +610,13 @@ float CassettePlayer::getAmplificationFactorImpl() const
 
 int CassettePlayer::signalEvent(const Event& event)
 {
-	if (getType(event) == EventType::BOOT) {
-		if (!getImageName().empty()) {
-			// Reinsert tape to make sure everything is reset.
-			try {
-				playTape(getImageName(), getCurrentTime());
-			} catch (MSXException& e) {
-				motherBoard.getMSXCliComm().printWarning(
-					"Failed to insert tape: ", e.getMessage());
-			}
+	if (getType(event) == EventType::BOOT && !getImageName().empty()) {
+		// Reinsert tape to make sure everything is reset.
+		try {
+			playTape(getImageName(), getCurrentTime());
+		} catch (MSXException& e) {
+			motherBoard.getMSXCliComm().printWarning(
+				"Failed to insert tape: ", e.getMessage());
 		}
 	}
 	return 0;
@@ -675,12 +672,10 @@ void CassettePlayer::TapeCommand::execute(
 		                      options);
 
 	} else if (tokens[1] == "new") {
-		std::string_view directory = "taperecordings";
 		std::string_view prefix = "openmsx";
-		std::string_view extension = ".wav";
 		string filename = FileOperations::parseCommandFileArgument(
 			(tokens.size() == 3) ? tokens[2].getString() : string{},
-			directory, prefix, extension);
+			TAPE_RECORDING_DIR, prefix, TAPE_RECORDING_EXTENSION);
 		cassettePlayer.recordTape(Filename(filename), time);
 		result = tmpStrCat(
 			"Created new cassette image file: ", filename,

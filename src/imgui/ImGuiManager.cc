@@ -111,7 +111,7 @@ void ImGuiManager::loadFont()
 	ImFontConfig icons_config; icons_config.MergeMode = true; icons_config.PixelSnapH = true;
 	io.Fonts->AddFontFromMemoryCompressedBase85TTF(FONT_ICON_BUFFER_NAME_IGFD, 15.0f, &icons_config, icons_ranges.data());
 	// load debugger icons, also only in default font
-	debugger->loadIcons();
+	ImGuiDebugger::loadIcons();
 
 	assert(fontMono == nullptr);
 	fontMono = addFont(fontMonoFilename.getString(), fontMonoSize.getInt());
@@ -224,18 +224,10 @@ ImGuiManager::ImGuiManager(Reactor& reactor_, SettingsConfig& settingsConfig)
 	ImGui::AddSettingsHandler(&ini_handler);
 
 	auto& eventDistributor = reactor.getEventDistributor();
-	for (auto type : {
-			EventType::MOUSE_BUTTON_UP,
-			EventType::MOUSE_BUTTON_DOWN,
-			EventType::MOUSE_MOTION,
-			EventType::MOUSE_WHEEL,
-			EventType::KEY_UP,
-			EventType::KEY_DOWN,
-			EventType::TEXT,
-			EventType::WINDOW,
-			EventType::FILE_DROP,
-			EventType::IMGUI_DELAYED_ACTION,
-			EventType::BREAK}) {
+	using enum EventType;
+	for (auto type : {MOUSE_BUTTON_UP, MOUSE_BUTTON_DOWN, MOUSE_MOTION, MOUSE_WHEEL,
+	                  KEY_UP, KEY_DOWN, TEXT,
+	                  WINDOW, FILE_DROP, IMGUI_DELAYED_ACTION, BREAK}) {
 		eventDistributor.registerEventListener(type, *this, EventDistributor::IMGUI);
 	}
 
@@ -253,18 +245,10 @@ ImGuiManager::~ImGuiManager()
 	fontPropFilename.detach(*this);
 
 	auto& eventDistributor = reactor.getEventDistributor();
-	for (auto type : {
-			EventType::BREAK,
-			EventType::IMGUI_DELAYED_ACTION,
-			EventType::FILE_DROP,
-			EventType::WINDOW,
-			EventType::TEXT,
-			EventType::KEY_DOWN,
-			EventType::KEY_UP,
-			EventType::MOUSE_WHEEL,
-			EventType::MOUSE_MOTION,
-			EventType::MOUSE_BUTTON_DOWN,
-			EventType::MOUSE_BUTTON_UP}) {
+	using enum EventType;
+	for (auto type : {BREAK, IMGUI_DELAYED_ACTION, FILE_DROP, WINDOW, TEXT,
+	                  KEY_DOWN, KEY_UP,
+	                  MOUSE_WHEEL, MOUSE_MOTION, MOUSE_BUTTON_DOWN, MOUSE_BUTTON_UP}) {
 		eventDistributor.unregisterEventListener(type, *this);
 	}
 
@@ -344,8 +328,8 @@ void ImGuiManager::executeDelayed(std::function<void()> action)
 }
 
 void ImGuiManager::executeDelayed(TclObject command,
-                                  std::function<void(const TclObject&)> ok,
-                                  std::function<void(const std::string&)> error)
+                                  const std::function<void(const TclObject&)>& ok,
+                                  const std::function<void(const std::string&)>& error)
 {
 	executeDelayed([this, command, ok, error]() mutable {
 		try {
@@ -358,7 +342,7 @@ void ImGuiManager::executeDelayed(TclObject command,
 }
 
 void ImGuiManager::executeDelayed(TclObject command,
-                                  std::function<void(const TclObject&)> ok)
+                                  const std::function<void(const TclObject&)>& ok)
 {
 	executeDelayed(std::move(command), ok,
 		[this](const std::string& message) { this->printError(message); });

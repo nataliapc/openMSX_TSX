@@ -28,6 +28,9 @@ private:
 
 private:
 	struct Source {
+		Source(std::string n, int i)
+			: name(std::move(n)), id(i) {} // clang-15 workaround
+
 		std::string name;
 		int id;
 	};
@@ -37,9 +40,13 @@ private:
 class VideoSourceActivator
 {
 public:
-	VideoSourceActivator(
-		VideoSourceSetting& setting, const std::string& name);
+	VideoSourceActivator(VideoSourceSetting& setting, const std::string& name);
+	VideoSourceActivator(const VideoSourceActivator&) = delete;
+	VideoSourceActivator(VideoSourceActivator&&) = delete;
+	VideoSourceActivator& operator=(const VideoSourceActivator&) = delete;
+	VideoSourceActivator& operator=(VideoSourceActivator&&) = delete;
 	~VideoSourceActivator();
+
 	[[nodiscard]] int getID() const { return id; }
 
 private:
