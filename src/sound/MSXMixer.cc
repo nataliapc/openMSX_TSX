@@ -1,4 +1,5 @@
 #include "MSXMixer.hh"
+
 #include "Mixer.hh"
 #include "SoundDevice.hh"
 #include "MSXMotherBoard.hh"
@@ -12,26 +13,28 @@
 #include "CommandException.hh"
 #include "AviRecorder.hh"
 #include "Filename.hh"
-#include "CliComm.hh"
-#include "Math.hh"
+#include "FileOperations.hh"
+#include "MSXCliComm.hh"
+
 #include "stl.hh"
 #include "aligned.hh"
+#include "enumerate.hh"
+#include "narrow.hh"
+#include "one_of.hh"
 #include "outer.hh"
+#include "ranges.hh"
 #include "unreachable.hh"
+#include "view.hh"
 #include "vla.hh"
-#include <algorithm>
+
 #include <cassert>
 #include <cmath>
-#include <cstring>
 #include <memory>
 #include <tuple>
 
 #ifdef __SSE2__
 #include "emmintrin.h"
 #endif
-
-using std::string;
-using std::vector;
 
 namespace openmsx {
 
@@ -42,12 +45,10 @@ MSXMixer::MSXMixer(Mixer& mixer_, MSXMotherBoard& motherBoard_,
 	, motherBoard(motherBoard_)
 	, commandController(motherBoard.getMSXCommandController())
 	, masterVolume(mixer.getMasterVolume())
-	, speedSetting(globalSettings.getSpeedSetting())
+	, speedManager(globalSettings.getSpeedManager())
 	, throttleManager(globalSettings.getThrottleManager())
 	, prevTime(getCurrentTime(), 44100)
 	, soundDeviceInfo(commandController.getMachineInfoCommand())
-	, recorder(nullptr)
-	, synchronousCounter(0)
 {
 	hostSampleRate = 44100;
 	fragmentSize = 0;
@@ -58,7 +59,7 @@ MSXMixer::MSXMixer(Mixer& mixer_, MSXMotherBoard& motherBoard_,
 	reschedule2();
 
 	masterVolume.attach(*this);
-	speedSetting.attach(*this);
+	speedManager.attach(*this);
 	throttleManager.attach(*this);
 }
 
@@ -70,68 +71,69 @@ MSXMixer::~MSXMixer()
 	assert(infos.empty());
 
 	throttleManager.detach(*this);
-	speedSetting.detach(*this);
+	speedManager.detach(*this);
 	masterVolume.detach(*this);
 
 	mute(); // calls Mixer::unregisterMixer()
+}
+
+MSXMixer::SoundDeviceInfo::SoundDeviceInfo(unsigned numChannels)
+	: channelSettings(numChannels)
+{
 }
 
 void MSXMixer::registerSound(SoundDevice& device, float volume,
                              int balance, unsigned numChannels)
 {
 	// TODO read volume/balance(mode) from config file
-	const string& name = device.getName();
-	SoundDeviceInfo info;
+	const std::string& name = device.getName();
+	SoundDeviceInfo info(numChannels);
 	info.device = &device;
 	info.defaultVolume = volume;
 	info.volumeSetting = std::make_unique<IntegerSetting>(
-		commandController, name + "_volume",
+		commandController, tmpStrCat(name, "_volume"),
 		"the volume of this sound chip", 75, 0, 100);
 	info.balanceSetting = std::make_unique<IntegerSetting>(
-		commandController, name + "_balance",
+		commandController, tmpStrCat(name, "_balance"),
 		"the balance of this sound chip", balance, -100, 100);
 
 	info.volumeSetting->attach(*this);
 	info.balanceSetting->attach(*this);
 
-	for (unsigned i = 0; i < numChannels; ++i) {
-		SoundDeviceInfo::ChannelSettings channelSettings;
-		string ch_name = strCat(name, "_ch", i + 1);
+	for (auto&& [i, channelSettings] : enumerate(info.channelSettings)) {
+		auto ch_name = tmpStrCat(name, "_ch", i + 1);
 
-		channelSettings.recordSetting = std::make_unique<StringSetting>(
-			commandController, ch_name + "_record",
+		channelSettings.record = std::make_unique<StringSetting>(
+			commandController, tmpStrCat(ch_name, "_record"),
 			"filename to record this channel to",
-			string_view{}, Setting::DONT_SAVE);
-		channelSettings.recordSetting->attach(*this);
+			std::string_view{}, Setting::DONT_SAVE);
+		channelSettings.record->attach(*this);
 
-		channelSettings.muteSetting = std::make_unique<BooleanSetting>(
-			commandController, ch_name + "_mute",
+		channelSettings.mute = std::make_unique<BooleanSetting>(
+			commandController, tmpStrCat(ch_name, "_mute"),
 			"sets mute-status of individual sound channels",
 			false, Setting::DONT_SAVE);
-		channelSettings.muteSetting->attach(*this);
-
-		info.channelSettings.push_back(std::move(channelSettings));
+		channelSettings.mute->attach(*this);
 	}
 
-	device.setOutputRate(getSampleRate());
-	infos.push_back(std::move(info));
-	updateVolumeParams(infos.back());
+	device.setOutputRate(getSampleRate(), speedManager.getSpeed());
+	auto& i = infos.emplace_back(std::move(info));
+	updateVolumeParams(i);
 
-	commandController.getCliComm().update(CliComm::SOUNDDEVICE, device.getName(), "add");
+	commandController.getCliComm().update(CliComm::SOUND_DEVICE, device.getName(), "add");
 }
 
 void MSXMixer::unregisterSound(SoundDevice& device)
 {
-	auto it = rfind_if_unguarded(infos,
-		[&](const SoundDeviceInfo& i) { return i.device == &device; });
+	auto it = rfind_unguarded(infos, &device, &SoundDeviceInfo::device);
 	it->volumeSetting->detach(*this);
 	it->balanceSetting->detach(*this);
 	for (auto& s : it->channelSettings) {
-		s.recordSetting->detach(*this);
-		s.muteSetting->detach(*this);
+		s.record->detach(*this);
+		s.mute->detach(*this);
 	}
 	move_pop_back(infos, it);
-	commandController.getCliComm().update(CliComm::SOUNDDEVICE, device.getName(), "remove");
+	commandController.getCliComm().update(CliComm::SOUND_DEVICE, device.getName(), "remove");
 }
 
 void MSXMixer::setSynchronousMode(bool synchronous)
@@ -153,33 +155,25 @@ void MSXMixer::setSynchronousMode(bool synchronous)
 
 double MSXMixer::getEffectiveSpeed() const
 {
-	return synchronousCounter
-	     ? 1.0
-	     : speedSetting.getInt() / 100.0;
+	return synchronousCounter ? 1.0 : speedManager.getSpeed();
 }
 
 void MSXMixer::updateStream(EmuTime::param time)
 {
-	union {
-		int16_t mixBuffer[8192 * 2];
-		int32_t dummy1; // make sure mixBuffer is also 32-bit aligned
-#ifdef __SSE2__
-		__m128i dummy2; // and optionally also 128-bit
-#endif
-	};
-
 	unsigned count = prevTime.getTicksTill(time);
 	assert(count <= 8192);
+	ALIGNAS_SSE std::array<StereoFloat, 8192> mixBuffer_;
+	auto mixBuffer = subspan(mixBuffer_, 0, count);
 
 	// call generate() even if count==0 and even if muted
-	generate(mixBuffer, time, count);
+	generate(mixBuffer, time);
 
 	if (!muteCount && fragmentSize) {
-		mixer.uploadBuffer(*this, mixBuffer, count);
+		mixer.uploadBuffer(*this, mixBuffer);
 	}
 
 	if (recorder) {
-		recorder->addWave(count, mixBuffer);
+		recorder->addWave(mixBuffer);
 	}
 
 	prevTime += count;
@@ -193,13 +187,13 @@ void MSXMixer::updateStream(EmuTime::param time)
 // we skip the accumulation step.
 
 // buf[0:n] *= f
-static inline void mul(int32_t* buf, int n, int f)
+static inline void mul(float* buf, size_t n, float f)
 {
 	// C++ version, unrolled 4x,
 	//   this allows gcc/clang to do much better auto-vectorization
 	// Note that this can process upto 3 samples too many, but that's OK.
 	assume_SSE_aligned(buf);
-	int i = 0;
+	size_t i = 0;
 	do {
 		buf[i + 0] *= f;
 		buf[i + 1] *= f;
@@ -208,15 +202,25 @@ static inline void mul(int32_t* buf, int n, int f)
 		i += 4;
 	} while (i < n);
 }
+static inline void mul(std::span<float> buf, float f)
+{
+	assert(!buf.empty());
+	mul(buf.data(), buf.size(), f);
+}
+static inline void mul(std::span<StereoFloat> buf, float f)
+{
+	assert(!buf.empty());
+	mul(&buf.data()->left, 2 * buf.size(), f);
+}
 
 // acc[0:n] += mul[0:n] * f
 static inline void mulAcc(
-	int32_t* __restrict acc, const int32_t* __restrict mul, int n, int f)
+	float* __restrict acc, const float* __restrict mul, size_t n, float f)
 {
 	// C++ version, unrolled 4x, see comments above.
 	assume_SSE_aligned(acc);
 	assume_SSE_aligned(mul);
-	int i = 0;
+	size_t i = 0;
 	do {
 		acc[i + 0] += mul[i + 0] * f;
 		acc[i + 1] += mul[i + 1] * f;
@@ -225,12 +229,24 @@ static inline void mulAcc(
 		i += 4;
 	} while (i < n);
 }
+static inline void mulAcc(std::span<float> acc, std::span<const float> mul, float f)
+{
+	assert(!acc.empty());
+	assert(acc.size() == mul.size());
+	mulAcc(acc.data(), mul.data(), acc.size(), f);
+}
+static inline void mulAcc(std::span<StereoFloat> acc, std::span<const StereoFloat> mul, float f)
+{
+	assert(!acc.empty());
+	assert(acc.size() == mul.size());
+	mulAcc(&acc.data()->left, &mul.data()->left, 2 * acc.size(), f);
+}
 
 // buf[0:2n+0:2] = buf[0:n] * l
 // buf[1:2n+1:2] = buf[0:n] * r
-static inline void mulExpand(int32_t* buf, int n, int l, int r)
+static inline void mulExpand(float* buf, size_t n, float l, float r)
 {
-	int i = n;
+	size_t i = n;
 	do {
 		--i; // back-to-front
 		auto t = buf[i];
@@ -238,46 +254,60 @@ static inline void mulExpand(int32_t* buf, int n, int l, int r)
 		buf[2 * i + 1] = r * t;
 	} while (i != 0);
 }
+static inline void mulExpand(std::span<StereoFloat> buf, float l, float r)
+{
+	mulExpand(&buf.data()->left, buf.size(), l, r);
+}
 
 // acc[0:2n+0:2] += mul[0:n] * l
 // acc[1:2n+1:2] += mul[0:n] * r
 static inline void mulExpandAcc(
-	int32_t* __restrict acc, const int32_t* __restrict mul, int n,
-	int l, int r)
+	float* __restrict acc, const float* __restrict mul, size_t n,
+	float l, float r)
 {
-	int i = 0;
+	size_t i = 0;
 	do {
 		auto t = mul[i];
 		acc[2 * i + 0] += l * t;
 		acc[2 * i + 1] += r * t;
 	} while (++i < n);
 }
+static inline void mulExpandAcc(
+	std::span<StereoFloat> acc, std::span<const float> mul, float l, float r)
+{
+	assert(!acc.empty());
+	assert(acc.size() == mul.size());
+	mulExpandAcc(&acc.data()->left, mul.data(), acc.size(), l, r);
+}
 
 // buf[0:2n+0:2] = buf[0:2n+0:2] * l1 + buf[1:2n+1:2] * l2
 // buf[1:2n+1:2] = buf[0:2n+0:2] * r1 + buf[1:2n+1:2] * r2
-static inline void mulMix2(int32_t* buf, int n, int l1, int l2, int r1, int r2)
+static inline void mulMix2(std::span<StereoFloat> buf, float l1, float l2, float r1, float r2)
 {
-	int i = 0;
-	do {
-		auto t1 = buf[2 * i + 0];
-		auto t2 = buf[2 * i + 1];
-		buf[2 * i + 0] = l1 * t1 + l2 * t2;
-		buf[2 * i + 1] = r1 * t1 + r2 * t2;
-	} while (++i < n);
+	assert(!buf.empty());
+	for (auto& s : buf) {
+		auto t1 = s.left;
+		auto t2 = s.right;
+		s.left  = l1 * t1 + l2 * t2;
+		s.right = r1 * t1 + r2 * t2;
+	}
 }
 
 // acc[0:2n+0:2] += mul[0:2n+0:2] * l1 + mul[1:2n+1:2] * l2
 // acc[1:2n+1:2] += mul[0:2n+0:2] * r1 + mul[1:2n+1:2] * r2
 static inline void mulMix2Acc(
-	int32_t* __restrict acc, const int32_t* __restrict mul, int n,
-	int l1, int l2, int r1, int r2)
+	std::span<StereoFloat> acc, std::span<const StereoFloat> mul,
+	float l1, float l2, float r1, float r2)
 {
-	int i = 0;
+	assert(!acc.empty());
+	assert(acc.size() == mul.size());
+	auto n = acc.size();
+	size_t i = 0;
 	do {
-		auto t1 = mul[2 * i + 0];
-		auto t2 = mul[2 * i + 1];
-		acc[2 * i + 0] += l1 * t1 + l2 * t2;
-		acc[2 * i + 1] += r1 * t1 + r2 * t2;
+		auto t1 = mul[i].left;
+		auto t2 = mul[i].right;
+		acc[i].left  += l1 * t1 + l2 * t2;
+		acc[i].right += r1 * t1 + r2 * t2;
 	} while (++i < n);
 }
 
@@ -292,121 +322,124 @@ static inline void mulMix2Acc(
 //     t0 = t1               requires only one state variable
 //    see: http://en.wikipedia.org/wiki/Digital_filter#Direct_Form_I
 //  with:
-//     R = 1 - (2*pi * cut-off-frequency / samplerate)
+//     R = 1 - (2*pi * cut-off-frequency / sample-rate)
 //  we take R = 511/512
-//   44100Hz --> cutt-off freq = 14Hz
+//   44100Hz --> cutoff freq = 14Hz
 //   22050Hz                     7Hz
-// Note: the input still needs to be divided by 512 (because of balance-
-//       multiplication), can be done together with the above division.
+static constexpr auto R = 511.0f / 512.0f;
 
 // No new input, previous output was (non-zero) mono.
-static inline int32_t filterMonoNull(int32_t t0, int16_t* out, int n)
+static inline float filterMonoNull(float t0, std::span<StereoFloat> out)
 {
-	assert(n > 0);
-	int i = 0;
-	do {
-		int32_t t1 = (511 * int64_t(t0)) >> 9;
-		auto s = Math::clipIntToShort(t1 - t0);
+	assert(!out.empty());
+	for (auto& o : out) {
+		auto t1 = R * t0;
+		auto s = t1 - t0;
+		o.left = s;
+		o.right = s;
 		t0 = t1;
-		out[2 * i + 0] = s;
-		out[2 * i + 1] = s;
-	} while (++i < n);
+	}
 	return t0;
 }
 
 // No new input, previous output was (non-zero) stereo.
-static inline std::tuple<int32_t, int32_t> filterStereoNull(
-	int32_t tl0, int32_t tr0, int16_t* out, int n)
+static inline std::tuple<float, float> filterStereoNull(
+	float tl0, float tr0, std::span<StereoFloat> out)
 {
-	assert(n > 0);
-	int i = 0;
-	do {
-		int32_t tl1 = (511 * int64_t(tl0)) >> 9;
-		int32_t tr1 = (511 * int64_t(tr0)) >> 9;
-		out[2 * i + 0] = Math::clipIntToShort(tl1 - tl0);
-		out[2 * i + 1] = Math::clipIntToShort(tr1 - tr0);
+	assert(!out.empty());
+	for (auto& o : out) {
+		float tl1 = R * tl0;
+		float tr1 = R * tr0;
+		o.left  = tl1 - tl0;
+		o.right = tr1 - tr0;
 		tl0 = tl1;
 		tr0 = tr1;
-	} while (++i < n);
-	return std::make_tuple(tl0, tr0);
+	}
+	return {tl0, tr0};
 }
 
 // New input is mono, previous output was also mono.
-static inline int32_t filterMonoMono(int32_t t0, void* buf, int n)
+static inline float filterMonoMono(
+	float t0, std::span<const float> in, std::span<StereoFloat> out)
 {
-	assert(n > 0);
-	const auto* in  = static_cast<const int32_t*>(buf);
-	      auto* out = static_cast<      int16_t*>(buf);
-	int i = 0;
-	do {
-		int32_t t1 = (511 * int64_t(t0) + in[i]) >> 9;
-		auto s = Math::clipIntToShort(t1 - t0);
+	assert(in.size() == out.size());
+	assert(!out.empty());
+	for (auto [i, o] : view::zip_equal(in, out)) {
+		auto t1 = R * t0 + i;
+		auto s = t1 - t0;
+		o.left  = s;
+		o.right = s;
 		t0 = t1;
-		out[2 * i + 0] = s;
-		out[2 * i + 1] = s;
-	} while (++i < n);
+	}
 	return t0;
 }
 
 // New input is mono, previous output was stereo
-static inline std::tuple<int32_t, int32_t> filterStereoMono(
-	int32_t tl0, int32_t tr0, void* buf, int n)
+static inline std::tuple<float, float>
+filterStereoMono(float tl0, float tr0,
+                 std::span<const float> in,
+                 std::span<StereoFloat> out)
 {
-	assert(n > 0);
-	const auto* in  = static_cast<const int32_t*>(buf);
-	      auto* out = static_cast<      int16_t*>(buf);
-	int i = 0;
-	do {
-		auto x = in[i];
-		int32_t tl1 = (511 * int64_t(tl0) + x) >> 9;
-		int32_t tr1 = (511 * int64_t(tr0) + x) >> 9;
-		out[2 * i + 0] = Math::clipIntToShort(tl1 - tl0);
-		out[2 * i + 1] = Math::clipIntToShort(tr1 - tr0);
+	assert(in.size() == out.size());
+	assert(!out.empty());
+	for (auto [i, o] : view::zip_equal(in, out)) {
+		auto tl1 = R * tl0 + i;
+		auto tr1 = R * tr0 + i;
+		o.left  = tl1 - tl0;
+		o.right = tr1 - tr0;
 		tl0 = tl1;
 		tr0 = tr1;
-	} while (++i < n);
-	return std::make_tuple(tl0, tr0);
+	}
+	return {tl0, tr0};
 }
 
 // New input is stereo, (previous output either mono/stereo)
-static inline std::tuple<int32_t, int32_t> filterStereoStereo(
-	int32_t tl0, int32_t tr0, const int32_t* in, int16_t* out, int n)
+static inline std::tuple<float, float>
+filterStereoStereo(float tl0, float tr0,
+                   std::span<const StereoFloat> in,
+                   std::span<StereoFloat> out)
 {
-	assert(n > 0);
-	int i = 0;
-	do {
-		int32_t tl1 = (511 * int64_t(tl0) + in[2 * i + 0]) >> 9;
-		int32_t tr1 = (511 * int64_t(tr0) + in[2 * i + 1]) >> 9;
-		out[2 * i + 0] = Math::clipIntToShort(tl1 - tl0);
-		out[2 * i + 1] = Math::clipIntToShort(tr1 - tr0);
+	assert(in.size() == out.size());
+	assert(!out.empty());
+	for (auto [i, o] : view::zip_equal(in, out)) {
+		auto tl1 = R * tl0 + i.left;
+		auto tr1 = R * tr0 + i.right;
+		o.left  = tl1 - tl0;
+		o.right = tr1 - tr0;
 		tl0 = tl1;
 		tr0 = tr1;
-	} while (++i < n);
-	return std::make_tuple(tl0, tr0);
+	}
+	return {tl0, tr0};
 }
 
 // We have both mono and stereo input (and produce stereo output)
-static inline std::tuple<int32_t, int32_t> filterBothStereo(
-	int32_t tl0, int32_t tr0, const int32_t* inS, void* buf, int n)
+static inline std::tuple<float, float>
+filterBothStereo(float tl0, float tr0,
+                 std::span<const float> inM,
+                 std::span<const StereoFloat> inS,
+                 std::span<StereoFloat> out)
 {
-	assert(n > 0);
-	const auto* inM = static_cast<const int32_t*>(buf);
-	      auto* out = static_cast<      int16_t*>(buf);
-	int i = 0;
-	do {
-		auto m = inM[i];
-		int32_t tl1 = (511 * int64_t(tl0) + inS[2 * i + 0] + m) >> 9;
-		int32_t tr1 = (511 * int64_t(tr0) + inS[2 * i + 1] + m) >> 9;
-		out[2 * i + 0] = Math::clipIntToShort(tl1 - tl0);
-		out[2 * i + 1] = Math::clipIntToShort(tr1 - tr0);
+	assert(inM.size() == out.size());
+	assert(inS.size() == out.size());
+	assert(!out.empty());
+	for (auto [im, is, o] : view::zip_equal(inM, inS, out)) {
+		auto tl1 = R * tl0 + is.left  + im;
+		auto tr1 = R * tr0 + is.right + im;
+		o.left  = tl1 - tl0;
+		o.right = tr1 - tr0;
 		tl0 = tl1;
 		tr0 = tr1;
-	} while (++i < n);
-	return std::make_tuple(tl0, tr0);
+	}
+	return {tl0, tr0};
 }
 
+static bool approxEqual(float x, float y)
+{
+	constexpr float threshold = 1.0f / 32768;
+	return std::abs(x - y) < threshold;
+}
 
-void MSXMixer::generate(int16_t* output, EmuTime::param time, unsigned samples)
+void MSXMixer::generate(std::span<StereoFloat> output, EmuTime::param time)
 {
 	// The code below is specialized for a lot of cases (before this
 	// routine was _much_ shorter). This is done because this routine
@@ -417,80 +450,111 @@ void MSXMixer::generate(int16_t* output, EmuTime::param time, unsigned samples)
 
 	// When samples==0, call updateBuffer() but skip all further processing
 	// (handling this as a special case allows to simplify the code below).
+	auto samples = output.size(); // per channel
 	if (samples == 0) {
-		SSE_ALIGNED(int32_t dummyBuf[4]);
+		ALIGNAS_SSE std::array<float, 4> dummyBuf;
 		for (auto& info : infos) {
-			info.device->updateBuffer(0, dummyBuf, time);
+			bool ignore = info.device->updateBuffer(0, dummyBuf.data(), time);
+			(void)ignore;
 		}
 		return;
 	}
 
 	// +3 to allow processing samples in groups of 4 (and upto 3 samples
 	// more than requested).
-	VLA_SSE_ALIGNED(int32_t, stereoBuf, 2 * samples + 3);
-	VLA_SSE_ALIGNED(int32_t, tmpBuf,    2 * samples + 3);
-	// reuse 'output' as temporary storage
-	auto* monoBuf = reinterpret_cast<int32_t*>(output);
+	VLA_SSE_ALIGNED(float,       monoBufExtra,   samples + 3);
+	VLA_SSE_ALIGNED(StereoFloat, stereoBufExtra, samples + 3);
+	VLA_SSE_ALIGNED(StereoFloat, tmpBufExtra,    samples + 3);
+	auto* monoBufPtr   = monoBufExtra.data();
+	auto* stereoBufPtr = &stereoBufExtra.data()->left;
+	auto* tmpBufPtr    = &tmpBufExtra.data()->left; // can be used either for mono or stereo data
+	auto monoBuf      = monoBufExtra  .subspan(0, samples);
+	auto stereoBuf    = stereoBufExtra.subspan(0, samples);
+	auto tmpBufStereo = tmpBufExtra   .subspan(0, samples); // StereoFloat
+	auto tmpBufMono   = std::span{tmpBufPtr, samples};      // float
 
-	static const unsigned HAS_MONO_FLAG = 1;
-	static const unsigned HAS_STEREO_FLAG = 2;
+	constexpr unsigned HAS_MONO_FLAG = 1;
+	constexpr unsigned HAS_STEREO_FLAG = 2;
 	unsigned usedBuffers = 0;
 
 	// FIXME: The Infos should be ordered such that all the mono
 	// devices are handled first
 	for (auto& info : infos) {
 		SoundDevice& device = *info.device;
-		int l1 = info.left1;
-		int r1 = info.right1;
+		auto l1 = info.left1;
+		auto r1 = info.right1;
 		if (!device.isStereo()) {
+			// device generates mono output
 			if (l1 == r1) {
+				// no re-panning (means mono remains mono)
 				if (!(usedBuffers & HAS_MONO_FLAG)) {
-					if (device.updateBuffer(samples, monoBuf, time)) {
+					// generate in 'monoBuf' (because it was still empty)
+					// then multiply in-place
+					if (device.updateBuffer(samples, monoBufPtr, time)) {
 						usedBuffers |= HAS_MONO_FLAG;
-						mul(monoBuf, samples, l1);
+						mul(monoBuf, l1);
 					}
 				} else {
-					if (device.updateBuffer(samples, tmpBuf, time)) {
-						mulAcc(monoBuf, tmpBuf, samples, l1);
+					// generate in 'tmpBuf' (as mono data)
+					// then multiply-accumulate into 'monoBuf'
+					if (device.updateBuffer(samples, tmpBufPtr, time)) {
+						mulAcc(monoBuf, tmpBufMono, l1);
 					}
 				}
 			} else {
+				// re-panning -> mono expands to different left and right result
 				if (!(usedBuffers & HAS_STEREO_FLAG)) {
-					if (device.updateBuffer(samples, stereoBuf, time)) {
+					// 'stereoBuf' (which is still empty) is first filled with mono-data,
+					// then in-place expanded to stereo-data
+					if (device.updateBuffer(samples, stereoBufPtr, time)) {
 						usedBuffers |= HAS_STEREO_FLAG;
-						mulExpand(stereoBuf, samples, l1, r1);
+						mulExpand(stereoBuf, l1, r1);
 					}
 				} else {
-					if (device.updateBuffer(samples, tmpBuf, time)) {
-						mulExpandAcc(stereoBuf, tmpBuf, samples, l1, r1);
+					// 'tmpBuf' is first filled with mono-data,
+					// then expanded to stereo and mul-acc into 'stereoBuf'
+					if (device.updateBuffer(samples, tmpBufPtr, time)) {
+						mulExpandAcc(stereoBuf, tmpBufMono, l1, r1);
 					}
 				}
 			}
 		} else {
-			int l2 = info.left2;
-			int r2 = info.right2;
+			// device generates stereo output
+			auto l2 = info.left2;
+			auto r2 = info.right2;
 			if (l1 == r2) {
-				assert(l2 == 0);
-				assert(r1 == 0);
+				// no re-panning
+				assert(l2 == 0.0f);
+				assert(r1 == 0.0f);
 				if (!(usedBuffers & HAS_STEREO_FLAG)) {
-					if (device.updateBuffer(samples, stereoBuf, time)) {
+					// generate in 'stereoBuf' (because it was still empty)
+					// then multiply in-place
+					if (device.updateBuffer(samples, stereoBufPtr, time)) {
 						usedBuffers |= HAS_STEREO_FLAG;
-						mul(stereoBuf, 2 * samples, l1);
+						mul(stereoBuf, l1);
 					}
 				} else {
-					if (device.updateBuffer(samples, tmpBuf, time)) {
-						mulAcc(stereoBuf, tmpBuf, 2 * samples, l1);
+					// generate in 'tmpBuf' (as stereo data)
+					// then multiply-accumulate into 'stereoBuf'
+					if (device.updateBuffer(samples, tmpBufPtr, time)) {
+						mulAcc(stereoBuf, tmpBufStereo, l1);
 					}
 				}
 			} else {
+				// re-panning, this means each of the individual left or right generated
+				// channels gets distributed over both the left and right output channels
 				if (!(usedBuffers & HAS_STEREO_FLAG)) {
-					if (device.updateBuffer(samples, stereoBuf, time)) {
+					// generate in 'stereoBuf' (because it was still empty)
+					// then mix in-place
+					if (device.updateBuffer(samples, stereoBufPtr, time)) {
 						usedBuffers |= HAS_STEREO_FLAG;
-						mulMix2(stereoBuf, samples, l1, l2, r1, r2);
+						mulMix2(stereoBuf, l1, l2, r1, r2);
 					}
 				} else {
-					if (device.updateBuffer(samples, tmpBuf, time)) {
-						mulMix2Acc(stereoBuf, tmpBuf, samples, l1, l2, r1, r2);
+					// 'tmpBuf' is first filled with stereo-data,
+					// then mixed into stereoBuf
+					if (device.updateBuffer(samples, tmpBufPtr, time)) {
+						mulMix2Acc(stereoBuf, tmpBufStereo, l1, l2, r1, r2);
 					}
 				}
 			}
@@ -500,50 +564,48 @@ void MSXMixer::generate(int16_t* output, EmuTime::param time, unsigned samples)
 	// DC removal filter
 	switch (usedBuffers) {
 	case 0: // no new input
-		if (tl0 == tr0) {
-			if ((-511 <= tl0) && (tl0 <= 0)) {
+		if (approxEqual(tl0, tr0)) {
+			if (approxEqual(tl0, 0.0f)) {
 				// Output was zero, new input is zero,
 				// after DC-filter output will still be zero.
-				memset(output, 0, 2 * samples * sizeof(int16_t));
-				tl0 = tr0 = 0;
+				ranges::fill(output, StereoFloat{});
+				tl0 = tr0 = 0.0f;
 			} else {
 				// Output was not zero, but it was the same left and right.
-				tl0 = filterMonoNull(tl0, output, samples);
+				tl0 = filterMonoNull(tl0, output);
 				tr0 = tl0;
 			}
 		} else {
-			std::tie(tl0, tr0) = filterStereoNull(tl0, tr0, output, samples);
+			std::tie(tl0, tr0) = filterStereoNull(tl0, tr0, output);
 		}
 		break;
 
 	case HAS_MONO_FLAG: // only mono
-		assert(static_cast<void*>(monoBuf) == static_cast<void*>(output));
-		if (tl0 == tr0) {
+		if (approxEqual(tl0, tr0)) {
 			// previous output was also mono
-			tl0 = filterMonoMono(tl0, output, samples);
+			tl0 = filterMonoMono(tl0, monoBuf, output);
 			tr0 = tl0;
 		} else {
 			// previous output was stereo, rarely triggers but needed for correctness
-			std::tie(tl0, tr0) = filterStereoMono(tl0, tr0, output, samples);
+			std::tie(tl0, tr0) = filterStereoMono(tl0, tr0, monoBuf, output);
 		}
 		break;
 
 	case HAS_STEREO_FLAG: // only stereo
-		std::tie(tl0, tr0) = filterStereoStereo(tl0, tr0, stereoBuf, output, samples);
+		std::tie(tl0, tr0) = filterStereoStereo(tl0, tr0, stereoBuf, output);
 		break;
 
 	default: // mono + stereo
-		assert(static_cast<void*>(monoBuf) == static_cast<void*>(output));
-		std::tie(tl0, tr0) = filterBothStereo(tl0, tr0, stereoBuf, output, samples);
+		std::tie(tl0, tr0) = filterBothStereo(tl0, tr0, monoBuf, stereoBuf, output);
 	}
 }
 
 bool MSXMixer::needStereoRecording() const
 {
-	return any_of(begin(infos), end(infos),
-		[](const SoundDeviceInfo& info) {
-			return info.device->isStereo() ||
-			       info.balanceSetting->getInt() != 0; });
+	return ranges::any_of(infos, [](auto& info) {
+		return info.device->isStereo() ||
+		       info.balanceSetting->getInt() != 0;
+	});
 }
 
 void MSXMixer::mute()
@@ -558,7 +620,7 @@ void MSXMixer::unmute()
 {
 	--muteCount;
 	if (muteCount == 0) {
-		tl0 = tr0 = 0;
+		tl0 = tr0 = 0.0f;
 		mixer.registerMixer(*this);
 	}
 }
@@ -566,7 +628,7 @@ void MSXMixer::unmute()
 void MSXMixer::reInit()
 {
 	prevTime.reset(getCurrentTime());
-	prevTime.setFreq(hostSampleRate / getEffectiveSpeed());
+	prevTime.setFreq(narrow_cast<unsigned>(hostSampleRate / getEffectiveSpeed()));
 	reschedule();
 }
 void MSXMixer::reschedule()
@@ -590,7 +652,7 @@ void MSXMixer::setMixerParams(unsigned newFragmentSize, unsigned newSampleRate)
 	reInit(); // must come before call to setOutputRate()
 
 	for (auto& info : infos) {
-		info.device->setOutputRate(newSampleRate);
+		info.device->setOutputRate(newSampleRate, speedManager.getSpeed());
 	}
 }
 
@@ -602,26 +664,15 @@ void MSXMixer::setRecorder(AviRecorder* newRecorder)
 	recorder = newRecorder;
 }
 
-void MSXMixer::update(const Setting& setting)
+void MSXMixer::update(const Setting& setting) noexcept
 {
 	if (&setting == &masterVolume) {
 		updateMasterVolume();
-	} else if (&setting == &speedSetting) {
-		if (synchronousCounter == 0) {
-			setMixerParams(fragmentSize, hostSampleRate);
-		} else {
-			// Avoid calling reInit() while recording because
-			// each call causes a small hiccup in the sound (and
-			// while recording this call anyway has no effect).
-			// This was noticable while sliding the speed slider
-			// in catapult (becuase this causes many changes in
-			// the speed setting).
-		}
 	} else if (dynamic_cast<const IntegerSetting*>(&setting)) {
 		auto it = find_if_unguarded(infos,
 			[&](const SoundDeviceInfo& i) {
-				return (i.volumeSetting .get() == &setting) ||
-				       (i.balanceSetting.get() == &setting); });
+				return &setting == one_of(i.volumeSetting .get(),
+				                          i.balanceSetting.get()); });
 		updateVolumeParams(*it);
 	} else if (dynamic_cast<const StringSetting*>(&setting)) {
 		changeRecordSetting(setting);
@@ -635,15 +686,14 @@ void MSXMixer::update(const Setting& setting)
 void MSXMixer::changeRecordSetting(const Setting& setting)
 {
 	for (auto& info : infos) {
-		unsigned channel = 0;
-		for (auto& s : info.channelSettings) {
-			if (s.recordSetting.get() == &setting) {
+		for (auto&& [channel, settings] : enumerate(info.channelSettings)) {
+			if (settings.record.get() == &setting) {
 				info.device->recordChannel(
-					channel,
-					Filename(s.recordSetting->getString().str()));
+					unsigned(channel),
+					Filename(FileOperations::expandTilde(std::string(
+						 settings.record->getString()))));
 				return;
 			}
-			++channel;
 		}
 	}
 	UNREACHABLE;
@@ -652,64 +702,79 @@ void MSXMixer::changeRecordSetting(const Setting& setting)
 void MSXMixer::changeMuteSetting(const Setting& setting)
 {
 	for (auto& info : infos) {
-		unsigned channel = 0;
-		for (auto& s : info.channelSettings) {
-			if (s.muteSetting.get() == &setting) {
+		for (auto&& [channel, settings] : enumerate(info.channelSettings)) {
+			if (settings.mute.get() == &setting) {
 				info.device->muteChannel(
-					channel, s.muteSetting->getBoolean());
+					unsigned(channel), settings.mute->getBoolean());
 				return;
 			}
-			++channel;
 		}
 	}
 	UNREACHABLE;
 }
 
-void MSXMixer::update(const ThrottleManager& /*throttleManager*/)
+void MSXMixer::update(const SpeedManager& /*speedManager*/) noexcept
+{
+	if (synchronousCounter == 0) {
+		setMixerParams(fragmentSize, hostSampleRate);
+	} else {
+		// Avoid calling reInit() while recording because
+		// each call causes a small hiccup in the sound (and
+		// while recording this call anyway has no effect).
+		// This was noticeable while sliding the speed slider
+		// in catapult (because this causes many changes in
+		// the speed setting).
+	}
+}
+
+void MSXMixer::update(const ThrottleManager& /*throttleManager*/) noexcept
 {
 	//reInit();
 	// TODO Should this be removed?
 }
 
-void MSXMixer::updateVolumeParams(SoundDeviceInfo& info)
+void MSXMixer::updateVolumeParams(SoundDeviceInfo& info) const
 {
 	int mVolume = masterVolume.getInt();
 	int dVolume = info.volumeSetting->getInt();
-	float volume = info.defaultVolume * mVolume * dVolume / (100.0f * 100.0f);
+	float volume = info.defaultVolume * narrow<float>(mVolume) * narrow<float>(dVolume) * (1.0f / (100.0f * 100.0f));
 	int balance = info.balanceSetting->getInt();
-	float l1, r1, l2, r2;
-	if (info.device->isStereo()) {
-		if (balance < 0) {
-			float b = (balance + 100.0f) / 100.0f;
-			l1 = volume;
-			r1 = 0.0f;
-			l2 = volume * sqrtf(std::max(0.0f, 1.0f - b));
-			r2 = volume * sqrtf(std::max(0.0f,        b));
+	auto [l1, r1, l2, r2] = [&] {
+		if (info.device->isStereo()) {
+			if (balance < 0) {
+				float b = (narrow<float>(balance) + 100.0f) * (1.0f / 100.0f);
+				return std::tuple{
+					/*l1 =*/ volume,
+					/*r1 =*/ 0.0f,
+					/*l2 =*/ volume * sqrtf(std::max(0.0f, 1.0f - b)),
+					/*r2 =*/ volume * sqrtf(std::max(0.0f,        b))
+				};
+			} else {
+				float b = narrow<float>(balance) * (1.0f / 100.0f);
+				return std::tuple{
+					/*l1 =*/ volume * sqrtf(std::max(0.0f, 1.0f - b)),
+					/*r1 =*/ volume * sqrtf(std::max(0.0f,        b)),
+					/*l2 =*/ 0.0f,
+					/*r2 =*/ volume
+				};
+			}
 		} else {
-			float b = balance / 100.0f;
-			l1 = volume * sqrtf(std::max(0.0f, 1.0f - b));
-			r1 = volume * sqrtf(std::max(0.0f,        b));
-			l2 = 0.0f;
-			r2 = volume;
+			// make sure that in case of rounding errors
+			// we don't take sqrt() of negative numbers
+			float b = (narrow<float>(balance) + 100.0f) * (1.0f / 200.0f);
+			return std::tuple{
+				/*l1 =*/ volume * sqrtf(std::max(0.0f, 1.0f - b)),
+				/*r1 =*/ volume * sqrtf(std::max(0.0f,        b)),
+				/*l2 =*/ 0.0f, // dummy
+				/*r2 =*/ 0.0f  // dummy
+			};
 		}
-	} else {
-		// make sure that in case of rounding errors
-		// we don't take sqrt() of negative numbers
-		float b = (balance + 100.0f) / 200.0f;
-		l1 = volume * sqrtf(std::max(0.0f, 1.0f - b));
-		r1 = volume * sqrtf(std::max(0.0f,        b));
-		l2 = r2 = 0.0f; // dummy
-	}
-	// 512 (9 bits) because in the DC filter we also have a factor 512, and
-	// using the same allows to fold both (later) divisions into one.
-	static_assert((1 << AMP_BITS) == 512, "");
-	auto amp = info.device->getAmplificationFactor();
-	auto ampL = amp.first .getRawValue();
-	auto ampR = amp.second.getRawValue();
-	info.left1  = lrintf(l1 * ampL);
-	info.right1 = lrintf(r1 * ampR);
-	info.left2  = lrintf(l2 * ampL);
-	info.right2 = lrintf(r2 * ampR);
+	}();
+	auto [ampL, ampR] = info.device->getAmplificationFactor();
+	info.left1  = l1 * ampL;
+	info.right1 = r1 * ampR;
+	info.left2  = l2 * ampL;
+	info.right2 = r2 * ampR;
 }
 
 void MSXMixer::updateMasterVolume()
@@ -721,8 +786,7 @@ void MSXMixer::updateMasterVolume()
 
 void MSXMixer::updateSoftwareVolume(SoundDevice& device)
 {
-	auto it = find_if_unguarded(infos,
-		[&](auto& i) { return i.device == &device; });
+	auto it = find_unguarded(infos, &device, &SoundDeviceInfo::device);
 	updateVolumeParams(*it);
 }
 
@@ -734,7 +798,7 @@ void MSXMixer::executeUntil(EmuTime::param time)
 	// This method gets called very regularly, typically 44100/512 = 86x
 	// per second (even if sound is muted and even with sound_driver=null).
 	// This rate is constant in real-time (compared to e.g. the VDP sync
-	// points that are constant in emutime). So we can use this to
+	// points that are constant in EmuTime). So we can use this to
 	// regularly exit from the main CPU emulation loop. Without this there
 	// were problems like described in 'bug#563 Console very slow when
 	// setting speed to low values like 1'.
@@ -744,12 +808,17 @@ void MSXMixer::executeUntil(EmuTime::param time)
 
 // Sound device info
 
-SoundDevice* MSXMixer::findDevice(string_view name) const
+const MSXMixer::SoundDeviceInfo* MSXMixer::findDeviceInfo(std::string_view name) const
 {
-	auto it = find_if(begin(infos), end(infos),
-		[&](const SoundDeviceInfo& i) {
-			return i.device->getName() == name; });
-	return (it != end(infos)) ? it->device : nullptr;
+	auto it = ranges::find(infos, name,
+		[](auto& i) { return i.device->getName(); });
+	return (it != end(infos)) ? std::to_address(it) : nullptr;
+}
+
+SoundDevice* MSXMixer::findDevice(std::string_view name) const
+{
+	auto* info = findDeviceInfo(name);
+	return info ? info->device : nullptr;
 }
 
 MSXMixer::SoundDeviceInfoTopic::SoundDeviceInfoTopic(
@@ -759,21 +828,21 @@ MSXMixer::SoundDeviceInfoTopic::SoundDeviceInfoTopic(
 }
 
 void MSXMixer::SoundDeviceInfoTopic::execute(
-	array_ref<TclObject> tokens, TclObject& result) const
+	std::span<const TclObject> tokens, TclObject& result) const
 {
 	auto& msxMixer = OUTER(MSXMixer, soundDeviceInfo);
 	switch (tokens.size()) {
 	case 2:
-		for (auto& info : msxMixer.infos) {
-			result.addListElement(info.device->getName());
-		}
+		result.addListElements(view::transform(
+			msxMixer.infos,
+			[](auto& info) { return info.device->getName(); }));
 		break;
 	case 3: {
 		SoundDevice* device = msxMixer.findDevice(tokens[2].getString());
 		if (!device) {
 			throw CommandException("Unknown sound device");
 		}
-		result.setString(device->getDescription());
+		result = device->getDescription();
 		break;
 	}
 	default:
@@ -781,20 +850,17 @@ void MSXMixer::SoundDeviceInfoTopic::execute(
 	}
 }
 
-string MSXMixer::SoundDeviceInfoTopic::help(const vector<string>& /*tokens*/) const
+std::string MSXMixer::SoundDeviceInfoTopic::help(std::span<const TclObject> /*tokens*/) const
 {
 	return "Shows a list of available sound devices.\n";
 }
 
-void MSXMixer::SoundDeviceInfoTopic::tabCompletion(vector<string>& tokens) const
+void MSXMixer::SoundDeviceInfoTopic::tabCompletion(std::vector<std::string>& tokens) const
 {
 	if (tokens.size() == 3) {
-		vector<string_view> devices;
-		auto& msxMixer = OUTER(MSXMixer, soundDeviceInfo);
-		for (auto& info : msxMixer.infos) {
-			devices.emplace_back(info.device->getName());
-		}
-		completeString(tokens, devices);
+		completeString(tokens, view::transform(
+			OUTER(MSXMixer, soundDeviceInfo).infos,
+			[](auto& info) -> std::string_view { return info.device->getName(); }));
 	}
 }
 

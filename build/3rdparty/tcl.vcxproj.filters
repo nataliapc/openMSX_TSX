@@ -11,12 +11,6 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_fast_s_mp_mul_digs.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_fast_s_mp_sqr.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_add.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -68,9 +62,6 @@
     <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_exch.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_expt_d.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_grow.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -87,12 +78,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_init_size.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_karatsuba_mul.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_karatsuba_sqr.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_lshd.c">
@@ -152,31 +137,10 @@
     <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_sub_d.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_to_unsigned_bin.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_to_unsigned_bin_n.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_toom_mul.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_toom_sqr.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_toradix_n.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_unsigned_bin_size.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_xor.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_zero.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_reverse.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_s_mp_add.c">
@@ -189,9 +153,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_s_mp_sub.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bncore.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\regcomp.c">
@@ -371,18 +332,6 @@
     <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclStubInit.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclStubLib.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclTest.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclTestObj.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclTestProcBodyObj.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclThread.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -393,9 +342,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclThreadStorage.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclThreadTest.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclTimer.c">
@@ -458,9 +404,6 @@
     <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\win\tclWinSock.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\win\tclWinTest.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\win\tclWinThrd.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -470,13 +413,94 @@
     <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclPosixStr.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_set_int.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_init_set_int.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_cnt_lsb.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclAssembly.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclCompCmdsGR.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclCompCmdsSZ.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclDisassemble.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclEnsemble.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclIORTrans.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclOO.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclOOBasic.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclOOCall.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclOODefineCmds.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclOOInfo.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclOOMethod.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclOOStubInit.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclOptimize.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\generic\tclZlib.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_expt_u32.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_mod_d.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_signed_rsh.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_to_radix.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_to_ubin.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_mp_ubin_size.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_s_mp_balance_mul.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_s_mp_karatsuba_mul.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_s_mp_karatsuba_sqr.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_s_mp_mul_digs_fast.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_s_mp_reverse.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_s_mp_sqr_fast.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_s_mp_toom_mul.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\bn_s_mp_toom_sqr.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -539,6 +563,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\tommath_superclass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\tommath_cutoffs.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(ThirdPartySrcDir)\$(LibNameTcl)\libtommath\tommath_private.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

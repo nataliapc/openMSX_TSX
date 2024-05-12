@@ -1,11 +1,14 @@
 #ifndef DIRASDSK_HH
 #define DIRASDSK_HH
 
-#include "SectorBasedDisk.hh"
 #include "DiskImageUtils.hh"
-#include "FileOperations.hh"
 #include "EmuTime.hh"
-#include <map>
+#include "FileOperations.hh"
+#include "SectorBasedDisk.hh"
+
+#include "hash_map.hh"
+
+#include <utility>
 
 namespace openmsx {
 
@@ -16,7 +19,7 @@ class DirAsDSK final : public SectorBasedDisk
 {
 public:
 	enum SyncMode { SYNC_READONLY, SYNC_FULL };
-	enum BootSectorType { BOOTSECTOR_DOS1, BOOTSECTOR_DOS2 };
+	enum BootSectorType { BOOT_SECTOR_DOS1, BOOT_SECTOR_DOS2 };
 
 public:
 	DirAsDSK(DiskChanger& diskChanger, CliComm& cliComm,
@@ -26,20 +29,26 @@ public:
 	// SectorBasedDisk
 	void readSectorImpl (size_t sector,       SectorBuffer& buf) override;
 	void writeSectorImpl(size_t sector, const SectorBuffer& buf) override;
-	bool isWriteProtectedImpl() const override;
+	[[nodiscard]] bool isWriteProtectedImpl() const override;
+	[[nodiscard]] bool hasChanged() const override;
 	void checkCaches() override;
 
 private:
 	struct DirIndex {
-		DirIndex() {}
+		DirIndex() = default;
 		DirIndex(unsigned sector_, unsigned idx_)
 			: sector(sector_), idx(idx_) {}
-		bool operator<(const DirIndex& rhs) const {
-			if (sector != rhs.sector) return sector < rhs.sector;
-			return idx < rhs.idx;
-		}
+		[[nodiscard]] constexpr bool operator==(const DirIndex&) const = default;
+
 		unsigned sector;
 		unsigned idx;
+	};
+	struct HashDirIndex {
+		auto operator()(const DirIndex& d) const {
+			std::hash<unsigned> subHasher;
+			return 31 * subHasher(d.sector)
+			          + subHasher(d.idx);
+		}
 	};
 	struct MapDir {
 		std::string hostName; // path relative to 'hostDir'
@@ -52,9 +61,9 @@ private:
 		                 // truncated.
 	};
 
-	SectorBuffer* fat();
-	SectorBuffer* fat2();
-	MSXDirEntry& msxDir(DirIndex dirIndex);
+	[[nodiscard]] std::span<SectorBuffer> fat();
+	[[nodiscard]] std::span<SectorBuffer> fat2();
+	[[nodiscard]] MSXDirEntry& msxDir(DirIndex dirIndex);
 	void writeFATSector (unsigned sector, const SectorBuffer& buf);
 	void writeDIRSector (unsigned sector, DirIndex dirDirIndex,
 	                     const SectorBuffer& buf);
@@ -68,35 +77,35 @@ private:
 	void freeFATChain(unsigned cluster);
 	void addNewHostFiles(const std::string& hostSubDir, unsigned msxDirSector);
 	void addNewDirectory(const std::string& hostSubDir, const std::string& hostName,
-                             unsigned msxDirSector, FileOperations::Stat& fst);
+	                     unsigned msxDirSector, const FileOperations::Stat& fst);
 	void addNewHostFile(const std::string& hostSubDir, const std::string& hostName,
-	                    unsigned msxDirSector, FileOperations::Stat& fst);
-	DirIndex fillMSXDirEntry(
+	                    unsigned msxDirSector, const FileOperations::Stat& fst);
+	[[nodiscard]] DirIndex fillMSXDirEntry(
 		const std::string& hostSubDir, const std::string& hostName,
 		unsigned msxDirSector);
-	DirIndex getFreeDirEntry(unsigned msxDirSector);
-	DirIndex findHostFileInDSK(const std::string& hostName);
-	bool checkFileUsedInDSK(const std::string& hostName);
-	unsigned nextMsxDirSector(unsigned sector);
-	bool checkMSXFileExists(const std::string& msxfilename,
-	                        unsigned msxDirSector);
+	[[nodiscard]] DirIndex getFreeDirEntry(unsigned msxDirSector);
+	[[nodiscard]] DirIndex findHostFileInDSK(std::string_view hostName) const;
+	[[nodiscard]] bool checkFileUsedInDSK(std::string_view hostName) const;
+	[[nodiscard]] unsigned nextMsxDirSector(unsigned sector);
+	[[nodiscard]] bool checkMSXFileExists(std::span<const char, 11> msxfilename,
+	                                      unsigned msxDirSector);
 	void checkModifiedHostFiles();
-	void setMSXTimeStamp(DirIndex dirIndex, FileOperations::Stat& fst);
-	void importHostFile(DirIndex dirIndex, FileOperations::Stat& fst);
+	void setMSXTimeStamp(DirIndex dirIndex, const FileOperations::Stat& fst);
+	void importHostFile(DirIndex dirIndex, const FileOperations::Stat& fst);
 	void exportToHost(DirIndex dirIndex, DirIndex dirDirIndex);
 	void exportToHostDir (DirIndex dirIndex, const std::string& hostName);
 	void exportToHostFile(DirIndex dirIndex, const std::string& hostName);
-	unsigned findNextFreeCluster(unsigned cluster);
-	unsigned findFirstFreeCluster();
-	unsigned getFreeCluster();
-	unsigned readFAT(unsigned cluster);
+	[[nodiscard]] unsigned findNextFreeCluster(unsigned cluster);
+	[[nodiscard]] unsigned findFirstFreeCluster();
+	[[nodiscard]] unsigned getFreeCluster();
+	[[nodiscard]] unsigned readFAT(unsigned cluster);
 	void writeFAT12(unsigned cluster, unsigned val);
-	void exportFileFromFATChange(unsigned cluster, SectorBuffer* oldFAT);
-	unsigned getChainStart(unsigned cluster, unsigned& chainLength);
-	bool isDirSector(unsigned sector, DirIndex& dirDirIndex);
+	void exportFileFromFATChange(unsigned cluster, std::span<SectorBuffer> oldFAT);
+	std::pair<unsigned, unsigned> getChainStart(unsigned cluster);
+	[[nodiscard]] bool isDirSector(unsigned sector, DirIndex& dirDirIndex);
 	bool getDirEntryForCluster(unsigned cluster,
 	                           DirIndex& dirIndex, DirIndex& dirDirIndex);
-	DirIndex getDirEntryForCluster(unsigned cluster);
+	[[nodiscard]] DirIndex getDirEntryForCluster(unsigned cluster);
 	void unmapHostFiles(unsigned msxDirSector);
 	template<typename FUNC> bool scanMsxDirs(
 		FUNC func, unsigned msxDirSector);
@@ -107,11 +116,11 @@ private:
 	friend struct UnmapHostFiles;
 
 	// internal helper functions
-	unsigned readFATHelper(const SectorBuffer* fat, unsigned cluster) const;
-	void writeFATHelper(SectorBuffer* fat, unsigned cluster, unsigned val) const;
-	unsigned clusterToSector(unsigned cluster) const;
-	void sectorToCluster(unsigned sector, unsigned& cluster, unsigned& offset) const;
-	unsigned sectorToCluster(unsigned sector) const;
+	[[nodiscard]] unsigned readFATHelper(std::span<const SectorBuffer> fat, unsigned cluster) const;
+	void writeFATHelper(std::span<SectorBuffer> fat, unsigned cluster, unsigned val) const;
+	[[nodiscard]] unsigned clusterToSector(unsigned cluster) const;
+	[[nodiscard]] std::pair<unsigned, unsigned> sectorToClusterOffset(unsigned sector) const;
+	[[nodiscard]] unsigned sectorToCluster(unsigned sector) const;
 
 private:
 	DiskChanger& diskChanger; // used to query time / report disk change
@@ -124,7 +133,7 @@ private:
 	// For each directory entry that has a mapped host file/directory we
 	// store the name, last modification time and size of the corresponding
 	// host file/dir.
-	using MapDirs = std::map<DirIndex, MapDir>;
+	using MapDirs = hash_map<DirIndex, MapDir, HashDirIndex>;
 	MapDirs mapDirs;
 
 	// format parameters which depend on single/double sided

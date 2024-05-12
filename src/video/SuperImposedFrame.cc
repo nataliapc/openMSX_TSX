@@ -1,53 +1,15 @@
 #include "SuperImposedFrame.hh"
-#include "PixelOperations.hh"
+
 #include "LineScalers.hh"
-#include "unreachable.hh"
+
 #include "vla.hh"
-#include "build-info.hh"
+
 #include <algorithm>
 #include <cstdint>
-#include <memory>
 
 namespace openmsx {
 
-template <typename Pixel>
-class SuperImposedFrameImpl final : public SuperImposedFrame
-{
-public:
-	explicit SuperImposedFrameImpl(const SDL_PixelFormat& format);
-
-private:
-	unsigned getLineWidth(unsigned line) const override;
-	const void* getLineInfo(
-		unsigned line, unsigned& width,
-		void* buf, unsigned bufWidth) const override;
-
-	PixelOperations<Pixel> pixelOps;
-};
-
-
-// class SuperImposedFrame
-
-std::unique_ptr<SuperImposedFrame> SuperImposedFrame::create(
-	const SDL_PixelFormat& format)
-{
-#if HAVE_16BPP
-	if (format.BitsPerPixel == 15 || format.BitsPerPixel == 16) {
-		return std::make_unique<SuperImposedFrameImpl<uint16_t>>(format);
-	}
-#endif
-#if HAVE_32BPP
-	if (format.BitsPerPixel == 32) {
-		return std::make_unique<SuperImposedFrameImpl<uint32_t>>(format);
-	}
-#endif
-	UNREACHABLE; return nullptr; // avoid warning
-}
-
-SuperImposedFrame::SuperImposedFrame(const SDL_PixelFormat& format)
-	: FrameSource(format)
-{
-}
+using Pixel = uint32_t;
 
 void SuperImposedFrame::init(
 	const FrameSource* top_, const FrameSource* bottom_)
@@ -57,19 +19,7 @@ void SuperImposedFrame::init(
 	setHeight(std::max(top->getHeight(), bottom->getHeight()));
 }
 
-
-// class SuperImposedFrameImpl
-
-template <typename Pixel>
-SuperImposedFrameImpl<Pixel>::SuperImposedFrameImpl(
-		const SDL_PixelFormat& format)
-	: SuperImposedFrame(format)
-	, pixelOps(format)
-{
-}
-
-template <typename Pixel>
-unsigned SuperImposedFrameImpl<Pixel>::getLineWidth(unsigned line) const
+unsigned SuperImposedFrame::getLineWidth(unsigned line) const
 {
 	unsigned tNum = (getHeight() == top   ->getHeight()) ? line : line / 2;
 	unsigned bNum = (getHeight() == bottom->getHeight()) ? line : line / 2;
@@ -78,24 +28,22 @@ unsigned SuperImposedFrameImpl<Pixel>::getLineWidth(unsigned line) const
 	return std::max(tWidth, bWidth);
 }
 
-template <typename Pixel>
-const void* SuperImposedFrameImpl<Pixel>::getLineInfo(
-	unsigned line, unsigned& width, void* buf, unsigned bufWidth) const
+std::span<const FrameSource::Pixel> SuperImposedFrame::getUnscaledLine(
+	unsigned line, std::span<Pixel> helpBuf) const
 {
 	unsigned tNum = (getHeight() == top   ->getHeight()) ? line : line / 2;
 	unsigned bNum = (getHeight() == bottom->getHeight()) ? line : line / 2;
 	unsigned tWidth = top   ->getLineWidth(tNum);
 	unsigned bWidth = bottom->getLineWidth(bNum);
-	width = std::max(tWidth, bWidth);  // as wide as the widest source
-	width = std::min(width, bufWidth); // but no wider than the output buffer
+	auto width = std::min(std::max<size_t>(tWidth, bWidth), // as wide as the widest source
+	                      helpBuf.size()); // but no wider than the output buffer
 
-	auto* tBuf = static_cast<Pixel*>(buf);
+	auto tBuf = std::span{helpBuf.data(), width};
 	VLA_SSE_ALIGNED(Pixel, bBuf, width);
-	auto* tLine = top   ->getLinePtr(tNum, width, tBuf);
-	auto* bLine = bottom->getLinePtr(bNum, width, bBuf);
+	auto tLine = top   ->getLine(narrow<int>(tNum), tBuf);
+	auto bLine = bottom->getLine(narrow<int>(bNum), bBuf);
 
-	AlphaBlendLines<Pixel> blend(pixelOps);
-	blend(tLine, bLine, tBuf, width); // possibly tLine == tBuf
+	alphaBlendLines(tLine, bLine, tBuf); // possibly tLine == tBuf
 	return tBuf;
 }
 

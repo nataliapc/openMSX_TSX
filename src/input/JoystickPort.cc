@@ -6,24 +6,21 @@
 #include "serialize.hh"
 #include <memory>
 
-using std::string;
-
 namespace openmsx {
 
 JoystickPort::JoystickPort(PluggingController& pluggingController_,
                            std::string name_, std::string description_)
 	: Connector(pluggingController_, std::move(name_), std::make_unique<DummyJoystick>())
-	, lastValue(255) // != 0
 	, description(std::move(description_))
 {
 }
 
-const string JoystickPort::getDescription() const
+std::string_view JoystickPort::getDescription() const
 {
 	return description;
 }
 
-string_view JoystickPort::getClass() const
+std::string_view JoystickPort::getClass() const
 {
 	return "Joystick Port";
 }
@@ -39,16 +36,16 @@ void JoystickPort::plug(Pluggable& device, EmuTime::param time)
 	getPluggedJoyDev().write(lastValue, time);
 }
 
-byte JoystickPort::read(EmuTime::param time)
+uint8_t JoystickPort::read(EmuTime::param time)
 {
 	return getPluggedJoyDev().read(time);
 }
 
-void JoystickPort::write(byte value, EmuTime::param time)
+void JoystickPort::write(uint8_t value, EmuTime::param time)
 {
 	if (lastValue != value) writeDirect(value, time);
 }
-void JoystickPort::writeDirect(byte value, EmuTime::param time)
+void JoystickPort::writeDirect(uint8_t value, EmuTime::param time)
 {
 	lastValue = value;
 	getPluggedJoyDev().write(value, time);
@@ -58,7 +55,7 @@ template<typename Archive>
 void JoystickPort::serialize(Archive& ar, unsigned /*version*/)
 {
 	ar.template serializeBase<Connector>(*this);
-	if (ar.isLoader()) {
+	if constexpr (Archive::IS_LOADER) {
 		// The value of 'lastValue', is already restored via MSXPSG,
 		// but we still need to re-write this value to the plugged
 		// devices (do this after those devices have been re-plugged).
@@ -70,12 +67,12 @@ INSTANTIATE_SERIALIZE_METHODS(JoystickPort);
 
 // class DummyJoystickPort
 
-byte DummyJoystickPort::read(EmuTime::param /*time*/)
+uint8_t DummyJoystickPort::read(EmuTime::param /*time*/)
 {
 	return 0x3F; // do as-if nothing is connected
 }
 
-void DummyJoystickPort::write(byte /*value*/, EmuTime::param /*time*/)
+void DummyJoystickPort::write(uint8_t /*value*/, EmuTime::param /*time*/)
 {
 	// ignore writes
 }

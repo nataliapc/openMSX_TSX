@@ -1,26 +1,30 @@
 #include "RomDatabase.hh"
-#include "FileContext.hh"
-#include "File.hh"
-#include "FileOperations.hh"
-#include "CliComm.hh"
-#include "MSXException.hh"
-#include "StringOp.hh"
-#include "String32.hh"
-#include "hash_map.hh"
-#include "outer.hh"
-#include "rapidsax.hh"
-#include "unreachable.hh"
-#include "stl.hh"
-#include "xxhash.hh"
-#include <cassert>
-#include <stdexcept>
 
-using std::string;
-using std::vector;
+#include "CliComm.hh"
+#include "File.hh"
+#include "FileContext.hh"
+#include "MSXException.hh"
+
+#include "String32.hh"
+#include "StringOp.hh"
+#include "hash_map.hh"
+#include "narrow.hh"
+#include "ranges.hh"
+#include "rapidsax.hh"
+#include "stl.hh"
+#include "unreachable.hh"
+#include "view.hh"
+#include "xxhash.hh"
+
+#include <array>
+#include <cassert>
+#include <string_view>
+
+using std::string_view;
 
 namespace openmsx {
 
-using UnknownTypes = hash_map<string, unsigned, XXHasher>;
+using UnknownTypes = hash_map<std::string, unsigned, XXHasher>;
 
 class DBParser : public rapidsax::NullHandler
 {
@@ -31,8 +35,6 @@ public:
 		, unknownTypes(unknownTypes_)
 		, cliComm(cliComm_)
 		, bufStart(bufStart_)
-		, state(BEGIN)
-		, unknownLevel(0)
 		, initialSize(db.size())
 	{
 	}
@@ -44,10 +46,10 @@ public:
 	void stop();
 	void doctype(string_view txt);
 
-	string_view getSystemID() const { return systemID; }
+	[[nodiscard]] string_view getSystemID() const { return systemID; }
 
 private:
-	String32 cIndex(string_view str);
+	[[nodiscard]] String32 cIndex(string_view str) const;
 	void addEntries();
 	void addAllEntries();
 
@@ -89,16 +91,16 @@ private:
 	string_view type;
 	string_view startVal;
 
-	vector<Dump> dumps;
+	std::vector<Dump> dumps;
 	string_view system;
 	String32 title;
 	String32 company;
 	String32 year;
 	String32 country;
-	int genMSXid;
+	unsigned genMSXid;
 
-	State state;
-	unsigned unknownLevel;
+	State state = BEGIN;
+	unsigned unknownLevel = 0;
 	size_t initialSize;
 };
 
@@ -118,8 +120,8 @@ void DBParser::start(string_view tag)
 		}
 		throw MSXException("Expected <softwaredb> as root tag.");
 	case SOFTWAREDB:
-		if (small_compare<'s','o','f','t','w','a','r','e'>(tag)) {
-			system.clear();
+		if (small_compare<"software">(tag)) {
+			system = string_view();
 			toString32(bufStart, bufStart, title);
 			toString32(bufStart, bufStart, company);
 			toString32(bufStart, bufStart, year);
@@ -133,41 +135,41 @@ void DBParser::start(string_view tag)
 	case SOFTWARE: {
 		switch (tag.front()) {
 		case 's':
-			if (small_compare<'s','y','s','t','e','m'>(tag)) {
+			if (small_compare<"system">(tag)) {
 				state = SYSTEM;
 				return;
 			}
 			break;
 		case 't':
-			tag.pop_front();
-			if (small_compare<'i','t','l','e'>(tag)) {
+			tag.remove_prefix(1);
+			if (small_compare<"itle">(tag)) {
 				state = TITLE;
 				return;
 			}
 			break;
 		case 'c':
-			if (small_compare<'c','o','m','p','a','n','y'>(tag)) {
+			if (small_compare<"company">(tag)) {
 				state = COMPANY;
 				return;
-			} else if (small_compare<'c','o','u','n','t','r','y'>(tag)) {
+			} else if (small_compare<"country">(tag)) {
 				state = COUNTRY;
 				return;
 			}
 			break;
 		case 'y':
-			if (small_compare<'y','e','a','r'>(tag)) {
+			if (small_compare<"year">(tag)) {
 				state = YEAR;
 				return;
 			}
 			break;
 		case 'g':
-			if (small_compare<'g','e','n','m','s','x','i','d'>(tag)) {
+			if (small_compare<"genmsxid">(tag)) {
 				state = GENMSXID;
 				return;
 			}
 			break;
 		case 'd':
-			if (small_compare<'d','u','m','p'>(tag)) {
+			if (small_compare<"dump">(tag)) {
 				dumps.resize(dumps.size() + 1);
 				dumps.back().type = ROM_UNKNOWN;
 				dumps.back().origValue = false;
@@ -183,25 +185,25 @@ void DBParser::start(string_view tag)
 	case DUMP: {
 		switch (tag.front()) {
 		case 'o':
-			if (small_compare<'o','r','i','g','i','n','a','l'>(tag)) {
+			if (small_compare<"original">(tag)) {
 				dumps.back().origValue = false;
 				state = ORIGINAL;
 				return;
 			}
 			break;
 		case 'm':
-			if (small_compare<'m','e','g','a','r','o','m'>(tag)) {
-				type.clear();
-				startVal.clear();
+			if (small_compare<"megarom">(tag)) {
+				type = string_view();
+				startVal = string_view();
 				state = ROM;
 				return;
 			}
 			break;
 		case 'r':
-			tag.pop_front();
-			if (small_compare<'o','m'>(tag)) {
+			tag.remove_prefix(1);
+			if (small_compare<"om">(tag)) {
 				type = "Mirrored";
-				startVal.clear();
+				startVal = string_view();
 				state = ROM;
 				return;
 			}
@@ -212,26 +214,26 @@ void DBParser::start(string_view tag)
 	case ROM: {
 		switch (tag.front()) {
 		case 't':
-			if (small_compare<'t','y','p','e'>(tag)) {
+			if (small_compare<"type">(tag)) {
 				state = TYPE;
 				return;
 			}
 			break;
 		case 's':
-			tag.pop_front();
-			if (small_compare<'t','a','r','t'>(tag)) {
+			tag.remove_prefix(1);
+			if (small_compare<"tart">(tag)) {
 				state = START;
 				return;
 			}
 			break;
 		case 'r':
-			if (small_compare<'r','e','m','a','r','k'>(tag)) {
+			if (small_compare<"remark">(tag)) {
 				state = DUMP_REMARK;
 				return;
 			}
 			break;
 		case 'h':
-			if (small_compare<'h','a','s','h'>(tag)) {
+			if (small_compare<"hash">(tag)) {
 				state = HASH;
 				return;
 			}
@@ -240,7 +242,7 @@ void DBParser::start(string_view tag)
 		break;
 	}
 	case DUMP_REMARK:
-		if (small_compare<'t','e','x','t'>(tag)) {
+		if (small_compare<"text">(tag)) {
 			state = DUMP_TEXT;
 			return;
 		}
@@ -274,7 +276,7 @@ void DBParser::attribute(string_view name, string_view value)
 
 	switch (state) {
 	case ORIGINAL:
-		if (small_compare<'v','a','l','u','e'>(name)) {
+		if (small_compare<"value">(name)) {
 			dumps.back().origValue = StringOp::stringToBool(value);
 		}
 		break;
@@ -321,16 +323,17 @@ void DBParser::text(string_view txt)
 	case COUNTRY:
 		country = cIndex(txt);
 		break;
-	case GENMSXID:
-		try {
-			genMSXid = fast_stou(txt);
-		} catch (std::invalid_argument&) {
+	case GENMSXID: {
+		if (auto g = StringOp::stringToBase<10, unsigned>(txt)) {
+			genMSXid = *g;
+		} else {
 			cliComm.printWarning(
 				"Ignoring bad Generation MSX id (genmsxid) "
-				"in entry with title '", title,
+				"in entry with title '", fromString32(bufStart, title),
 				": ", txt);
 		}
 		break;
+	}
 	case ORIGINAL:
 		dumps.back().origData = cIndex(txt);
 		break;
@@ -341,7 +344,13 @@ void DBParser::text(string_view txt)
 		startVal = txt;
 		break;
 	case HASH:
-		dumps.back().hash = Sha1Sum(txt);
+		try {
+			dumps.back().hash = Sha1Sum(txt);
+		} catch (MSXException& e) {
+			cliComm.printWarning(
+				"Ignoring bad dump for '", fromString32(bufStart, title),
+				"': ", e.getMessage());
+		}
 		break;
 	case DUMP_REMARK:
 	case DUMP_TEXT:
@@ -359,7 +368,7 @@ void DBParser::text(string_view txt)
 	}
 }
 
-String32 DBParser::cIndex(string_view str)
+String32 DBParser::cIndex(string_view str) const
 {
 	auto* begin = const_cast<char*>(str.data());
 	auto* end = begin + str.size();
@@ -372,12 +381,12 @@ String32 DBParser::cIndex(string_view str)
 // called on </software>
 void DBParser::addEntries()
 {
-	for (auto& d : dumps) {
-		db.emplace_back(d.hash, RomInfo(
-			title, year, company, country,
-			d.origValue, d.origData, d.remark, d.type,
-			genMSXid));
-	}
+	append(db, view::transform(dumps, [&](auto& d) {
+		return RomDatabase::Entry{
+			d.hash,
+			RomInfo(title, year, company, country, d.origValue,
+			        d.origData, d.remark, d.type, genMSXid)};
+	}));
 }
 
 // called on </softwaredb>
@@ -389,11 +398,11 @@ void DBParser::addAllEntries()
 	//    there may also be duplicates between old and new
 	const auto first = begin(db);
 	const auto last  = end  (db);
-	const auto mid = first + initialSize;
+	const auto mid = first + narrow<ptrdiff_t>(initialSize);
 	if (mid == last) return; // no new entries
 
 	// Sort new entries, old entries are already sorted.
-	sort(mid, last, LessTupleElement<0>());
+	ranges::sort(mid, last, {}, &RomDatabase::Entry::sha1);
 
 	// Filter duplicates from new entries. This is similar to the
 	// unique() algorithm, except that it also warns about duplicates.
@@ -401,15 +410,15 @@ void DBParser::addAllEntries()
 	auto it2 = mid + 1;
 	// skip initial non-duplicates
 	while (it2 != last) {
-		if (it1->first == it2->first) break;
+		if (it1->sha1 == it2->sha1) break;
 		++it1; ++it2;
 	}
 	// move non-duplicates up
 	while (it2 != last) {
-		if (it1->first == it2->first) {
+		if (it1->sha1 == it2->sha1) {
 			cliComm.printWarning(
 				"duplicate softwaredb entry SHA1: ",
-				it2->first.toString());
+				it2->sha1.toString());
 		} else {
 			++it1;
 			*it1 = std::move(*it2);
@@ -430,11 +439,11 @@ void DBParser::addAllEntries()
 	it2 = mid;
 	// while both new and old still have elements
 	while (it1 != mid && it2 != last) {
-		if (it1->first < it2->first) {
+		if (it1->sha1 < it2->sha1) {
 			result.push_back(std::move(*it1));
 			++it1;
 		} else {
-			if (it1->first != it2->first) { // *it2 < *it1
+			if (it1->sha1 != it2->sha1) { // *it2 < *it1
 				result.push_back(std::move(*it2));
 				++it2;
 			} else {
@@ -494,23 +503,23 @@ void DBParser::stop()
 		break;
 	case ROM: {
 		string_view t = type;
-		char buf[12];
-		if (small_compare<'M','i','r','r','o','r','e','d'>(t)) {
+		std::array<char, 8 + 4> buf;
+		if (small_compare<"Mirrored">(t)) {
 			if (const char* s = parseStart(startVal)) {
-				memcpy(buf, t.data(), 8);
-				memcpy(buf + 8, s, 4);
-				t = string_view(buf, 12);
+				ranges::copy(t,                      subspan<8>(buf, 0));
+				ranges::copy(std::string_view(s, 4), subspan<4>(buf, 8));
+				t = string_view(buf.data(), 8 + 4);
 			}
-		} else if (small_compare<'N','o','r','m','a','l'>(t)) {
+		} else if (small_compare<"Normal">(t)) {
 			if (const char* s = parseStart(startVal)) {
-				memcpy(buf, t.data(), 6);
-				memcpy(buf + 6, s, 4);
-				t = string_view(buf, 10);
+				ranges::copy(t,                      subspan<6>(buf, 0));
+				ranges::copy(std::string_view(s, 4), subspan<4>(buf, 6));
+				t = string_view(buf.data(), 6 + 4);
 			}
 		}
 		RomType romType = RomInfo::nameToRomType(t);
 		if (romType == ROM_UNKNOWN) {
-			unknownTypes[t.str()]++;
+			unknownTypes[std::string(t)]++;
 		}
 		dumps.back().type = romType;
 		state = DUMP;
@@ -563,13 +572,12 @@ RomDatabase::RomDatabase(CliComm& cliComm)
 	db.reserve(3500);
 	UnknownTypes unknownTypes;
 	// first user- then system-directory
-	vector<string> paths = systemFileContext().getPaths();
-	vector<File> files;
+	std::vector<File> files;
 	size_t bufferSize = 0;
-	for (auto& p : paths) {
+	for (const auto& p : systemFileContext().getPaths()) {
 		try {
-			files.emplace_back(FileOperations::join(p, "softwaredb.xml"));
-			bufferSize += files.back().getSize() + rapidsax::EXTRA_BUFFER_SPACE;
+			auto& f = files.emplace_back(p + "/softwaredb.xml");
+			bufferSize += f.getSize() + rapidsax::EXTRA_BUFFER_SPACE;
 		} catch (MSXException& /*e*/) {
 			// Ignore. It's not unusual the DB in the user
 			// directory is not found. In case there's an error
@@ -584,7 +592,7 @@ RomDatabase::RomDatabase(CliComm& cliComm)
 			auto size = file.getSize();
 			auto* buf = &buffer[bufferOffset];
 			bufferOffset += size + rapidsax::EXTRA_BUFFER_SPACE;
-			file.read(buf, size);
+			file.read(std::span{buf, size});
 			buf[size] = 0;
 
 			parseDB(cliComm, buf, buffer.data(), db, unknownTypes);
@@ -602,9 +610,9 @@ RomDatabase::RomDatabase(CliComm& cliComm)
 			"This may cause incorrect ROM mapper types to be used.");
 	}
 	if (!unknownTypes.empty()) {
-		string output = "Unknown mapper types in software database: ";
-		for (auto& p : unknownTypes) {
-			strAppend(output, p.first, " (", p.second, "x); ");
+		std::string output = "Unknown mapper types in software database: ";
+		for (const auto& [type, count] : unknownTypes) {
+			strAppend(output, type, " (", count, "x); ");
 		}
 		cliComm.printWarning(output);
 	}
@@ -612,10 +620,8 @@ RomDatabase::RomDatabase(CliComm& cliComm)
 
 const RomInfo* RomDatabase::fetchRomInfo(const Sha1Sum& sha1sum) const
 {
-	auto it = lower_bound(begin(db), end(db), sha1sum,
-	                      LessTupleElement<0>());
-	return ((it != end(db)) && (it->first == sha1sum))
-		? &it->second : nullptr;
+	auto d = binary_find(db, sha1sum, {}, &Entry::sha1);
+	return d ? &d->romInfo : nullptr;
 }
 
 } // namespace openmsx

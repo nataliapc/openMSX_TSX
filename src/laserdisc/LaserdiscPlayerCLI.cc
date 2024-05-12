@@ -1,10 +1,8 @@
 #include "LaserdiscPlayerCLI.hh"
 #include "CommandLineParser.hh"
-#include "GlobalCommandController.hh"
+#include "Interpreter.hh"
 #include "MSXException.hh"
 #include "TclObject.hh"
-
-using std::string;
 
 namespace openmsx {
 
@@ -12,36 +10,38 @@ LaserdiscPlayerCLI::LaserdiscPlayerCLI(CommandLineParser& parser_)
 	: parser(parser_)
 {
 	parser.registerOption("-laserdisc", *this);
-	parser.registerFileType("ogv", *this);
+	parser.registerFileType(std::array<std::string_view, 1>{"ogv"}, *this);
 }
 
-void LaserdiscPlayerCLI::parseOption(const string& option, array_ref<string>& cmdLine)
+void LaserdiscPlayerCLI::parseOption(const std::string& option, std::span<std::string>& cmdLine)
 {
 	parseFileType(getArgument(option, cmdLine), cmdLine);
 }
 
-string_view LaserdiscPlayerCLI::optionHelp() const
+std::string_view LaserdiscPlayerCLI::optionHelp() const
 {
-	return "Put laserdisc image specified in argument in "
-	       "virtual laserdiscplayer";
+	return "Put LaserDisc image specified in argument in "
+	       "virtual LaserDisc player";
 }
 
-void LaserdiscPlayerCLI::parseFileType(const string& filename,
-                                       array_ref<string>& /*cmdLine*/)
+void LaserdiscPlayerCLI::parseFileType(const std::string& filename,
+                                       std::span<std::string>& /*cmdLine*/)
 {
-	if (!parser.getGlobalCommandController().hasCommand("laserdiscplayer")) {
-		throw MSXException("No laserdiscplayer.");
+	if (!parser.getInterpreter().hasCommand("laserdiscplayer")) {
+		throw MSXException("No LaserDisc player present.");
 	}
-	TclObject command;
-	command.addListElement("laserdiscplayer");
-	command.addListElement("insert");
-	command.addListElement(filename);
+	TclObject command = makeTclList("laserdiscplayer", "insert", filename);
 	command.executeCommand(parser.getInterpreter());
 }
 
-string_view LaserdiscPlayerCLI::fileTypeHelp() const
+std::string_view LaserdiscPlayerCLI::fileTypeHelp() const
 {
-	return "Laserdisc image, Ogg Vorbis/Theora";
+	return "LaserDisc image, Ogg Vorbis/Theora";
+}
+
+std::string_view LaserdiscPlayerCLI::fileTypeCategoryName() const
+{
+	return "laserdisc";
 }
 
 } // namespace openmsx

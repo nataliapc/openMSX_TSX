@@ -15,16 +15,20 @@ class WavImage final : public CassetteImage
 {
 public:
 	explicit WavImage(const Filename& filename, FilePool& filePool);
+	WavImage(const WavImage&) = delete;
+	WavImage(WavImage&&) = delete;
+	WavImage& operator=(const WavImage&) = delete;
+	WavImage& operator=(WavImage&&) = delete;
+	~WavImage() override;
 
-	int16_t getSampleAt(EmuTime::param time) override;
-	EmuTime getEndTime() const override;
-	unsigned getFrequency() const override;
-	void fillBuffer(unsigned pos, int** bufs, unsigned num) const override;
+	[[nodiscard]] int16_t getSampleAt(EmuTime::param time) const override;
+	[[nodiscard]] EmuTime getEndTime() const override;
+	[[nodiscard]] unsigned getFrequency() const override;
+	void fillBuffer(unsigned pos, std::span<float*, 1> bufs, unsigned num) const override;
+	[[nodiscard]] float getAmplificationFactorImpl() const override;
 
 private:
-	int16_t getSample(unsigned pos) const;
-
-	WavData wav;
+	const WavData* wav;
 	DynamicClock clock;
 };
 

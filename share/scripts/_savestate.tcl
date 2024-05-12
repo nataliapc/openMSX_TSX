@@ -6,15 +6,7 @@ proc savestate_common {} {
 	uplevel {
 		if {$name eq ""} {set name "quicksave"}
 		set directory [file normalize $::env(OPENMSX_USER_DATA)/../savestates]
-		set fullname_oms [file join $directory ${name}.oms]
-		set fullname_gz  [file join $directory ${name}.xml.gz]
-		if {![file exists $fullname_oms] &&
-		     [file exists $fullname_gz]} {
-			# only when old name exists but new doesn't
-			set fullname_bwcompat $fullname_gz
-		} else {
-			set fullname_bwcompat $fullname_oms
-		}
+		set fullname [file join $directory ${name}.oms]
 		set png [file join $directory ${name}.png]
 	}
 }
@@ -31,17 +23,13 @@ proc savestate {{name ""}} {
 		}
 	}
 	set currentID [machine]
-	# always save using the new (.oms) name
-	store_machine $currentID $fullname_oms
-	# if successful, delete the old (.gz) filename (deleting a non-exiting
-	# file is not an error)
-	file delete -- $fullname_gz
+	store_machine $currentID $fullname
 	return $name
 }
 
 proc loadstate {{name ""}} {
 	savestate_common
-	set newID [restore_machine $fullname_bwcompat]
+	set newID [restore_machine $fullname]
 	set currentID [machine]
 	if {$currentID ne ""} {delete_machine $currentID}
 	activate_machine $newID
@@ -52,11 +40,9 @@ proc loadstate {{name ""}} {
 proc list_savestates_raw {} {
 	set directory [file normalize $::env(OPENMSX_USER_DATA)/../savestates]
 	set results [list]
-	foreach f [glob -tails -directory $directory -nocomplain *.xml.gz *.oms] {
+	foreach f [glob -tails -directory $directory -nocomplain *.oms] {
 		if       {[string range $f end-3 end] eq ".oms"} {
 			set name [string range $f 0 end-4]
-		} elseif {[string range $f end-6 end] eq ".xml.gz"} {
-			set name [string range $f 0 end-7]
 		} else {
 			set name $f
 		}
@@ -69,7 +55,6 @@ proc list_savestates_raw {} {
 
 proc list_savestates {args} {
 	set sort_key 0
-	set long_format false
 	set sort_option "-ascii"
 	set sort_order "-increasing"
 
@@ -83,14 +68,6 @@ proc list_savestates {args} {
 			set args [lrange $args 1 end]
 			set sort_order "-decreasing"
 		}
-		"-l" {
-			if {[info commands clock] ne ""} {
-				set long_format true
-			} else {
-				error "Sorry, long format not supported on this system (missing clock.tcl)"
-			}
-			set args [lrange $args 1 end]
-		}
 		"default" {
 			error "Invalid option: [lindex $args 0]"
 		}
@@ -99,17 +76,9 @@ proc list_savestates {args} {
 
 	set sorted_sublists [lsort ${sort_option} ${sort_order} -index $sort_key [list_savestates_raw]]
 
-	if {!$long_format} {
-		set sorted_result [list]
-		foreach sublist $sorted_sublists {lappend sorted_result [lindex $sublist 0]}
-		return $sorted_result
-	} else {
-		set stringres ""
-		foreach sublist $sorted_sublists {
-			append stringres [format "%-[expr {round(${::consolecolumns} / 2)}]s %s\n" [lindex $sublist 0] [clock format [lindex $sublist 1] -format "%a %b %d %Y - %H:%M:%S"]]
-		}
-		return $stringres
-	}
+	set sorted_result [list]
+	foreach sublist $sorted_sublists {lappend sorted_result [lindex $sublist 0]}
+	return $sorted_result
 }
 
 proc delete_savestate {{name ""}} {
@@ -124,7 +93,7 @@ proc savestate_tab {args} {
 }
 
 proc savestate_list_tab {args} {
-	list "-l" "-t"
+	list "-t"
 }
 
 # savestate
@@ -159,9 +128,6 @@ Return the names of all previously created savestates.
 
 Options:
   -t      sort savestates by time
-  -l      long formatting, showing date of savestates
-
-Note: the -l option is not available on all systems.
 
 See also 'savestate', 'loadstate', 'delete_savestate'.
 }

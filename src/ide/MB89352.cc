@@ -9,7 +9,7 @@
 */
 /*
  * Notes:
- *  Not suppport padding transfer and interrupt signal. (Not used MEGA-SCSI)
+ *  Not support padding transfer and interrupt signal. (Not used MEGA-SCSI)
  *  Message system might be imperfect. (Not used in MEGA-SCSI usually)
  */
 #include "MB89352.hh"
@@ -20,75 +20,72 @@
 #include "DeviceConfig.hh"
 #include "XMLElement.hh"
 #include "MSXException.hh"
+#include "enumerate.hh"
+#include "narrow.hh"
 #include "serialize.hh"
+#include "xrange.hh"
 #include <cassert>
-#include <string>
-#include <cstring>
 #include <memory>
-
-using std::string;
 
 namespace openmsx {
 
-static const byte REG_BDID =  0;   // Bus Device ID        (r/w)
-static const byte REG_SCTL =  1;   // Spc Control          (r/w)
-static const byte REG_SCMD =  2;   // Command              (r/w)
-static const byte REG_OPEN =  3;   //                      (open)
-static const byte REG_INTS =  4;   // Interrupt Sense      (r/w)
-static const byte REG_PSNS =  5;   // Phase Sense          (r)
-static const byte REG_SDGC =  5;   // SPC Diag. Control    (w)
-static const byte REG_SSTS =  6;   // SPC SCSI::STATUS           (r)
-static const byte REG_SERR =  7;   // SPC Error SCSI::STATUS     (r/w?)
-static const byte REG_PCTL =  8;   // Phase Control        (r/w)
-static const byte REG_MBC  =  9;   // Modified Byte Counter(r)
-static const byte REG_DREG = 10;   // Data Register        (r/w)
-static const byte REG_TEMP = 11;   // Temporary Register   (r/w)
-                                   // Another value is maintained respec-
-                                   // tively for writing and for reading
-static const byte REG_TCH  = 12;   // Transfer Counter High(r/w)
-static const byte REG_TCM  = 13;   // Transfer Counter Mid (r/w)
-static const byte REG_TCL  = 14;   // Transfer Counter Low (r/w)
+static constexpr uint8_t REG_BDID =  0;   // Bus Device ID        (r/w)
+static constexpr uint8_t REG_SCTL =  1;   // Spc Control          (r/w)
+static constexpr uint8_t REG_SCMD =  2;   // Command              (r/w)
+static constexpr uint8_t REG_OPEN =  3;   //                      (open)
+static constexpr uint8_t REG_INTS =  4;   // Interrupt Sense      (r/w)
+static constexpr uint8_t REG_PSNS =  5;   // Phase Sense          (r)
+static constexpr uint8_t REG_SDGC =  5;   // SPC Diag. Control    (w)
+static constexpr uint8_t REG_SSTS =  6;   // SPC SCSI::STATUS           (r)
+static constexpr uint8_t REG_SERR =  7;   // SPC Error SCSI::STATUS     (r/w?)
+static constexpr uint8_t REG_PCTL =  8;   // Phase Control        (r/w)
+static constexpr uint8_t REG_MBC  =  9;   // Modified Byte Counter(r)
+static constexpr uint8_t REG_DREG = 10;   // Data Register        (r/w)
+static constexpr uint8_t REG_TEMP = 11;   // Temporary Register   (r/w)
+                                          // Another value is maintained respectively
+                                          // for writing and for reading
+static constexpr uint8_t REG_TCH  = 12;   // Transfer Counter High(r/w)
+static constexpr uint8_t REG_TCM  = 13;   // Transfer Counter Mid (r/w)
+static constexpr uint8_t REG_TCL  = 14;   // Transfer Counter Low (r/w)
 
-static const byte REG_TEMPWR = 13; // (TEMP register preservation place for writing)
-static const byte FIX_PCTL   = 14; // (REG_PCTL & 7)
+static constexpr uint8_t REG_TEMPWR = 13; // (TEMP register preservation place for writing)
+static constexpr uint8_t FIX_PCTL   = 14; // (REG_PCTL & 7)
 
-static const byte PSNS_IO  = 0x01;
-static const byte PSNS_CD  = 0x02;
-static const byte PSNS_MSG = 0x04;
-static const byte PSNS_BSY = 0x08;
-static const byte PSNS_SEL = 0x10;
-static const byte PSNS_ATN = 0x20;
-static const byte PSNS_ACK = 0x40;
-static const byte PSNS_REQ = 0x80;
+static constexpr uint8_t PSNS_IO  = 0x01;
+static constexpr uint8_t PSNS_CD  = 0x02;
+static constexpr uint8_t PSNS_MSG = 0x04;
+static constexpr uint8_t PSNS_BSY = 0x08;
+static constexpr uint8_t PSNS_SEL = 0x10;
+static constexpr uint8_t PSNS_ATN = 0x20;
+static constexpr uint8_t PSNS_ACK = 0x40;
+static constexpr uint8_t PSNS_REQ = 0x80;
 
-static const byte PSNS_SELECTION = PSNS_SEL;
-static const byte PSNS_COMMAND   = PSNS_CD;
-static const byte PSNS_DATAIN    = PSNS_IO;
-static const byte PSNS_DATAOUT   = 0;
-static const byte PSNS_STATUS    = PSNS_CD  | PSNS_IO;
-static const byte PSNS_MSGIN     = PSNS_MSG | PSNS_CD | PSNS_IO;
-static const byte PSNS_MSGOUT    = PSNS_MSG | PSNS_CD;
+static constexpr uint8_t PSNS_SELECTION = PSNS_SEL;
+static constexpr uint8_t PSNS_COMMAND   = PSNS_CD;
+static constexpr uint8_t PSNS_DATAIN    = PSNS_IO;
+static constexpr uint8_t PSNS_DATAOUT   = 0;
+static constexpr uint8_t PSNS_STATUS    = PSNS_CD  | PSNS_IO;
+static constexpr uint8_t PSNS_MSGIN     = PSNS_MSG | PSNS_CD | PSNS_IO;
+static constexpr uint8_t PSNS_MSGOUT    = PSNS_MSG | PSNS_CD;
 
-static const byte INTS_ResetCondition  = 0x01;
-static const byte INTS_SPC_HardError   = 0x02;
-static const byte INTS_TimeOut         = 0x04;
-static const byte INTS_ServiceRequited = 0x08;
-static const byte INTS_CommandComplete = 0x10;
-static const byte INTS_Disconnected    = 0x20;
-static const byte INTS_ReSelected      = 0x40;
-static const byte INTS_Selected        = 0x80;
+static constexpr uint8_t INTS_ResetCondition  = 0x01;
+static constexpr uint8_t INTS_SPC_HardError   = 0x02;
+static constexpr uint8_t INTS_TimeOut         = 0x04;
+static constexpr uint8_t INTS_ServiceRequited = 0x08;
+static constexpr uint8_t INTS_CommandComplete = 0x10;
+static constexpr uint8_t INTS_Disconnected    = 0x20;
+static constexpr uint8_t INTS_ReSelected      = 0x40;
+static constexpr uint8_t INTS_Selected        = 0x80;
 
-static const byte CMD_BusRelease    = 0x00;
-static const byte CMD_Select        = 0x20;
-static const byte CMD_ResetATN      = 0x40;
-static const byte CMD_SetATN        = 0x60;
-static const byte CMD_Transfer      = 0x80;
-static const byte CMD_TransferPause = 0xA0;
-static const byte CMD_Reset_ACK_REQ = 0xC0;
-static const byte CMD_Set_ACK_REQ   = 0xE0;
-static const byte CMD_MASK          = 0xE0;
-
-static const unsigned MAX_DEV = 8;
+static constexpr uint8_t CMD_BusRelease    = 0x00;
+static constexpr uint8_t CMD_Select        = 0x20;
+static constexpr uint8_t CMD_ResetATN      = 0x40;
+static constexpr uint8_t CMD_SetATN        = 0x60;
+static constexpr uint8_t CMD_Transfer      = 0x80;
+static constexpr uint8_t CMD_TransferPause = 0xA0;
+static constexpr uint8_t CMD_Reset_ACK_REQ = 0xC0;
+static constexpr uint8_t CMD_Set_ACK_REQ   = 0xE0;
+static constexpr uint8_t CMD_MASK          = 0xE0;
 
 MB89352::MB89352(const DeviceConfig& config)
 {
@@ -96,8 +93,8 @@ MB89352::MB89352(const DeviceConfig& config)
 
 	// ALMOST COPY PASTED FROM WD33C93:
 
-	for (auto* t : config.getXML()->getChildren("target")) {
-		unsigned id = t->getAttributeAsInt("id");
+	for (const auto* t : config.getXML()->getChildren("target")) {
+		unsigned id = t->getAttributeValueAsInt("id", 0);
 		if (id >= MAX_DEV) {
 			throw MSXException(
 				"Invalid SCSI id: ", id,
@@ -107,7 +104,7 @@ MB89352::MB89352(const DeviceConfig& config)
 			throw MSXException("Duplicate SCSI id: ", id);
 		}
 		DeviceConfig conf(config, *t);
-		auto& type = t->getChild("type").getData();
+		auto type = t->getChildData("type");
 		if (type == "SCSIHD") {
 			dev[id] = std::make_unique<SCSIHD>(conf, buffer,
 			        SCSIDevice::MODE_SCSI2 | SCSIDevice::MODE_MEGASCSI);
@@ -125,11 +122,7 @@ MB89352::MB89352(const DeviceConfig& config)
 	reset(false);
 
 	// avoid UMR on savestate
-	memset(buffer.data(), 0, SCSIDevice::BUFFER_SIZE);
-	msgin = 0;
-	blockCounter = 0;
-	nextPhase = SCSI::UNDEFINED;
-	targetId = 0;
+	ranges::fill(buffer, 0);
 }
 
 void MB89352::disconnect()
@@ -154,11 +147,11 @@ void MB89352::softReset()
 {
 	isEnabled = false;
 
-	for (int i = 2; i < 15; ++i) {
+	for (auto i : xrange(2, 15)) {
 		regs[i] = 0;
 	}
 	regs[15] = 0xFF;               // un mapped
-	memset(cdb, 0, sizeof(cdb));
+	ranges::fill(cdb, 0);
 
 	cdbIdx = 0;
 	bufIdx = 0;
@@ -166,7 +159,7 @@ void MB89352::softReset()
 	disconnect();
 }
 
-void MB89352::reset(bool scsireset)
+void MB89352::reset(bool scsiReset)
 {
 	regs[REG_BDID] = 0x80;     // Initial value
 	regs[REG_SCTL] = 0x80;
@@ -176,14 +169,14 @@ void MB89352::reset(bool scsireset)
 
 	softReset();
 
-	if (scsireset) {
+	if (scsiReset) {
 		for (auto& d : dev) {
 			d->reset();
 		}
 	}
 }
 
-void MB89352::setACKREQ(byte& value)
+void MB89352::setACKREQ(uint8_t& value)
 {
 	// REQ check
 	if ((regs[REG_PSNS] & (PSNS_REQ | PSNS_BSY)) != (PSNS_REQ | PSNS_BSY)) {
@@ -274,7 +267,7 @@ void MB89352::resetACKREQ()
 			regs[REG_PSNS] = PSNS_REQ | PSNS_BSY | PSNS_DATAIN;
 		} else {
 			if (blockCounter > 0) {
-				counter = dev[targetId]->dataIn(blockCounter);
+				counter = narrow<int>(dev[targetId]->dataIn(blockCounter));
 				if (counter) {
 					regs[REG_PSNS] = PSNS_REQ | PSNS_BSY | PSNS_DATAIN;
 					bufIdx = 0;
@@ -290,7 +283,7 @@ void MB89352::resetACKREQ()
 		if (--counter > 0) {
 			regs[REG_PSNS] = PSNS_REQ | PSNS_BSY | PSNS_DATAOUT;
 		} else {
-			counter = dev[targetId]->dataOut(blockCounter);
+			counter = narrow<int>(dev[targetId]->dataOut(blockCounter));
 			if (counter) {
 				regs[REG_PSNS] = PSNS_REQ | PSNS_BSY | PSNS_DATAOUT;
 				bufIdx = 0;
@@ -307,7 +300,7 @@ void MB89352::resetACKREQ()
 		} else {
 			bufIdx = 0; // reset buffer index
 			// TODO: devBusy = true;
-			counter = dev[targetId]->executeCmd(cdb, phase, blockCounter);
+			counter = narrow<int>(dev[targetId]->executeCmd(cdb, phase, blockCounter));
 			switch (phase) {
 			case SCSI::DATA_IN:
 				regs[REG_PSNS] = PSNS_REQ | PSNS_BSY | PSNS_DATAIN;
@@ -340,7 +333,7 @@ void MB89352::resetACKREQ()
 			break;
 		}
 		msgin = 0;
-		// fall-through
+		[[fallthrough]];
 	case SCSI::MSG_OUT: // Message Out phase
 		if (msgin == -1) {
 			disconnect();
@@ -405,7 +398,7 @@ void MB89352::resetACKREQ()
 	}
 }
 
-byte MB89352::readDREG()
+uint8_t MB89352::readDREG()
 {
 	if (isTransfer && (tc > 0)) {
 		setACKREQ(regs[REG_DREG]);
@@ -423,7 +416,7 @@ byte MB89352::readDREG()
 	}
 }
 
-void MB89352::writeDREG(byte value)
+void MB89352::writeDREG(uint8_t value)
 {
 	if (isTransfer && (tc > 0)) {
 		setACKREQ(value);
@@ -438,7 +431,7 @@ void MB89352::writeDREG(byte value)
 	}
 }
 
-void MB89352::writeRegister(byte reg, byte value)
+void MB89352::writeRegister(uint8_t reg, uint8_t value)
 {
 	switch (reg) {
 	case REG_DREG: // write data Register
@@ -452,7 +445,7 @@ void MB89352::writeRegister(byte reg, byte value)
 
 		// bus reset
 		if (value & 0x10) {
-			if (((regs[REG_SCMD] & 0x10) == 0) & (regs[REG_SCTL] == 0)) {
+			if (((regs[REG_SCMD] & 0x10) == 0) && (regs[REG_SCTL] == 0)) {
 				rst = true;
 				regs[REG_INTS] |= INTS_ResetCondition;
 				for (auto& d : dev) {
@@ -603,7 +596,7 @@ void MB89352::writeRegister(byte reg, byte value)
 		// set Bus Device ID
 		value &= 7;
 		myId = value;
-		regs[REG_BDID] = 1 << value;
+		regs[REG_BDID] = uint8_t(1 << value);
 		break;
 
 		// Nothing
@@ -615,36 +608,33 @@ void MB89352::writeRegister(byte reg, byte value)
 		break;
 
 	case REG_SCTL: {
-		bool flag = !(value & 0xE0);
-		if (flag != isEnabled) {
+		if (bool flag = !(value & 0xE0); flag != isEnabled) {
 			isEnabled = flag;
 			if (!flag) {
 				softReset();
 			}
 		}
+		[[fallthrough]];
 	}
-		// fall-through
 	default:
 		regs[reg] = value;
 	}
 }
 
-byte MB89352::getSSTS() const
+uint8_t MB89352::getSSTS() const
 {
-	byte result = 1; // set fifo empty
-	if (isTransfer) {
-		if (regs[REG_PSNS] & PSNS_IO) { // SCSI -> SPC transfer
-			if (tc >= 8) {
-				result = 2; // set fifo full
-			} else {
-				if (tc != 0) {
-					result = 0; // set fifo 1..7 bytes
-				}
+	uint8_t result = 1; // set fifo empty
+	if (isTransfer && (regs[REG_PSNS] & PSNS_IO)) { // SCSI -> SPC transfer
+		if (tc >= 8) {
+			result = 2; // set fifo full
+		} else {
+			if (tc != 0) {
+				result = 0; // set fifo 1..7 bytes
 			}
 		}
 	}
 	if (phase != SCSI::BUS_FREE) {
-		result |= 0x80; // set iniciator
+		result |= 0x80; // set indicator
 	}
 	if (isBusy) {
 		result |= 0x20; // set SPC_BSY
@@ -661,7 +651,7 @@ byte MB89352::getSSTS() const
 	return result;
 }
 
-byte MB89352::readRegister(byte reg)
+uint8_t MB89352::readRegister(uint8_t reg)
 {
 	switch (reg) {
 	case REG_DREG:
@@ -669,7 +659,7 @@ byte MB89352::readRegister(byte reg)
 
 	case REG_PSNS:
 		if (phase == SCSI::EXECUTE) {
-			counter = dev[targetId]->executingCmd(phase, blockCounter);
+			counter = narrow<int>(dev[targetId]->executingCmd(phase, blockCounter));
 			if (atn && phase != SCSI::EXECUTE) {
 				nextPhase = phase;
 				phase = SCSI::MSG_OUT;
@@ -701,7 +691,7 @@ byte MB89352::readRegister(byte reg)
 	}
 }
 
-byte MB89352::peekDREG() const
+uint8_t MB89352::peekDREG() const
 {
 	if (isTransfer && (tc > 0)) {
 		return regs[REG_DREG];
@@ -710,7 +700,7 @@ byte MB89352::peekDREG() const
 	}
 }
 
-byte MB89352::peekRegister(byte reg) const
+uint8_t MB89352::peekRegister(uint8_t reg) const
 {
 	switch (reg) {
 	case REG_DREG:
@@ -720,11 +710,11 @@ byte MB89352::peekRegister(byte reg) const
 	case REG_SSTS:
 		return getSSTS();
 	case REG_TCH:
-		return (tc >> 16) & 0xFF;
+		return narrow_cast<uint8_t>((tc >> 16) & 0xFF);
 	case REG_TCM:
-		return (tc >>  8) & 0xFF;
+		return narrow_cast<uint8_t>((tc >>  8) & 0xFF);
 	case REG_TCL:
-		return (tc >>  0) & 0xFF;
+		return narrow_cast<uint8_t>((tc >>  0) & 0xFF);
 	default:
 		return regs[reg];
 	}
@@ -732,7 +722,7 @@ byte MB89352::peekRegister(byte reg) const
 
 
 // TODO duplicated in WD33C93.cc
-static std::initializer_list<enum_string<SCSI::Phase>> phaseInfo = {
+static constexpr std::initializer_list<enum_string<SCSI::Phase>> phaseInfo = {
 	{ "UNDEFINED",   SCSI::UNDEFINED   },
 	{ "BUS_FREE",    SCSI::BUS_FREE    },
 	{ "ARBITRATION", SCSI::ARBITRATION },
@@ -751,29 +741,29 @@ SERIALIZE_ENUM(SCSI::Phase, phaseInfo);
 template<typename Archive>
 void MB89352::serialize(Archive& ar, unsigned /*version*/)
 {
-	ar.serialize_blob("buffer", buffer.data(), buffer.size());
-	char tag[8] = { 'd', 'e', 'v', 'i', 'c', 'e', 'X', 0 };
-	for (unsigned i = 0; i < MAX_DEV; ++i) {
+	ar.serialize_blob("buffer", buffer);
+	std::array<char, 8> tag = {'d', 'e', 'v', 'i', 'c', 'e', 'X', 0};
+	for (auto [i, d] : enumerate(dev)) {
 		tag[6] = char('0' + i);
-		ar.serializePolymorphic(tag, *dev[i]);
+		ar.serializePolymorphic(tag.data(), *d);
 	}
-	ar.serialize("bufIdx", bufIdx);
-	ar.serialize("msgin", msgin);
-	ar.serialize("counter", counter);
-	ar.serialize("blockCounter", blockCounter);
-	ar.serialize("tc", tc);
-	ar.serialize("phase", phase);
-	ar.serialize("nextPhase", nextPhase);
-	ar.serialize("myId", myId);
-	ar.serialize("targetId", targetId);
-	ar.serialize_blob("registers", regs, sizeof(regs));
-	ar.serialize("rst", rst);
-	ar.serialize("atn", atn);
-	ar.serialize("isEnabled", isEnabled);
-	ar.serialize("isBusy", isBusy);
-	ar.serialize("isTransfer", isTransfer);
-	ar.serialize("cdbIdx", cdbIdx);
-	ar.serialize_blob("cdb", cdb, sizeof(cdb));
+	ar.serialize("bufIdx",       bufIdx,
+	             "msgin",        msgin,
+	             "counter",      counter,
+	             "blockCounter", blockCounter,
+	             "tc",           tc,
+	             "phase",        phase,
+	             "nextPhase",    nextPhase,
+	             "myId",         myId,
+	             "targetId",     targetId);
+	ar.serialize_blob("registers", regs);
+	ar.serialize("rst",        rst,
+	             "atn",        atn,
+	             "isEnabled",  isEnabled,
+	             "isBusy",     isBusy,
+	             "isTransfer", isTransfer,
+	             "cdbIdx",     cdbIdx);
+	ar.serialize_blob("cdb", cdb);
 }
 INSTANTIATE_SERIALIZE_METHODS(MB89352);
 

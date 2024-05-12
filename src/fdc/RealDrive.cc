@@ -1,22 +1,31 @@
 #include "RealDrive.hh"
 #include "Disk.hh"
-#include "DiskChanger.hh"
+#include "DummyDisk.hh"
+#include "DirAsDSK.hh"
+#include "RamDSKDiskImage.hh"
+#include "DMKDiskImage.hh"
 #include "MSXMotherBoard.hh"
 #include "Reactor.hh"
 #include "LedStatus.hh"
-#include "CommandController.hh"
-#include "CliComm.hh"
+#include "MSXCommandController.hh"
+#include "MSXCliComm.hh"
 #include "GlobalSettings.hh"
 #include "MSXException.hh"
+#include "narrow.hh"
 #include "serialize.hh"
+#include "unreachable.hh"
 #include <memory>
-
-using std::string;
 
 namespace openmsx {
 
+std::shared_ptr<RealDrive::DrivesInUse> RealDrive::getDrivesInUse(MSXMotherBoard& motherBoard)
+{
+	return motherBoard.getSharedStuff<DrivesInUse>("drivesInUse");
+}
+
 RealDrive::RealDrive(MSXMotherBoard& motherBoard_, EmuDuration::param motorTimeout_,
-                     bool signalsNeedMotorOn_, bool doubleSided)
+                     bool signalsNeedMotorOn_, bool doubleSided,
+                     DiskDrive::TrackMode trackMode_)
 	: syncLoadingTimeout(motherBoard_.getScheduler())
 	, syncMotorTimeout  (motherBoard_.getScheduler())
 	, motherBoard(motherBoard_)
@@ -24,13 +33,11 @@ RealDrive::RealDrive(MSXMotherBoard& motherBoard_, EmuDuration::param motorTimeo
 		motherBoard.getReactor().getGlobalSettings().getThrottleManager())
 	, motorTimeout(motorTimeout_)
 	, motorTimer(getCurrentTime())
-	, headPos(0), side(0), startAngle(0)
-	, motorStatus(false)
 	, doubleSizedDrive(doubleSided)
 	, signalsNeedMotorOn(signalsNeedMotorOn_)
-	, trackValid(false), trackDirty(false)
+	, trackMode(trackMode_)
 {
-	drivesInUse = motherBoard.getSharedStuff<DrivesInUse>("drivesInUse");
+	drivesInUse = getDrivesInUse(motherBoard);
 
 	unsigned i = 0;
 	while ((*drivesInUse)[i]) {
@@ -39,14 +46,15 @@ RealDrive::RealDrive(MSXMotherBoard& motherBoard_, EmuDuration::param motorTimeo
 		}
 	}
 	(*drivesInUse)[i] = true;
-	string driveName = "diskX"; driveName[4] = char('a' + i);
+	std::string driveName = "diskX"; driveName[4] = char('a' + i);
 
-	if (motherBoard.getCommandController().hasCommand(driveName)) {
+	if (motherBoard.getMSXCommandController().hasCommand(driveName)) {
 		throw MSXException("Duplicated drive name: ", driveName);
 	}
 	motherBoard.getMSXCliComm().update(CliComm::HARDWARE, driveName, "add");
-	changer = std::make_unique<DiskChanger>(motherBoard, driveName, true, doubleSizedDrive,
-	                                        [this]() { invalidateTrack(); });
+	changer.emplace(motherBoard, driveName, true, doubleSizedDrive,
+	                [this]() { invalidateTrack(); });
+	motherBoard.registerMediaInfo(changer->getDriveName(), *this);
 }
 
 RealDrive::~RealDrive()
@@ -58,12 +66,43 @@ RealDrive::~RealDrive()
 	}
 	doSetMotor(false, getCurrentTime()); // to send LED event
 
+	motherBoard.unregisterMediaInfo(*this);
+
 	const auto& driveName = changer->getDriveName();
 	motherBoard.getMSXCliComm().update(CliComm::HARDWARE, driveName, "remove");
 
 	unsigned driveNum = driveName[4] - 'a';
 	assert((*drivesInUse)[driveNum]);
 	(*drivesInUse)[driveNum] = false;
+}
+
+void RealDrive::getMediaInfo(TclObject& result)
+{
+	auto typeStr = [&]() -> std::string_view {
+		if (dynamic_cast<DummyDisk*>(&(changer->getDisk()))) {
+			return "empty";
+		} else if (dynamic_cast<DirAsDSK*>(&(changer->getDisk()))) {
+			return "dirasdisk";
+		} else if (dynamic_cast<RamDSKDiskImage*>(&(changer->getDisk()))) {
+			return "ramdsk";
+		} else {
+			return "file";
+		}
+	}();
+	result.addDictKeyValues("target", changer->getDiskName().getResolved(),
+	                        "type", typeStr,
+	                        "readonly", changer->getDisk().isWriteProtected(),
+	                        "doublesided", changer->getDisk().isDoubleSided());
+	if (!dynamic_cast<DMKDiskImage*>(&(changer->getDisk()))) {
+		result.addDictKeyValues("size", int(changer->getDisk().getNbSectors() * SectorAccessibleDisk::SECTOR_SIZE));
+	}
+	if (auto* disk = changer->getSectorAccessibleDisk()) {
+		TclObject patches;
+		patches.addListElements(view::transform(disk->getPatches(), [](auto& p) {
+			return p.getResolved();
+		}));
+		result.addDictKeyValue("patches", patches);
+	}
 }
 
 bool RealDrive::isDiskInserted() const
@@ -93,7 +132,7 @@ bool RealDrive::isWriteProtected() const
 	return changer->getDisk().isWriteProtected();
 }
 
-bool RealDrive::isDoubleSided() const
+bool RealDrive::isDoubleSided()
 {
 	return doubleSizedDrive ? changer->getDisk().isDoubleSided()
 	                        : false;
@@ -105,13 +144,72 @@ void RealDrive::setSide(bool side_)
 	side = side_ ? 1 : 0; // also for single-sided drives
 }
 
+bool RealDrive::getSide() const
+{
+	return side;
+}
+
+unsigned RealDrive::getMaxTrack() const
+{
+	constexpr unsigned MAX_TRACK = 85;
+	switch (trackMode) {
+	case DiskDrive::TrackMode::NORMAL:
+		return MAX_TRACK;
+	case DiskDrive::TrackMode::YAMAHA_FD_03:
+		// Yamaha FD-03: Tracks are calibrated around 4 steps per track, max 3 step further than base
+		return MAX_TRACK * 4 + 3;
+	default:
+		UNREACHABLE;
+	}
+}
+
+std::optional<unsigned> RealDrive::getDiskReadTrack() const
+{
+	// Translate head-position to track number on disk.
+	// Normally this is a 1-to-1 mapping, but on the Yamaha-FD-03 the head
+	// moves 4 steps for every track on disk. This means it can be
+	// between disk tracks so that it can't read valid data.
+	switch (trackMode) {
+	case DiskDrive::TrackMode::NORMAL:
+		return headPos;
+	case DiskDrive::TrackMode::YAMAHA_FD_03:
+		// Tracks are at a multiple of 4 steps.
+		// But also make sure the track at 1 step lower and 1 step up correctly reads.
+		// This makes the driver (calibration routine) use a track offset of 0 (so at a multiple of 4 steps).
+		if ((headPos >= 2) && ((headPos % 4) != 2)) {
+			return (headPos - 2) / 4;
+		} else {
+			return {};
+		}
+	default:
+		UNREACHABLE;
+	}
+}
+
+std::optional<unsigned> RealDrive::getDiskWriteTrack() const
+{
+	switch (trackMode) {
+	case DiskDrive::TrackMode::NORMAL:
+		return headPos;
+	case DiskDrive::TrackMode::YAMAHA_FD_03:
+		// For writes allow only exact multiples of 4. But track 0 is at step 4
+		if ((headPos >= 4) && ((headPos % 4) == 0)) {
+			return (headPos - 4) / 4;
+		} else {
+			return {};
+		}
+	default:
+		UNREACHABLE;
+	}
+}
+
 void RealDrive::step(bool direction, EmuTime::param time)
 {
 	invalidateTrack();
 
 	if (direction) {
 		// step in
-		if (headPos < MAX_TRACK) {
+		if (headPos < getMaxTrack()) {
 			headPos++;
 		}
 	} else {
@@ -191,12 +289,20 @@ void RealDrive::setMotor(bool status, EmuTime::param time)
 	}
 }
 
+bool RealDrive::getMotor() const
+{
+	// note: currently unused because of the implementation in DriveMultiplexer
+	// note: currently returns the actual motor status, could be different from the
+	//       last set status because of 'syncMotorTimeout'.
+	return motorStatus;
+}
+
 unsigned RealDrive::getCurrentAngle(EmuTime::param time) const
 {
 	if (motorStatus) {
 		// rotating, take passed time into account
 		auto deltaAngle = motorTimer.getTicksTillUp(time);
-		return (startAngle + deltaAngle) % TICKS_PER_ROTATION;
+		return narrow_cast<unsigned>((startAngle + deltaAngle) % TICKS_PER_ROTATION);
 	} else {
 		// not rotating, angle didn't change
 		return startAngle;
@@ -255,7 +361,7 @@ bool RealDrive::indexPulse(EmuTime::param time)
 EmuTime RealDrive::getTimeTillIndexPulse(EmuTime::param time, int count)
 {
 	if (!motorStatus || !isDiskInserted()) { // TODO is this correct?
-		return EmuTime::infinity;
+		return EmuTime::infinity();
 	}
 	unsigned delta = TICKS_PER_ROTATION - getCurrentAngle(time);
 	auto dur1 = MotorClock::duration(delta);
@@ -281,7 +387,13 @@ void RealDrive::getTrack()
 		return;
 	}
 	if (!trackValid) {
-		changer->getDisk().readTrack(headPos, side, track);
+		if (auto rdTrack = getDiskReadTrack()) {
+			changer->getDisk().readTrack(narrow<uint8_t>(*rdTrack),
+			                             narrow<uint8_t>(side),
+			                             track);
+		} else {
+			track.clear(track.getLength());
+		}
 		trackValid = true;
 		trackDirty = false;
 	}
@@ -293,7 +405,7 @@ unsigned RealDrive::getTrackLength()
 	return track.getLength();
 }
 
-void RealDrive::writeTrackByte(int idx, byte val, bool addIdam)
+void RealDrive::writeTrackByte(int idx, uint8_t val, bool addIdam)
 {
 	getTrack();
 	// It's possible 'trackValid==false', but that's fine because in that
@@ -302,20 +414,20 @@ void RealDrive::writeTrackByte(int idx, byte val, bool addIdam)
 	trackDirty = true;
 }
 
-byte RealDrive::readTrackByte(int idx)
+uint8_t RealDrive::readTrackByte(int idx)
 {
 	getTrack();
 	return trackValid ? track.read(idx) : 0;
 }
 
-static inline unsigned divUp(unsigned a, unsigned b)
+static constexpr unsigned divUp(unsigned a, unsigned b)
 {
 	return (a + b - 1) / b;
 }
 EmuTime RealDrive::getNextSector(EmuTime::param time, RawTrack::Sector& sector)
 {
 	getTrack();
-	int currentAngle = getCurrentAngle(time);
+	unsigned currentAngle = getCurrentAngle(time);
 	unsigned trackLen = track.getLength();
 	unsigned idx = divUp(currentAngle * trackLen, TICKS_PER_ROTATION);
 
@@ -326,14 +438,16 @@ EmuTime RealDrive::getNextSector(EmuTime::param time, RawTrack::Sector& sector)
 	// distance is only 3 bytes or less we need to skip to the next sector
 	// header. IOW we need a sector header that's at least 4 bytes removed
 	// from the current position.
-	if (!track.decodeNextSector(idx + 4, sector)) {
-		return EmuTime::infinity;
+	if (auto s = track.decodeNextSector(idx + 4)) {
+		sector = *s;
+	} else {
+		return EmuTime::infinity();
 	}
-	int sectorAngle = divUp(sector.addrIdx * TICKS_PER_ROTATION, trackLen);
+	unsigned sectorAngle = divUp(sector.addrIdx * TICKS_PER_ROTATION, trackLen);
 
 	// note that if there is only one sector in this track, we have
 	// to do a full rotation.
-	int delta = sectorAngle - currentAngle;
+	auto delta = narrow<int>(sectorAngle) - narrow<int>(currentAngle);
 	if (delta < 4) delta += TICKS_PER_ROTATION;
 	assert(4 <= delta); assert(unsigned(delta) < (TICKS_PER_ROTATION + 4));
 
@@ -343,7 +457,11 @@ EmuTime RealDrive::getNextSector(EmuTime::param time, RawTrack::Sector& sector)
 void RealDrive::flushTrack()
 {
 	if (trackValid && trackDirty) {
-		changer->getDisk().writeTrack(headPos, side, track);
+		if (auto wrTrack = getDiskWriteTrack()) {
+			changer->getDisk().writeTrack(narrow<uint8_t>(*wrTrack),
+			                              narrow<uint8_t>(side),
+			                              track);
+		}
 		trackDirty = false;
 	}
 }
@@ -384,28 +502,28 @@ template<typename Archive>
 void RealDrive::serialize(Archive& ar, unsigned version)
 {
 	if (ar.versionAtLeast(version, 4)) {
-		ar.serialize("syncLoadingTimeout", syncLoadingTimeout);
-		ar.serialize("syncMotorTimeout",   syncMotorTimeout);
+		ar.serialize("syncLoadingTimeout", syncLoadingTimeout,
+		             "syncMotorTimeout",   syncMotorTimeout);
 	} else {
 		Schedulable::restoreOld(ar, {&syncLoadingTimeout, &syncMotorTimeout});
 	}
-	ar.serialize("motorTimer", motorTimer);
-	ar.serialize("changer", *changer);
-	ar.serialize("headPos", headPos);
-	ar.serialize("side", side);
-	ar.serialize("motorStatus", motorStatus);
+	ar.serialize("motorTimer", motorTimer,
+	             "changer",    *changer,
+	             "headPos",    headPos,
+	             "side",       side,
+	             "motorStatus", motorStatus);
 	if (ar.versionAtLeast(version, 3)) {
 		ar.serialize("startAngle", startAngle);
 	} else {
-		assert(ar.isLoader());
+		assert(Archive::IS_LOADER);
 		startAngle = 0;
 	}
 	if (ar.versionAtLeast(version, 5)) {
-		ar.serialize("track", track);
-		ar.serialize("trackValid" ,trackValid);
+		ar.serialize("track",      track);
+		ar.serialize("trackValid", trackValid);
 		ar.serialize("trackDirty", trackDirty);
 	}
-	if (ar.isLoader()) {
+	if constexpr (Archive::IS_LOADER) {
 		// Right after a loadstate, the 'loading indicator' state may
 		// be wrong, but that's OK. It's anyway only a heuristic and
 		// it will be correct after at most one second.

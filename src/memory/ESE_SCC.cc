@@ -1,5 +1,5 @@
 /*
- * 'Ese-SCC' cartride and 'MEGA-SCSI with SCC'(alias WAVE-SCSI) cartrige.
+ * 'Ese-SCC' cartridge and 'MEGA-SCSI with SCC'(alias WAVE-SCSI) cartridge.
  *
  * Specification:
  *  SRAM(MegaROM) controller: KONAMI_SCC type
@@ -7,11 +7,11 @@
  *  SCSI Protocol controller: Fujitsu MB89352A
  *
  * ESE-SCC sram write control register:
- *  7FFEH, 7FFFH SRAM write control.
- *   bit4       = 1..SRAM writing in 4000H-7FFDH can be done.
+ *  0x7FFE, 0x7FFF SRAM write control.
+ *   bit4       = 1..SRAM writing in 0x4000-0x7FFD can be done.
  *                   It is given priority more than bank changing.
  *              = 0..SRAM read only
- *   othet bit  = not used
+ *   other bit  = not used
  *
  * WAVE-SCSI bank control register
  *             6bit register (MA13-MA18, B0-B5)
@@ -48,15 +48,19 @@
 #include "ESE_SCC.hh"
 #include "MB89352.hh"
 #include "MSXException.hh"
+#include "narrow.hh"
+#include "one_of.hh"
+#include "ranges.hh"
 #include "serialize.hh"
+#include "xrange.hh"
 #include <memory>
 
 namespace openmsx {
 
-unsigned ESE_SCC::getSramSize(bool withSCSI) const
+size_t ESE_SCC::getSramSize(bool withSCSI) const
 {
-	unsigned sramSize = getDeviceConfig().getChildDataAsInt("sramsize", 256); // size in kb
-	if (sramSize != 1024 && sramSize != 512 && sramSize != 256 && sramSize != 128) {
+	size_t sramSize = getDeviceConfig().getChildDataAsInt("sramsize", 256); // size in kb
+	if (sramSize != one_of(1024u, 512u, 256u, 128u)) {
 		throw MSXException(
 			"SRAM size for ", getName(),
 			" should be 128, 256, 512 or 1024kB and not ",
@@ -74,15 +78,10 @@ ESE_SCC::ESE_SCC(const DeviceConfig& config, bool withSCSI)
 	, scc(getName(), config, getCurrentTime())
 	, spc(withSCSI ? std::make_unique<MB89352>(config) : nullptr)
 	, romBlockDebug(*this, mapper, 0x4000, 0x8000, 13)
-	, mapperMask((sram.getSize() / 0x2000) - 1)
+	, mapperMask(narrow<byte>((sram.size() / 0x2000) - 1))
 {
 	// initialized mapper
-	sccEnable   = false;
-	spcEnable   = false;
-	writeEnable = false;
-	for (int i = 0; i < 4; ++i) {
-		mapper[i] = i;
-	}
+	ranges::iota(mapper, byte(0));
 }
 
 void ESE_SCC::powerUp(EmuTime::param time)
@@ -94,7 +93,7 @@ void ESE_SCC::powerUp(EmuTime::param time)
 void ESE_SCC::reset(EmuTime::param time)
 {
 	setMapperHigh(0);
-	for (int i = 0; i < 4; ++i) {
+	for (auto i : xrange(byte(4))) {
 		setMapperLow(i, i);
 	}
 	scc.reset(time);
@@ -113,14 +112,14 @@ void ESE_SCC::setMapperLow(unsigned page, byte value)
 		}
 	}
 	byte newValue = value;
-	if (page == 0) newValue |= mapper[0] & 0x40;
+	if (page == 0) newValue |= byte(mapper[0] & 0x40);
 	newValue &= mapperMask;
 	if (mapper[page] != newValue) {
 		mapper[page] = newValue;
 		flush = true;
 	}
 	if (flush) {
-		invalidateMemCache(0x4000 + 0x2000 * page, 0x2000);
+		invalidateDeviceRWCache(0x4000 + 0x2000 * page, 0x2000);
 	}
 }
 
@@ -131,19 +130,19 @@ void ESE_SCC::setMapperHigh(byte value)
 
 	bool flush = false;
 	byte mapperHigh = value & 0x40;
-	bool newSpcEnable = mapperHigh && !writeEnable;
-	if (spcEnable != newSpcEnable) {
+	if (bool newSpcEnable = mapperHigh && !writeEnable;
+	    spcEnable != newSpcEnable) {
 		spcEnable = newSpcEnable;
 		flush = true;
 	}
 
-	byte newValue = ((mapper[0] & 0x3F) | mapperHigh) & mapperMask;
-	if (mapper[0] != newValue) {
+	if (byte newValue = ((mapper[0] & 0x3F) | mapperHigh) & mapperMask;
+	    mapper[0] != newValue) {
 		mapper[0] = newValue;
 		flush = true;
 	}
 	if (flush) {
-		invalidateMemCache(0x4000, 0x2000);
+		invalidateDeviceRWCache(0x4000, 0x2000);
 	}
 }
 
@@ -161,7 +160,7 @@ byte ESE_SCC::readMem(word address, EmuTime::param time)
 	}
 	// SCC bank
 	if (sccEnable && (address >= 0x9800) && (address < 0xa000)) {
-		return scc.readMem(address & 0xff, time);
+		return scc.readMem(narrow_cast<uint8_t>(address & 0xff), time);
 	}
 	// SRAM read
 	return sram[mapper[page] * 0x2000 + (address & 0x1fff)];
@@ -181,7 +180,7 @@ byte ESE_SCC::peekMem(word address, EmuTime::param time) const
 	}
 	// SCC bank
 	if (sccEnable && (address >= 0x9800) && (address < 0xa000)) {
-		return scc.peekMem(address & 0xff, time);
+		return scc.peekMem(narrow_cast<uint8_t>(address & 0xff), time);
 	}
 	// SRAM read
 	return sram[mapper[page] * 0x2000 + (address & 0x1fff)];
@@ -218,7 +217,7 @@ void ESE_SCC::writeMem(word address, byte value, EmuTime::param time)
 
 	// SCC write
 	if (sccEnable && (0x9800 <= address) && (address < 0xa000)) {
-		scc.writeMem(address & 0xff, value, time);
+		scc.writeMem(narrow_cast<uint8_t>(address & 0xff), value, time);
 		return;
 	}
 
@@ -228,14 +227,14 @@ void ESE_SCC::writeMem(word address, byte value, EmuTime::param time)
 		return;
 	}
 
-	// SRAM write (processing of 4000-7FFDH)
+	// SRAM write (processing of 0x4000-0x7FFD)
 	if (writeEnable && (page < 2)) {
 		sram.write(mapper[page] * 0x2000 + (address & 0x1FFF), value);
 		return;
 	}
 
 	// Bank change
-	if (((address & 0x1800) == 0x1000)) {
+	if ((address & 0x1800) == 0x1000) {
 		setMapperLow(page, value);
 		return;
 	}
@@ -251,13 +250,13 @@ template<typename Archive>
 void ESE_SCC::serialize(Archive& ar, unsigned /*version*/)
 {
 	ar.template serializeBase<MSXDevice>(*this);
-	ar.serialize("sram", sram);
-	ar.serialize("scc", scc);
+	ar.serialize("sram", sram,
+	             "scc",  scc);
 	if (spc) ar.serialize("MB89352", *spc);
-	ar.serialize("mapper", mapper);
-	ar.serialize("spcEnable", spcEnable);
-	ar.serialize("sccEnable", sccEnable);
-	ar.serialize("writeEnable", writeEnable);
+	ar.serialize("mapper",      mapper,
+	             "spcEnable",   spcEnable,
+	             "sccEnable",   sccEnable,
+	             "writeEnable", writeEnable);
 }
 INSTANTIATE_SERIALIZE_METHODS(ESE_SCC);
 REGISTER_MSXDEVICE(ESE_SCC, "ESE_SCC");

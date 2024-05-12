@@ -9,8 +9,9 @@
     <manufacturer>Sanyo</manufacturer>
     <code>MPC-25FD</code>
     <release_year></release_year>
-    <description>An MSX2 with diskdrive and only one cartridge port.</description>
+    <description>Desktop MSX2 with diskdrive and only one cartridge slot.</description>
     <type>MSX2</type>
+    <region>jp</region>
   </info>
 
   <CassettePort/>
@@ -18,11 +19,11 @@
   <devices>
 
     <PPI id="ppi">
-      <io base="0xA8" num="4"/>
+      <io base="0xA8" num="8"/> <!-- S-3527 mirrors -->
       <sound>
         <volume>16000</volume>
       </sound>
-      <keyboard_type>jp_jis</keyboard_type>
+      <keyboard_type>jp_ansi</keyboard_type>
       <has_keypad>true</has_keypad>
       <key_ghosting_sgc_protected>false</key_ghosting_sgc_protected>
       <code_kana_locks>true</code_kana_locks>
@@ -38,12 +39,12 @@
 
     <PSG id="PSG">
       <type>YM2149</type> <!-- In S3527 -->
-      <keyboardlayout>JIS</keyboardlayout>
+      <keyboardlayout>50on</keyboardlayout>
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="8" type="IO"/> <!-- S-3527 mirrors -->
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <RTC id="Real time clock">
@@ -53,7 +54,8 @@
     </RTC>
 
     <PrinterPort id="Printer Port">
-      <io base="0x90" num="2"/>
+      <io base="0x90" num="8" type="IO"/> <!-- S-3527 mirrors -->
+      <status_readable_on_all_ports>true</status_readable_on_all_ports> <!-- S-3527 property -->
     </PrinterPort>
 
     <primary slot="0">
@@ -88,7 +90,8 @@
           <drives>1</drives>
           <rom>
             <filename>mpc-25fd_disk.rom</filename>
-            <sha1>58ac78bba29a06645ca8d6a94ef2ac68b743ad32</sha1>
+            <sha1>bdbc75aacba4ea0f359694f304ae436914733460</sha1>
+            <sha1>58ac78bba29a06645ca8d6a94ef2ac68b743ad32</sha1> <!-- dirty register region -->
           </rom>
         </WD2793>
 

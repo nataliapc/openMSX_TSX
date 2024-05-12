@@ -6,8 +6,9 @@
     <manufacturer>Sanyo</manufacturer>
     <code>PHC-70FD2</code>
     <release_year>1988</release_year>
-    <description/>
+    <description>Japanese MSX2+ with MSX-MUSIC and two disk drives.</description>
     <type>MSX2+</type>
+    <region>jp</region>
   </info>
 
   <MapperReadBackBits>largest</MapperReadBackBits>
@@ -51,8 +52,8 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <RTC id="Real time clock">
@@ -140,6 +141,7 @@
           <sound>
             <volume>9000</volume>
           </sound>
+          <ym2413-core>NukeYKT</ym2413-core>
           <io base="0x7C" num="2" type="O"/>
           <mem base="0x4000" size="0x4000"/>
         </MSX-MUSIC>

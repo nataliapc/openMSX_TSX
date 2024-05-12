@@ -1,16 +1,16 @@
 #include "Disk.hh"
 #include "DiskExceptions.hh"
-
-using std::string;
+#include "narrow.hh"
+#include "one_of.hh"
 
 namespace openmsx {
 
 Disk::Disk(DiskName name_)
-	: name(std::move(name_)), nbSides(0)
+	: name(std::move(name_))
 {
 }
 
-void Disk::writeTrack(byte track, byte side, const RawTrack& input)
+void Disk::writeTrack(uint8_t track, uint8_t side, const RawTrack& input)
 {
 	if (isWriteProtected()) {
 		throw WriteProtectedException();
@@ -33,7 +33,7 @@ bool Disk::isDoubleSided()
 //       conversion without relying on the detected geometry parameters.
 //       Otherwise the detectGeometry() method (which itself reads these
 //       two sectors) would get in an infinite loop.
-size_t Disk::physToLog(byte track, byte side, byte sector)
+size_t Disk::physToLog(uint8_t track, uint8_t side, uint8_t sector)
 {
 	if ((track == 0) && (side == 0)) {
 		return sector - 1;
@@ -43,20 +43,21 @@ size_t Disk::physToLog(byte track, byte side, byte sector)
 	}
 	return sectorsPerTrack * (side + nbSides * track) + (sector - 1);
 }
-void Disk::logToPhys(size_t log, byte& track, byte& side, byte& sector)
+Disk::TSS Disk::logToPhys(size_t log)
 {
 	if (log <= 1) {
-		track = 0;
-		side = 0;
-		sector = byte(log + 1);
-		return;
+		uint8_t track = 0;
+		uint8_t side = 0;
+		auto sector = narrow<uint8_t>(log + 1);
+		return {track, side, sector};
 	}
 	if (!nbSides) {
 		detectGeometry();
 	}
-	track  = byte(log / (nbSides * sectorsPerTrack)); // TODO check for overflow
-	side   = byte((log / sectorsPerTrack) % nbSides);
-	sector = byte((log % sectorsPerTrack) + 1);
+	auto track  = narrow<uint8_t>(log / (size_t(nbSides) * sectorsPerTrack));
+	auto side   = narrow<uint8_t>((log / sectorsPerTrack) % nbSides);
+	auto sector = narrow<uint8_t>((log % sectorsPerTrack) + 1);
+	return {track, side, sector};
 }
 
 unsigned Disk::getSectorsPerTrack()
@@ -94,7 +95,7 @@ void Disk::detectGeometry()
 	//     If step c) fails, then this disk cannot be read.
 	//
 	//  d) If step b) succeeds, read bytes # 0B to # 1D. This is the
-	//     DPB for MS-DOS, Version 2.0 and above. The DPB for MSXDOS can
+	//     DPB for MS-DOS, Version 2.0 and above. The DPB for MSX-DOS can
 	//     be obtained as follows.
 	//
 	//     ....
@@ -104,7 +105,7 @@ void Disk::detectGeometry()
 
 	//
 	//     Media Descriptor  0F8H  0F9H  0FAh  0FBH  0FCH  0FDH  0FEH  0FFH
-	//       byte (FATID)
+	//       byte (FAT-ID)
 	//     Sectors/track        9     9     8     8     9     9     8     8
 	//     No. of sides         1     2     1     2     1     2     1     2
 	//     Tracks/side         80    80    80    80    40    40    40    40
@@ -112,9 +113,9 @@ void Disk::detectGeometry()
 
 	try {
 		SectorBuffer buf;
-		readSector(0, buf); // bootsector
-		if ((buf.raw[0] == 0xE9) || (buf.raw[0] == 0xEB)) {
-			// use values from bootsector
+		readSector(0, buf); // boot sector
+		if (buf.raw[0] == one_of(0xE9, 0xEB)) {
+			// use values from boot sector
 			sectorsPerTrack = buf.bootSector.sectorsTrack;
 			nbSides         = buf.bootSector.nrSides;
 			if ((sectorsPerTrack == 0) || (sectorsPerTrack > 255) ||
@@ -124,7 +125,7 @@ void Disk::detectGeometry()
 			}
 		} else {
 			readSector(1, buf); // 1st fat sector
-			byte mediaDescriptor = buf.raw[0];
+			auto mediaDescriptor = buf.raw[0];
 			if (mediaDescriptor >= 0xF8) {
 				sectorsPerTrack = (mediaDescriptor & 2) ? 8 : 9;
 				nbSides         = (mediaDescriptor & 1) ? 2 : 1;

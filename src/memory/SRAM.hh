@@ -2,9 +2,11 @@
 #define SRAM_HH
 
 #include "TrackedRam.hh"
+
 #include "DeviceConfig.hh"
 #include "RTSchedulable.hh"
-#include <memory>
+
+#include <optional>
 
 namespace openmsx {
 
@@ -12,28 +14,28 @@ class SRAM final
 {
 public:
 	struct DontLoadTag {};
-	SRAM(int size, const XMLElement& xml, DontLoadTag);
-	SRAM(const std::string& name, const std::string& description,
-	     int size, const DeviceConfig& config, DontLoadTag);
+	SRAM(size_t size, const XMLElement& xml, DontLoadTag);
+	SRAM(const std::string& name, static_string_view description,
+	     size_t size, const DeviceConfig& config, DontLoadTag);
 	SRAM(const std::string& name,
-	     int size, const DeviceConfig& config, const char* header = nullptr,
+	     size_t size, const DeviceConfig& config, const char* header = nullptr,
 	     bool* loaded = nullptr);
-	SRAM(const std::string& name, const std::string& description,
-	     int size, const DeviceConfig& config, const char* header = nullptr,
+	SRAM(const std::string& name, static_string_view description,
+	     size_t size, const DeviceConfig& config, const char* header = nullptr,
 	     bool* loaded = nullptr);
 	~SRAM();
 
-	const byte& operator[](unsigned addr) const {
-		assert(addr < getSize());
+	[[nodiscard]] const byte& operator[](size_t addr) const {
+		assert(addr < size());
 		return ram[addr];
 	}
 	// write() is non-inline because of the auto-sync to disk feature
-	void write(unsigned addr, byte value);
-	void memset(unsigned addr, byte c, unsigned size);
-	unsigned getSize() const {
-		return ram.getSize();
+	void write(size_t addr, byte value);
+	void memset(size_t addr, byte c, size_t size);
+	[[nodiscard]] size_t size() const {
+		return ram.size();
 	}
-	const std::string& getLoadedFilename() const {
+	[[nodiscard]] const std::string& getLoadedFilename() const {
 		return loadedFilename;
 	}
 
@@ -48,10 +50,10 @@ private:
 	private:
 		SRAM& sram;
 	};
-	std::unique_ptr<SRAMSchedulable> schedulable;
+	std::optional<SRAMSchedulable> schedulable;
 
 	void load(bool* loaded);
-	void save();
+	void save() const;
 
 	const DeviceConfig config;
 	TrackedRam ram;

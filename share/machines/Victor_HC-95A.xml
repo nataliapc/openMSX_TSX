@@ -6,8 +6,9 @@
     <manufacturer>Victor</manufacturer>
     <code>HC-95A</code>
     <release_year>1988</release_year>
-    <description>A top notch MSX2, but note: superimpose and turbo mode are not yet implemented!</description>
+    <description>A top notch MSX2, but note: superimpose and turbo mode are not yet implemented! With 2 disk drives, RS-232C interface, kanji ROM and system control software built in.</description>
     <type>MSX2</type>
+    <region>jp</region>
   </info>
 
   <MapperReadBackBits>largest</MapperReadBackBits>
@@ -50,8 +51,8 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <RTC id="Real time clock">

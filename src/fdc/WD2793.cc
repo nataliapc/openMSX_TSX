@@ -1,70 +1,59 @@
 #include "WD2793.hh"
 #include "DiskDrive.hh"
-#include "CliComm.hh"
+#include "MSXCliComm.hh"
 #include "Clock.hh"
 #include "MSXException.hh"
+#include "narrow.hh"
 #include "serialize.hh"
 #include "unreachable.hh"
+#include <array>
 #include <iostream>
 
 namespace openmsx {
 
 // Status register
-static const int BUSY             = 0x01;
-static const int INDEX            = 0x02;
-static const int S_DRQ            = 0x02;
-static const int TRACK00          = 0x04;
-static const int LOST_DATA        = 0x04;
-static const int CRC_ERROR        = 0x08;
-static const int SEEK_ERROR       = 0x10;
-static const int RECORD_NOT_FOUND = 0x10;
-static const int HEAD_LOADED      = 0x20;
-static const int RECORD_TYPE      = 0x20;
-static const int WRITE_PROTECTED  = 0x40;
-static const int NOT_READY        = 0x80;
+static constexpr int BUSY             = 0x01;
+static constexpr int INDEX            = 0x02;
+static constexpr int S_DRQ            = 0x02;
+static constexpr int TRACK00          = 0x04;
+static constexpr int LOST_DATA        = 0x04;
+static constexpr int CRC_ERROR        = 0x08;
+static constexpr int SEEK_ERROR       = 0x10;
+static constexpr int RECORD_NOT_FOUND = 0x10;
+static constexpr int HEAD_LOADED      = 0x20;
+static constexpr int RECORD_TYPE      = 0x20;
+static constexpr int WRITE_PROTECTED  = 0x40;
+static constexpr int NOT_READY        = 0x80;
 
 // Command register
-static const int STEP_SPEED = 0x03;
-static const int V_FLAG     = 0x04;
-static const int E_FLAG     = 0x04;
-static const int H_FLAG     = 0x08;
-static const int T_FLAG     = 0x10;
-static const int M_FLAG     = 0x10;
-static const int A0_FLAG    = 0x01;
-static const int N2R_IRQ    = 0x01;
-static const int R2N_IRQ    = 0x02;
-static const int IDX_IRQ    = 0x04;
-static const int IMM_IRQ    = 0x08;
+static constexpr int STEP_SPEED = 0x03;
+static constexpr int V_FLAG     = 0x04;
+static constexpr int E_FLAG     = 0x04;
+static constexpr int H_FLAG     = 0x08;
+static constexpr int T_FLAG     = 0x10;
+static constexpr int M_FLAG     = 0x10;
+static constexpr int A0_FLAG    = 0x01;
+static constexpr int N2R_IRQ    = 0x01;
+static constexpr int R2N_IRQ    = 0x02;
+static constexpr int IDX_IRQ    = 0x04;
+static constexpr int IMM_IRQ    = 0x08;
 
 // HLD/HLT timing constants
-const EmuDuration WD2793::IDLE = EmuDuration::sec(3);
+static constexpr auto IDLE = EmuDuration::sec(3);
 
 /** This class has emulation for WD1770, WD1793, WD2793. Though at the moment
  * the only emulated difference between WD1770 and WD{12}793 is that WD1770
  * has no ready input signal. (E.g. we don't emulate the WD1770 motor out
  * signal yet).
  */
-WD2793::WD2793(Scheduler& scheduler_, DiskDrive& drive_, CliComm& cliComm_,
+WD2793::WD2793(Scheduler& scheduler_, DiskDrive& drive_, MSXCliComm& cliComm_,
                EmuTime::param time, bool isWD1770_)
 	: Schedulable(scheduler_)
 	, drive(drive_)
 	, cliComm(cliComm_)
-	, drqTime(EmuTime::infinity)
-	, irqTime(EmuTime::infinity)
-	, pulse5(EmuTime::infinity)
-	, hldTime(EmuTime::infinity) // HLD=false
 	, isWD1770(isWD1770_)
 {
-	// avoid (harmless) UMR in serialize()
-	dataCurrent = 0;
-	dataAvailable = 0;
-	dataOutReg = 0;
-	dataRegWritten = false;
-	lastWasA1 = false;
-	lastWasCRC = false;
-	commandReg = 0;
 	setDrqRate(RawTrack::STANDARD_SIZE);
-
 	reset(time);
 }
 
@@ -78,8 +67,8 @@ void WD2793::reset(EmuTime::param time)
 	dataReg = 0;
 	directionIn = true;
 
-	drqTime.reset(EmuTime::infinity); // DRQ = false
-	irqTime = EmuTime::infinity;      // INTRQ = false;
+	drqTime.reset(EmuTime::infinity()); // DRQ = false
+	irqTime = EmuTime::infinity();      // INTRQ = false;
 	immediateIRQ = false;
 
 	// Execute Restore command
@@ -87,7 +76,7 @@ void WD2793::reset(EmuTime::param time)
 	setCommandReg(0x03, time);
 }
 
-bool WD2793::getDTRQ(EmuTime::param time)
+bool WD2793::getDTRQ(EmuTime::param time) const
 {
 	return peekDTRQ(time);
 }
@@ -102,7 +91,7 @@ void WD2793::setDrqRate(unsigned trackLength)
 	drqTime.setFreq(trackLength * DiskDrive::ROTATIONS_PER_SECOND);
 }
 
-bool WD2793::getIRQ(EmuTime::param time)
+bool WD2793::getIRQ(EmuTime::param time) const
 {
 	return peekIRQ(time);
 }
@@ -119,19 +108,23 @@ bool WD2793::isReady() const
 	return drive.isDiskInserted() || isWD1770;
 }
 
-void WD2793::setCommandReg(byte value, EmuTime::param time)
+void WD2793::setCommandReg(uint8_t value, EmuTime::param time)
 {
 	if (((commandReg & 0xE0) == 0xA0) || // write sector
 	    ((commandReg & 0xF0) == 0xF0)) { // write track
 		// If a write sector/track command is cancelled, still flush
 		// the partially written data to disk.
-		drive.flushTrack();
+		try {
+			drive.flushTrack();
+		} catch (MSXException&) {
+			// ignore
+		}
 	}
 
 	removeSyncPoint();
 
 	commandReg = value;
-	irqTime = EmuTime::infinity; // INTRQ = false;
+	irqTime = EmuTime::infinity(); // INTRQ = false;
 	switch (commandReg & 0xF0) {
 		case 0x00: // restore
 		case 0x10: // seek
@@ -163,7 +156,7 @@ void WD2793::setCommandReg(byte value, EmuTime::param time)
 	}
 }
 
-byte WD2793::getStatusReg(EmuTime::param time)
+uint8_t WD2793::getStatusReg(EmuTime::param time)
 {
 	if (((commandReg & 0x80) == 0) || ((commandReg & 0xF0) == 0xD0)) {
 		// Type I or type IV command
@@ -197,49 +190,49 @@ byte WD2793::getStatusReg(EmuTime::param time)
 
 	// Reset INTRQ only if it's not scheduled to turn on in the future.
 	if (irqTime <= time) { // if (INTRQ == true)
-		irqTime = EmuTime::infinity; // INTRQ = false;
+		irqTime = EmuTime::infinity(); // INTRQ = false;
 	}
 
 	return statusReg;
 }
 
-byte WD2793::peekStatusReg(EmuTime::param time) const
+uint8_t WD2793::peekStatusReg(EmuTime::param time) const
 {
 	// TODO implement proper peek?
 	return const_cast<WD2793*>(this)->getStatusReg(time);
 }
 
-void WD2793::setTrackReg(byte value, EmuTime::param /*time*/)
+void WD2793::setTrackReg(uint8_t value, EmuTime::param /*time*/)
 {
 	trackReg = value;
 }
 
-byte WD2793::getTrackReg(EmuTime::param time)
+uint8_t WD2793::getTrackReg(EmuTime::param time) const
 {
 	return peekTrackReg(time);
 }
 
-byte WD2793::peekTrackReg(EmuTime::param /*time*/) const
+uint8_t WD2793::peekTrackReg(EmuTime::param /*time*/) const
 {
 	return trackReg;
 }
 
-void WD2793::setSectorReg(byte value, EmuTime::param /*time*/)
+void WD2793::setSectorReg(uint8_t value, EmuTime::param /*time*/)
 {
 	sectorReg = value;
 }
 
-byte WD2793::getSectorReg(EmuTime::param time)
+uint8_t WD2793::getSectorReg(EmuTime::param time) const
 {
 	return peekSectorReg(time);
 }
 
-byte WD2793::peekSectorReg(EmuTime::param /*time*/) const
+uint8_t WD2793::peekSectorReg(EmuTime::param /*time*/) const
 {
 	return sectorReg;
 }
 
-void WD2793::setDataReg(byte value, EmuTime::param time)
+void WD2793::setDataReg(uint8_t value, EmuTime::param time)
 {
 	dataReg = value;
 
@@ -249,11 +242,11 @@ void WD2793::setDataReg(byte value, EmuTime::param time)
 	if (((commandReg & 0xE0) == 0xA0) || // write sector
 	    ((commandReg & 0xF0) == 0xF0)) { // write track
 		dataRegWritten = true;
-		drqTime.reset(EmuTime::infinity); // DRQ = false
+		drqTime.reset(EmuTime::infinity()); // DRQ = false
 	}
 }
 
-byte WD2793::getDataReg(EmuTime::param time)
+uint8_t WD2793::getDataReg(EmuTime::param time)
 {
 	if ((((commandReg & 0xE0) == 0x80) ||   // read sector
 	     ((commandReg & 0xF0) == 0xC0) ||   // read address
@@ -265,7 +258,7 @@ byte WD2793::getDataReg(EmuTime::param time)
 		crc.update(dataReg);
 		dataAvailable--;
 		drqTime += 1; // time when the next byte will be available
-		while (dataAvailable && unlikely(getDTRQ(time))) {
+		while (dataAvailable && /*unlikely*/(getDTRQ(time))) {
 			statusReg |= LOST_DATA;
 			dataReg = drive.readTrackByte(dataCurrent++);
 			crc.update(dataReg);
@@ -277,8 +270,8 @@ byte WD2793::getDataReg(EmuTime::param time)
 			if ((commandReg & 0xE0) == 0x80) {
 				// read sector
 				// update crc status flag
-				word diskCrc  = 256 * drive.readTrackByte(dataCurrent++);
-				     diskCrc +=       drive.readTrackByte(dataCurrent++);
+				uint16_t diskCrc  = 256 * drive.readTrackByte(dataCurrent++);
+				         diskCrc +=       drive.readTrackByte(dataCurrent++);
 				if (diskCrc == crc.getValue()) {
 					statusReg &= ~CRC_ERROR;
 				} else {
@@ -294,9 +287,10 @@ byte WD2793::getDataReg(EmuTime::param time)
 				if (!(commandReg & M_FLAG)) {
 					endCmd(time);
 				} else {
-					// TODO multi sector read
+					// multi sector read, wait for the next sector
+					drqTime.reset(EmuTime::infinity()); // DRQ = false
 					sectorReg++;
-					endCmd(time);
+					type2Loaded(time);
 				}
 			} else {
 				// read track, read address
@@ -317,7 +311,7 @@ byte WD2793::getDataReg(EmuTime::param time)
 	return dataReg;
 }
 
-byte WD2793::peekDataReg(EmuTime::param time) const
+uint8_t WD2793::peekDataReg(EmuTime::param time) const
 {
 	if ((((commandReg & 0xE0) == 0x80) ||   // read sector
 	     ((commandReg & 0xF0) == 0xC0) ||   // read address
@@ -434,7 +428,7 @@ void WD2793::startType1Cmd(EmuTime::param time)
 		hldTime = time;
 	} else {
 		// deactivate HLD
-		hldTime = EmuTime::infinity;
+		hldTime = EmuTime::infinity();
 	}
 
 	switch (commandReg & 0xF0) {
@@ -479,9 +473,12 @@ void WD2793::seek(EmuTime::param time)
 
 void WD2793::step(EmuTime::param time)
 {
-	const int timePerStep[4] = {
-		// in ms, in case a 1MHz clock is used (as in MSX)
-		6, 12, 20, 30
+	static constexpr std::array<EmuDuration, 4> timePerStep = {
+		// in case a 1MHz clock is used (as in MSX)
+		EmuDuration::msec( 6),
+		EmuDuration::msec(12),
+		EmuDuration::msec(20),
+		EmuDuration::msec(30),
 	};
 
 	if ((commandReg & T_FLAG) || ((commandReg & 0xE0) == 0x00)) {
@@ -497,8 +494,7 @@ void WD2793::step(EmuTime::param time)
 		endType1Cmd(time);
 	} else {
 		drive.step(directionIn, time);
-		schedule(FSM_SEEK,
-		         time + EmuDuration::msec(timePerStep[commandReg & STEP_SPEED]));
+		schedule(FSM_SEEK, time + timePerStep[commandReg & STEP_SPEED]);
 	}
 }
 
@@ -574,7 +570,7 @@ void WD2793::type2Search(EmuTime::param time)
 	}
 	// Sector not found in 5 revolutions (or read error),
 	// schedule to give a RECORD_NOT_FOUND error
-	if (pulse5 < EmuTime::infinity) {
+	if (pulse5 < EmuTime::infinity()) {
 		schedule(FSM_TYPE2_NOT_FOUND, pulse5);
 	} else {
 		// Drive not rotating. How does a real WD293 handle this?
@@ -627,9 +623,9 @@ void WD2793::type2NotFound(EmuTime::param time)
 void WD2793::startReadSector(EmuTime::param time)
 {
 	if (sectorInfo.deleted) {
-		crc.init<0xA1, 0xA1, 0xA1, 0xF8>();
+		crc.init({0xA1, 0xA1, 0xA1, 0xF8});
 	} else {
-		crc.init<0xA1, 0xA1, 0xA1, 0xFB>();
+		crc.init({0xA1, 0xA1, 0xA1, 0xFB});
 	}
 	unsigned trackLength = drive.getTrackLength();
 	int tmp = sectorInfo.dataIdx - sectorInfo.addrIdx;
@@ -639,9 +635,9 @@ void WD2793::startReadSector(EmuTime::param time)
 	drqTime += gapLength + 1 + 1; // (first) byte can be read in a moment
 	dataCurrent = sectorInfo.dataIdx;
 
-	// Get sectorsize from disk: 128, 256, 512 or 1024 bytes
+	// Get sector size from disk: 128, 256, 512 or 1024 bytes
 	// Verified on real WD2793:
-	//   sizecode=255 results in a sector size of 1024 bytes,
+	//   size-code = 255 results in a sector size of 1024 bytes,
 	// This suggests the WD2793 only looks at the lower 2 bits.
 	dataAvailable = 128 << (sectorInfo.sizeCode & 3);
 }
@@ -699,7 +695,7 @@ void WD2793::checkStartWrite(EmuTime::param time)
 	// pause 12 bytes
 	drqTime.reset(time);
 	schedule(FSM_PRE_WRITE_SECTOR, drqTime + 12);
-	drqTime.reset(EmuTime::infinity); // DRQ = false
+	drqTime.reset(EmuTime::infinity()); // DRQ = false
 	dataAvailable = 16; // 12+4 bytes pre-data
 }
 
@@ -717,11 +713,11 @@ void WD2793::preWriteSector(EmuTime::param time)
 			}
 			drqTime.reset(time);
 			schedule(FSM_PRE_WRITE_SECTOR, drqTime + 1);
-			drqTime.reset(EmuTime::infinity); // DRQ = false
+			drqTime.reset(EmuTime::infinity()); // DRQ = false
 		} else {
 			// and finally a single F8/FB byte
-			crc.init<0xA1, 0xA1, 0xA1>();
-			byte mark = (commandReg & A0_FLAG) ? 0xF8 : 0xFB;
+			crc.init({0xA1, 0xA1, 0xA1});
+			uint8_t mark = (commandReg & A0_FLAG) ? 0xF8 : 0xFB;
 			drive.writeTrackByte(dataCurrent++, mark);
 			crc.update(mark);
 
@@ -768,7 +764,7 @@ void WD2793::writeSectorData(EmuTime::param time)
 			dataAvailable = 3;
 			drqTime.reset(time);
 			schedule(FSM_POST_WRITE_SECTOR, drqTime + 1);
-			drqTime.reset(EmuTime::infinity); // DRQ = false
+			drqTime.reset(EmuTime::infinity()); // DRQ = false
 		}
 	} catch (MSXException&) {
 		statusReg |= NOT_READY; // TODO which status bit should be set?
@@ -782,12 +778,12 @@ void WD2793::postWriteSector(EmuTime::param time)
 		--dataAvailable;
 		if (dataAvailable > 0) {
 			// write 2 CRC bytes (big endian)
-			byte val = (dataAvailable == 2) ? (crc.getValue() >> 8)
-							: (crc.getValue() & 0xFF);
+			uint8_t val = (dataAvailable == 2) ? narrow_cast<uint8_t>((crc.getValue() >> 8))
+			                                   : narrow_cast<uint8_t>((crc.getValue() & 0xFF));
 			drive.writeTrackByte(dataCurrent++, val);
 			drqTime.reset(time);
 			schedule(FSM_POST_WRITE_SECTOR, drqTime + 1);
-			drqTime.reset(EmuTime::infinity); // DRQ = false
+			drqTime.reset(EmuTime::infinity()); // DRQ = false
 		} else {
 			// write one byte of 0xFE
 			drive.writeTrackByte(dataCurrent++, 0xFE);
@@ -798,9 +794,10 @@ void WD2793::postWriteSector(EmuTime::param time)
 			if (!(commandReg & M_FLAG)) {
 				endCmd(time);
 			} else {
-				// TODO multi sector write
+				// multi sector write, wait for next sector
+				drqTime.reset(EmuTime::infinity()); // DRQ = false
 				sectorReg++;
-				endCmd(time);
+				type2Loaded(time);
 			}
 		}
 	} catch (MSXException&) {
@@ -853,7 +850,7 @@ void WD2793::type3Loaded(EmuTime::param time)
 			// wait till next sector header
 			setDrqRate(drive.getTrackLength());
 			next = drive.getNextSector(time, sectorInfo);
-			if (next == EmuTime::infinity) {
+			if (next == EmuTime::infinity()) {
 				// TODO wait for 5 revolutions
 				statusReg |= RECORD_NOT_FOUND;
 				endCmd(time);
@@ -861,6 +858,7 @@ void WD2793::type3Loaded(EmuTime::param time)
 			}
 			dataCurrent = sectorInfo.addrIdx;
 			dataAvailable = 6;
+			sectorReg = drive.readTrackByte(dataCurrent);
 		} catch (MSXException&) {
 			// read addr failed
 			statusReg |= RECORD_NOT_FOUND;
@@ -871,7 +869,7 @@ void WD2793::type3Loaded(EmuTime::param time)
 		// read/write track
 		// wait till next index pulse
 		next = drive.getTimeTillIndexPulse(time);
-		if (next == EmuTime::infinity) {
+		if (next == EmuTime::infinity()) {
 			// drive became not ready since the command was started,
 			// how does a real WD2793 handle this?
 			endCmd(time);
@@ -909,7 +907,7 @@ void WD2793::readTrackCmd(EmuTime::param time)
 		drive.applyWd2793ReadTrackQuirk();
 		setDrqRate(trackLength);
 		dataCurrent = 0;
-		dataAvailable = trackLength;
+		dataAvailable = narrow<int>(trackLength);
 		drqTime.reset(time);
 
 		// Stop command at next index pulse
@@ -936,7 +934,7 @@ void WD2793::startWriteTrack(EmuTime::param time)
 		unsigned trackLength = drive.getTrackLength();
 		setDrqRate(trackLength);
 		dataCurrent = 0;
-		dataAvailable = trackLength;
+		dataAvailable = narrow<int>(trackLength);
 		lastWasA1 = false;
 		lastWasCRC = false;
 		dataOutReg = dataReg;
@@ -957,6 +955,7 @@ void WD2793::writeTrackData(EmuTime::param time)
 		lastWasA1 = false;
 
 		// handle chars with special meaning
+		uint8_t CRCvalue2 = 0; // dummy
 		bool idam = false;
 		if (lastWasCRC) {
 			// 2nd CRC byte, don't transform
@@ -972,13 +971,14 @@ void WD2793::writeTrackData(EmuTime::param time)
 			// 3rd A1 byte. Though what we do instead is on
 			// each A1 byte initialize the value as if
 			// there were already 2 A1 bytes written.
-			crc.init<0xA1, 0xA1>();
+			crc.init({0xA1, 0xA1});
 		} else if (dataOutReg == 0xF6) {
 			// write C2 with missing clock transitions
 			dataOutReg = 0xC2;
 		} else if (dataOutReg == 0xF7) {
 			// write 2 CRC bytes, big endian
-			dataOutReg = crc.getValue() >> 8; // high byte
+			dataOutReg = narrow_cast<uint8_t>(crc.getValue() >> 8); // high byte
+			CRCvalue2  = narrow_cast<uint8_t>(crc.getValue() >> 0); // low byte
 			lastWasCRC = true;
 		} else if (dataOutReg == 0xFE) {
 			// Record locations of 0xA1 (with missing clock
@@ -989,9 +989,7 @@ void WD2793::writeTrackData(EmuTime::param time)
 		}
 		// actually write (transformed) byte
 		drive.writeTrackByte(dataCurrent++, dataOutReg, idam);
-		if (!lastWasCRC) {
-			crc.update(dataOutReg);
-		}
+		crc.update(dataOutReg); // also when 'lastWasCRC == true'
 		--dataAvailable;
 
 		if (dataAvailable > 0) {
@@ -1010,9 +1008,9 @@ void WD2793::writeTrackData(EmuTime::param time)
 					statusReg |= LOST_DATA;
 				}
 			} else {
-				dataOutReg = crc.getValue() & 0xFF; // low byte
+				dataOutReg = CRCvalue2;
 				// don't re-activate DRQ for 2nd byte of CRC
-				drqTime.reset(EmuTime::infinity); // DRQ = false
+				drqTime.reset(EmuTime::infinity()); // DRQ = false
 			}
 		} else {
 			// Write track done
@@ -1028,11 +1026,11 @@ void WD2793::writeTrackData(EmuTime::param time)
 void WD2793::startType4Cmd(EmuTime::param time)
 {
 	// Force interrupt
-	byte flags = commandReg & 0x0F;
+	uint8_t flags = commandReg & 0x0F;
 	if (flags & (N2R_IRQ | R2N_IRQ)) {
 		// all flags not yet supported
 		#ifdef DEBUG
-		std::cerr << "WD2793 type 4 cmd, unimplemented bits " << int(flags) << std::endl;
+		std::cerr << "WD2793 type 4 cmd, unimplemented bits " << int(flags) << '\n';
 		#endif
 	}
 
@@ -1042,13 +1040,13 @@ void WD2793::startType4Cmd(EmuTime::param time)
 	if ((flags & IDX_IRQ) && isReady()) {
 		irqTime = drive.getTimeTillIndexPulse(time);
 	} else {
-		assert(irqTime == EmuTime::infinity); // INTRQ = false
+		assert(irqTime == EmuTime::infinity()); // INTRQ = false
 	}
 	if (flags & IMM_IRQ) {
 		immediateIRQ = true;
 	}
 
-	drqTime.reset(EmuTime::infinity); // DRQ = false
+	drqTime.reset(EmuTime::infinity()); // DRQ = false
 	statusReg &= ~BUSY; // reset status on Busy
 }
 
@@ -1060,13 +1058,13 @@ void WD2793::endCmd(EmuTime::param time)
 		// here by waiting for 3s.
 		hldTime = time;
 	}
-	drqTime.reset(EmuTime::infinity); // DRQ   = false
-	irqTime = EmuTime::zero;          // INTRQ = true;
+	drqTime.reset(EmuTime::infinity()); // DRQ   = false
+	irqTime = EmuTime::zero();          // INTRQ = true;
 	statusReg &= ~BUSY;
 }
 
 
-static std::initializer_list<enum_string<WD2793::FSMState>> fsmStateInfo = {
+static constexpr std::initializer_list<enum_string<WD2793::FSMState>> fsmStateInfo = {
 	{ "NONE",              WD2793::FSM_NONE },
 	{ "SEEK",              WD2793::FSM_SEEK },
 	{ "TYPE2_LOADED",      WD2793::FSM_TYPE2_LOADED },
@@ -1112,13 +1110,13 @@ SERIALIZE_ENUM(WD2793::FSMState, fsmStateInfo);
 template<typename Archive>
 void WD2793::serialize(Archive& ar, unsigned version)
 {
-	EmuTime bw_irqTime = EmuTime::zero;
+	EmuTime bw_irqTime = EmuTime::zero();
 	if (ar.versionAtLeast(version, 8)) {
 		ar.template serializeBase<Schedulable>(*this);
 	} else {
-		static const int SCHED_FSM     = 0;
-		static const int SCHED_IDX_IRQ = 1;
-		assert(ar.isLoader());
+		constexpr int SCHED_FSM     = 0;
+		constexpr int SCHED_IDX_IRQ = 1;
+		assert(Archive::IS_LOADER);
 		removeSyncPoint();
 		for (auto& old : Schedulable::serializeBW(ar)) {
 			if (old.userData == SCHED_FSM) {
@@ -1129,79 +1127,79 @@ void WD2793::serialize(Archive& ar, unsigned version)
 		}
 	}
 
-	ar.serialize("fsmState", fsmState);
-	ar.serialize("statusReg", statusReg);
-	ar.serialize("commandReg", commandReg);
-	ar.serialize("sectorReg", sectorReg);
-	ar.serialize("trackReg", trackReg);
-	ar.serialize("dataReg", dataReg);
+	ar.serialize("fsmState",      fsmState,
+	             "statusReg",     statusReg,
+	             "commandReg",    commandReg,
+	             "sectorReg",     sectorReg,
+	             "trackReg",      trackReg,
+	             "dataReg",       dataReg,
 
-	ar.serialize("directionIn", directionIn);
-	ar.serialize("immediateIRQ", immediateIRQ);
+	             "directionIn",   directionIn,
+	             "immediateIRQ",  immediateIRQ,
 
-	ar.serialize("dataCurrent", dataCurrent);
-	ar.serialize("dataAvailable", dataAvailable);
+	             "dataCurrent",   dataCurrent,
+	             "dataAvailable", dataAvailable);
 
 	if (ar.versionAtLeast(version, 2)) {
 		if (ar.versionAtLeast(version, 4)) {
 			ar.serialize("drqTime", drqTime);
 		} else {
-			assert(ar.isLoader());
+			assert(Archive::IS_LOADER);
 			Clock<6250 * 5> c(EmuTime::dummy());
 			ar.serialize("drqTime", c);
 			drqTime.reset(c.getTime());
 			drqTime.setFreq(6250 * 5);
 		}
 	} else {
-		assert(ar.isLoader());
-		//ar.serialize("commandStart", commandStart);
-		//ar.serialize("DRQTimer", DRQTimer);
-		//ar.serialize("DRQ", DRQ);
-		//ar.serialize("transferring", transferring);
-		//ar.serialize("formatting", formatting);
-		drqTime.reset(EmuTime::infinity);
+		assert(Archive::IS_LOADER);
+		//ar.serialize("commandStart", commandStart,
+		//             "DRQTimer",     DRQTimer,
+		//             "DRQ",          DRQ,
+		//             "transferring", transferring,
+		//             "formatting",   formatting);
+		drqTime.reset(EmuTime::infinity());
 	}
 
 	if (ar.versionAtLeast(version, 3)) {
 		ar.serialize("lastWasA1", lastWasA1);
-		word crcVal = crc.getValue();
+		uint16_t crcVal = crc.getValue();
 		ar.serialize("crc", crcVal);
 		crc.init(crcVal);
 	}
 
 	if (ar.versionAtLeast(version, 5)) {
-		ar.serialize("pulse5", pulse5);
-		ar.serialize("sectorInfo", sectorInfo);
+		ar.serialize("pulse5",     pulse5,
+		             "sectorInfo", sectorInfo);
 	} else {
-		// leave pulse5 at EmuTime::infinity
+		// leave pulse5 at EmuTime::infinity()
 		// leave sectorInfo uninitialized
 	}
 
 	if (ar.versionAtLeast(version, 7)) {
 		ar.serialize("irqTime", irqTime);
 	} else {
-		assert(ar.isLoader());
+		assert(Archive::IS_LOADER);
 		bool INTRQ = false; // dummy init to avoid warning
 		ar.serialize("INTRQ", INTRQ);
-		irqTime = INTRQ ? EmuTime::zero : EmuTime::infinity;
-		if (bw_irqTime != EmuTime::zero) {
+		irqTime = INTRQ ? EmuTime::zero() : EmuTime::infinity();
+		if (bw_irqTime != EmuTime::zero()) {
 			irqTime = bw_irqTime;
 		}
 	}
 
 	if (ar.versionAtLeast(version, 11)) {
-		ar.serialize("dataOutReg", dataOutReg);
-		ar.serialize("dataRegWritten", dataRegWritten);
-		ar.serialize("lastWasCRC", lastWasCRC);
+		ar.serialize("dataOutReg",     dataOutReg,
+		             "dataRegWritten", dataRegWritten,
+		             "lastWasCRC",     lastWasCRC);
 	} else {
-		assert(ar.isLoader());
+		assert(Archive::IS_LOADER);
 		dataOutReg = dataReg;
 		dataRegWritten = false;
 		lastWasCRC = false;
 	}
 
 	if (ar.versionBelow(version, 11)) {
-		assert(ar.isLoader());
+		assert(Archive::IS_LOADER);
 		// version 9->10: 'trackData' moved from FDC to RealDrive
 		// version 10->11: write commands are different
 		if (statusReg & BUSY) {
@@ -1219,7 +1217,7 @@ void WD2793::serialize(Archive& ar, unsigned version)
 		if (statusReg & BUSY) {
 			hldTime = getCurrentTime();
 		} else {
-			hldTime = EmuTime::infinity;
+			hldTime = EmuTime::infinity();
 		}
 	}
 }

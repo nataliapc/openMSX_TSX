@@ -3,6 +3,7 @@
 
 #include "EmuTime.hh"
 #include "DivModBySame.hh"
+#include "narrow.hh"
 #include <cassert>
 
 namespace openmsx {
@@ -15,7 +16,7 @@ namespace openmsx {
 class DynamicClock
 {
 public:
-	// Note: default copy constructor and assigment operator are ok.
+	// Note: default copy constructor and assignment operator are ok.
 
 	/** Create a new clock, which starts ticking at given time.
 	  * The initial frequency is infinite;
@@ -34,83 +35,111 @@ public:
 
 	/** Gets the time at which the last clock tick occurred.
 	  */
-	EmuTime::param getTime() const {
+	[[nodiscard]] EmuTime::param getTime() const {
 		return lastTick;
 	}
 
 	/** Checks whether this clock's last tick is or is not before the
 	  * given time stamp.
 	  */
-	bool before(EmuTime::param e) const {
+	[[nodiscard]] bool before(EmuTime::param e) const {
 		return lastTick.time < e.time;
 	}
 
 	/** Calculate the number of ticks for this clock until the given time.
 	  * It is not allowed to call this method for a time in the past.
 	  */
-	unsigned getTicksTill(EmuTime::param e) const {
+	[[nodiscard]] unsigned getTicksTill(EmuTime::param e) const {
 		assert(e.time >= lastTick.time);
-		return divmod.div(e.time - lastTick.time);
+		return divMod.div(e.time - lastTick.time);
+	}
+	/** Like getTicksTill(), but also returns the fractional part (in range [0, 1)).
+	  * This is equivalent to, but numerically more stable than:
+	  *   EmuDuration dur = e - this->getTime();
+	  *   double d = dur / this->getPeriod();
+	  *   int i = int(d);
+	  *   double frac = d - i;
+	  *   return {i, frac};
+	  */
+	struct IntegralFractional {
+		unsigned integral;
+		float fractional;
+	};
+	[[nodiscard]] IntegralFractional getTicksTillAsIntFloat(EmuTime::param e) const {
+		assert(e.time >= lastTick.time);
+		auto dur = e.time - lastTick.time;
+		auto [q, r] = divMod.divMod(dur);
+		auto f = float(r) / float(getStep());
+		assert(0.0f <= f); assert(f < 1.0f);
+		return {q, f};
 	}
 
 	template<typename FIXED>
 	void getTicksTill(EmuTime::param e, FIXED& result) const {
 		assert(e.time >= lastTick.time);
 		uint64_t tmp = (e.time - lastTick.time) << FIXED::FRACTION_BITS;
-		result = FIXED::create(divmod.div(tmp + (getStep() / 2)));
+		result = FIXED::create(divMod.div(tmp + (getStep() / 2)));
 	}
 
 	/** Calculate the number of ticks this clock has to tick to reach
 	  * or go past the given time.
 	  * It is not allowed to call this method for a time in the past.
 	  */
-	unsigned getTicksTillUp(EmuTime::param e) const {
+	[[nodiscard]] unsigned getTicksTillUp(EmuTime::param e) const {
 		assert(e.time >= lastTick.time);
-		return divmod.div(e.time - lastTick.time + (getStep() - 1));
+		return divMod.div(e.time - lastTick.time + (getStep() - 1));
 	}
 
-	double getTicksTillDouble(EmuTime::param e) const {
+	[[nodiscard]] double getTicksTillDouble(EmuTime::param e) const {
 		assert(e.time >= lastTick.time);
 		return double(e.time - lastTick.time) / getStep();
 	}
 
-	uint64_t getTotalTicks() const {
-		// note: don't use divmod.div() because that one only returns a
+	[[nodiscard]] uint64_t getTotalTicks() const {
+		// note: don't use divMod.div() because that one only returns a
 		//       32 bit result. Maybe improve in the future.
 		return lastTick.time / getStep();
 	}
 
 	/** Change the frequency at which this clock ticks.
+	  * When possible prefer setPeriod() over this method because it may
+	  * introduce less rounding errors.
 	  * @param freq New frequency in Hertz.
 	  */
 	void setFreq(unsigned freq) {
 		unsigned newStep = (MAIN_FREQ32 + (freq / 2)) / freq;
-		assert(newStep);
-		divmod.setDivisor(newStep);
+		setPeriod(EmuDuration(uint64_t(newStep)));
 	}
 	/** Equivalent to setFreq(freq_num / freq_denom), but possibly with
 	  * less rounding errors.
+	  * When possible prefer setPeriod() over this method because it may
+	  * introduce less rounding errors.
 	  */
 	void setFreq(unsigned freq_num, unsigned freq_denom) {
-		static_assert(MAIN_FREQ < (1ull << 32), "must fit in 32 bit");
+		static_assert(MAIN_FREQ < (1ULL << 32), "must fit in 32 bit");
 		uint64_t p = MAIN_FREQ * freq_denom + (freq_num / 2);
 		uint64_t newStep = p / freq_num;
-		assert(newStep < (1ull << 32));
-		assert(newStep);
-		divmod.setDivisor(unsigned(newStep));
+		setPeriod(EmuDuration(newStep));
 	}
 
 	/** Returns the frequency (in Hz) at which this clock ticks.
 	  * @see setFreq()
 	  */
-	unsigned getFreq() const {
-		return MAIN_FREQ32 / getStep();
+	[[nodiscard]] unsigned getFreq() const {
+		auto step = getStep();
+		return narrow<unsigned>((MAIN_FREQ + (step / 2)) / step);
 	}
 
 	/** Returns the length of one clock-cycle.
 	  */
-	EmuDuration getPeriod() const {
+	[[nodiscard]] EmuDuration getPeriod() const {
 		return EmuDuration(uint64_t(getStep()));
+	}
+
+	/** Set the duration of a clock tick. See also setFreq(). */
+	void setPeriod(EmuDuration period) {
+		assert(period.length() < (1ULL << 32));
+		divMod.setDivisor(uint32_t(period.length()));
 	}
 
 	/** Reset the clock to start ticking at the given time.
@@ -125,7 +154,7 @@ public:
 	  */
 	void advance(EmuTime::param e) {
 		assert(lastTick.time <= e.time);
-		lastTick.time = e.time - divmod.mod(e.time - lastTick.time);
+		lastTick.time = e.time - divMod.mod(e.time - lastTick.time);
 	}
 
 	/** Advance this clock by the given number of ticks.
@@ -137,7 +166,7 @@ public:
 	/** Calculate the time at which this clock will have ticked the given
 	  * number of times (counted from its last tick).
 	  */
-	const EmuTime operator+(uint64_t n) const {
+	[[nodiscard]] EmuTime operator+(uint64_t n) const {
 		return EmuTime(lastTick.time + n * getStep());
 	}
 
@@ -150,16 +179,16 @@ public:
 	void fastAdd(unsigned n) {
 		#ifdef DEBUG
 		// we don't even want this overhead in development versions
-		assert((uint64_t(n) * getStep()) < (1ull << 32));
+		assert((uint64_t(n) * getStep()) < (1ULL << 32));
 		#endif
 		lastTick.time += n * getStep();
 	}
-	EmuTime getFastAdd(unsigned n) const {
+	[[nodiscard]] EmuTime getFastAdd(unsigned n) const {
 		return add(lastTick, n);
 	}
-	EmuTime add(EmuTime::param time, unsigned n) const {
+	[[nodiscard]] EmuTime add(EmuTime::param time, unsigned n) const {
 		#ifdef DEBUG
-		assert((uint64_t(n) * getStep()) < (1ull << 32));
+		assert((uint64_t(n) * getStep()) < (1ULL << 32));
 		#endif
 		return EmuTime(time.time + n * getStep());
 	}
@@ -174,14 +203,16 @@ private:
 	  * We used to store this as a member, but DivModBySame also stores
 	  * it, so we can as well get it from there (getter is inlined).
 	  */
-	unsigned getStep() const { return divmod.getDivisor(); }
+	[[nodiscard]] unsigned getStep() const { return divMod.getDivisor(); }
 
+private:
 	/** Time of this clock's last tick.
 	  */
 	EmuTime lastTick;
 
-	DivModBySame divmod;
+	DivModBySame divMod;
 };
+SERIALIZE_CLASS_VERSION(DynamicClock, 2);
 
 } // namespace openmsx
 

@@ -31,6 +31,9 @@ DEALINGS IN THE SOFTWARE.
 #ifndef UTF8_CORE_HH
 #define UTF8_CORE_HH
 
+#include "narrow.hh"
+#include "one_of.hh"
+#include <array>
 #include <iterator>
 #include <cstdint>
 
@@ -43,33 +46,33 @@ namespace internal {
 // Unicode constants
 // Leading (high) surrogates: 0xd800 - 0xdbff
 // Trailing (low) surrogates: 0xdc00 - 0xdfff
-const uint16_t LEAD_SURROGATE_MIN  = 0xd800u;
-const uint16_t LEAD_SURROGATE_MAX  = 0xdbffu;
-const uint16_t TRAIL_SURROGATE_MIN = 0xdc00u;
-const uint16_t TRAIL_SURROGATE_MAX = 0xdfffu;
-const uint16_t LEAD_OFFSET         = LEAD_SURROGATE_MIN - (0x10000 >> 10);
-const uint32_t SURROGATE_OFFSET    = 0x10000u - (LEAD_SURROGATE_MIN << 10) - TRAIL_SURROGATE_MIN;
+inline constexpr uint16_t LEAD_SURROGATE_MIN  = 0xd800u;
+inline constexpr uint16_t LEAD_SURROGATE_MAX  = 0xdbffu;
+inline constexpr uint16_t TRAIL_SURROGATE_MIN = 0xdc00u;
+inline constexpr uint16_t TRAIL_SURROGATE_MAX = 0xdfffu;
+inline constexpr uint16_t LEAD_OFFSET         = LEAD_SURROGATE_MIN - (0x10000 >> 10);
+inline constexpr uint32_t SURROGATE_OFFSET    = 0x10000u - (LEAD_SURROGATE_MIN << 10) - TRAIL_SURROGATE_MIN;
 
 // Maximum valid value for a Unicode code point
-const uint32_t CODE_POINT_MAX      = 0x0010ffffu;
+inline constexpr uint32_t CODE_POINT_MAX      = 0x0010ffffu;
 
-inline bool is_trail(uint8_t oc)
+[[nodiscard]] constexpr bool is_trail(uint8_t oc)
 {
 	return (oc >> 6) == 0x2;
 }
 
-inline bool is_surrogate(uint16_t cp)
+[[nodiscard]] constexpr bool is_surrogate(uint32_t cp)
 {
 	return (cp >= LEAD_SURROGATE_MIN) && (cp <= TRAIL_SURROGATE_MAX);
 }
 
-inline bool is_code_point_valid(uint32_t cp)
+[[nodiscard]] constexpr bool is_code_point_valid(uint32_t cp)
 {
 	return (cp <= CODE_POINT_MAX) && !is_surrogate(cp) &&
-	       (cp != 0xfffe) && (cp != 0xffff);
+	       (cp != one_of(0xfffeu, 0xffffu));
 }
 
-inline unsigned sequence_length(uint8_t lead)
+[[nodiscard]] constexpr unsigned sequence_length(uint8_t lead)
 {
 	if (lead < 0x80) {
 		return 1;
@@ -93,11 +96,11 @@ enum utf_error {
 	INVALID_CODE_POINT
 };
 
-template <typename octet_iterator>
-utf_error validate_next(octet_iterator& it, octet_iterator end,
-                        uint32_t* code_point)
+template<typename octet_iterator>
+[[nodiscard]] constexpr utf_error validate_next(octet_iterator& it, octet_iterator end,
+                                      uint32_t* code_point)
 {
-	uint32_t cp = *it;
+	uint32_t cp = narrow_cast<unsigned char>(*it);
 	// Check the lead octet
 	int length = sequence_length(*it);
 
@@ -167,9 +170,7 @@ utf_error validate_next(octet_iterator& it, octet_iterator end,
 	}
 	// Is the code point valid?
 	if (!is_code_point_valid(cp)) {
-		for (int i = 0; i < length - 1; ++i) {
-			--it;
-		}
+		repeat(length - 1, [&] { --it; });
 		return INVALID_CODE_POINT;
 	}
 
@@ -197,8 +198,8 @@ utf_error validate_next(octet_iterator& it, octet_iterator end,
 	return OK;
 }
 
-template <typename octet_iterator>
-inline utf_error validate_next(octet_iterator& it, octet_iterator end) {
+template<typename octet_iterator>
+[[nodiscard]] constexpr utf_error validate_next(octet_iterator& it, octet_iterator end) {
 	return validate_next(it, end, nullptr);
 }
 
@@ -206,11 +207,8 @@ inline utf_error validate_next(octet_iterator& it, octet_iterator end) {
 
 /// The library API - functions intended to be called by the users
 
-// Byte order mark
-const uint8_t bom[] = { 0xef, 0xbb, 0xbf };
-
-template <typename octet_iterator>
-octet_iterator find_invalid(octet_iterator start, octet_iterator end)
+template<typename octet_iterator>
+[[nodiscard]] constexpr octet_iterator find_invalid(octet_iterator start, octet_iterator end)
 {
 	auto result = start;
 	while (result != end) {
@@ -222,32 +220,44 @@ octet_iterator find_invalid(octet_iterator start, octet_iterator end)
 	return result;
 }
 
-template <typename octet_iterator>
-inline bool is_valid(octet_iterator start, octet_iterator end)
+template<typename octet_iterator>
+[[nodiscard]] constexpr bool is_valid(octet_iterator start, octet_iterator end)
 {
 	return find_invalid(start, end) == end;
 }
 
-template <typename octet_iterator>
-inline bool is_bom(octet_iterator it)
+template<typename octet_iterator>
+[[nodiscard]] constexpr bool is_bom(octet_iterator it)
 {
+	// Byte order mark
+	constexpr std::array<uint8_t, 3> bom = {0xef, 0xbb, 0xbf};
+
 	return ((*it++ == bom[0]) &&
 	        (*it++ == bom[1]) &&
 	        (*it   == bom[2]));
 }
 
 template<typename octet_iterator>
-inline octet_iterator sync_forward(octet_iterator it)
+[[nodiscard]] constexpr octet_iterator sync_forward(octet_iterator it)
 {
 	while (internal::is_trail(*it)) ++it;
 	return it;
 }
 
 template<typename octet_iterator>
-inline octet_iterator sync_backward(octet_iterator it)
+[[nodiscard]] constexpr octet_iterator sync_backward(octet_iterator it)
 {
 	while (internal::is_trail(*it)) --it;
 	return it;
+}
+
+// Is this a code point in the 'Private Use Area' (PUA).
+//   https://en.wikipedia.org/wiki/Private_Use_Areas
+[[nodiscard]] constexpr bool is_pua(uint32_t cp)
+{
+	return ((0x00E000 <= cp) && (cp <= 0x00F8FF)) ||
+	       ((0x0F0000 <= cp) && (cp <= 0x0FFFFD)) ||
+	       ((0x100000 <= cp) && (cp <= 0x10FFFD));
 }
 
 } // namespace utf8

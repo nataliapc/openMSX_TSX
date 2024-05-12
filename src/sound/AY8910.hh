@@ -5,7 +5,9 @@
 #include "FloatSetting.hh"
 #include "SimpleDebuggable.hh"
 #include "TclCallback.hh"
-#include "openmsx.hh"
+
+#include <array>
+#include <cstdint>
 
 namespace openmsx {
 
@@ -23,9 +25,9 @@ public:
 	       const DeviceConfig& config, EmuTime::param time);
 	~AY8910();
 
-	byte readRegister(unsigned reg, EmuTime::param time);
-	byte peekRegister(unsigned reg, EmuTime::param time) const;
-	void writeRegister(unsigned reg, byte value, EmuTime::param time);
+	[[nodiscard]] uint8_t readRegister(unsigned reg, EmuTime::param time);
+	[[nodiscard]] uint8_t peekRegister(unsigned reg, EmuTime::param time) const;
+	void writeRegister(unsigned reg, uint8_t value, EmuTime::param time);
 	void reset(EmuTime::param time);
 
 	template<typename Archive>
@@ -34,16 +36,16 @@ public:
 private:
 	class Generator {
 	public:
-		inline void setPeriod(int value);
-		inline unsigned getNextEventTime() const;
-		inline void advanceFast(unsigned duration);
+		void setPeriod(int value);
+		[[nodiscard]] unsigned getNextEventTime() const;
+		void advanceFast(unsigned duration);
 
 		template<typename Archive>
 		void serialize(Archive& ar, unsigned version);
 
 	protected:
 		Generator() = default;
-		inline void reset();
+		void reset();
 
 		/** Time between output steps.
 		  * For tones, this is half the period of the square wave.
@@ -62,29 +64,30 @@ private:
 	public:
 		ToneGenerator();
 
-		inline void reset();
+		void reset();
 
 		/** Advance tone generator several steps in time.
 		  * @param duration Length of interval to simulate.
 		  */
-		inline void advance(int duration);
+		void advance(unsigned duration);
 
-		inline void doNextEvent(AY8910& ay8910);
+		void doNextEvent(const AY8910& ay8910);
 
 		/** Gets the current output of this generator.
 		  */
-		bool getOutput() const { return output; }
+		[[nodiscard]] bool getOutput() const { return output; }
 
 		template<typename Archive>
 		void serialize(Archive& ar, unsigned version);
 
 	private:
-		int getDetune(AY8910& ay8910);
+		[[nodiscard]] int getDetune(const AY8910& ay8910);
 
+	private:
 		/** Time passed since start of vibrato cycle.
 		  */
-		unsigned vibratoCount;
-		unsigned detuneCount;
+		unsigned vibratoCount = 0;
+		unsigned detuneCount = 0;
 
 		/** Current state of the wave.
 		  */
@@ -95,17 +98,17 @@ private:
 	public:
 		NoiseGenerator();
 
-		inline void reset();
+		void reset();
 		/** Advance noise generator several steps in time.
 		  * @param duration Length of interval to simulate.
 		  */
-		inline void advance(int duration);
+		void advance(unsigned duration);
 
-		inline void doNextEvent();
+		void doNextEvent();
 
 		/** Gets the current output of this generator.
 		  */
-		bool getOutput() const { return random & 1; }
+		[[nodiscard]] bool getOutput() const { return random & 1; }
 
 		template<typename Archive>
 		void serialize(Archive& ar, unsigned version);
@@ -117,62 +120,63 @@ private:
 	class Amplitude {
 	public:
 		explicit Amplitude(const DeviceConfig& config);
-		const unsigned* getEnvVolTable() const;
-		inline unsigned getVolume(unsigned chan) const;
-		inline void setChannelVolume(unsigned chan, unsigned value);
-		inline void setMasterVolume(int volume);
-		inline bool followsEnvelope(unsigned chan) const;
+		[[nodiscard]] auto getEnvVolTable() const { return envVolTable; }
+		[[nodiscard]] float getVolume(unsigned chan) const;
+		void setChannelVolume(unsigned chan, unsigned value);
+		[[nodiscard]] bool followsEnvelope(unsigned chan) const;
 
 	private:
-		unsigned volTable[16];
-		unsigned envVolTable[32];
-		unsigned vol[3];
-		bool envChan[3];
-		const bool isAY8910;
+		const bool isAY8910; // must come before envVolTable
+		std::span<const float, 32> envVolTable;
+		std::array<float, 3> vol;
+		std::array<bool, 3> envChan;
 	};
 
 	class Envelope {
 	public:
-		explicit inline Envelope(const unsigned* envVolTable);
-		inline void reset();
-		inline void setPeriod(int value);
-		inline void setShape(unsigned shape);
-		inline bool isChanging() const;
-		inline void advance(int duration);
-		inline unsigned getVolume() const;
+		explicit Envelope(std::span<const float, 32> envVolTable);
+		void reset();
+		void setPeriod(int value);
+		void setShape(unsigned shape);
+		[[nodiscard]] bool isChanging() const;
+		void advance(unsigned duration);
+		[[nodiscard]] float getVolume() const;
 
-		inline unsigned getNextEventTime() const;
-		inline void advanceFast(unsigned duration);
-		inline void doNextEvent();
+		[[nodiscard]] unsigned getNextEventTime() const;
+		void advanceFast(unsigned duration);
+		void doNextEvent();
 
 		template<typename Archive>
 		void serialize(Archive& ar, unsigned version);
 
 	private:
-		inline void doSteps(int steps);
+		void doSteps(int steps);
 
-		const unsigned* envVolTable;
-		int period;
-		int count;
-		int step;
-		int attack;
-		bool hold, alternate, holding;
+	private:
+		std::span<const float, 32> envVolTable;
+		int period = 1;
+		int count = 0;
+		int step = 0;
+		int attack = 0;
+		bool hold = false, alternate = false, holding = false;
 	};
 
 	// SoundDevice
-	void generateChannels(int** bufs, unsigned num) override;
+	void generateChannels(std::span<float*> bufs, unsigned num) override;
+	[[nodiscard]] float getAmplificationFactorImpl() const override;
 
 	// Observer<Setting>
-	void update(const Setting& setting) override;
+	void update(const Setting& setting) noexcept override;
 
-	void wrtReg(unsigned reg, byte value, EmuTime::param time);
+	void wrtReg(unsigned reg, uint8_t value, EmuTime::param time);
 
+private:
 	AY8910Periphery& periphery;
 
 	struct Debuggable final : SimpleDebuggable {
 		Debuggable(MSXMotherBoard& motherBoard, const std::string& name);
-		byte read(unsigned address, EmuTime::param time) override;
-		void write(unsigned address, byte value, EmuTime::param time) override;
+		[[nodiscard]] uint8_t read(unsigned address, EmuTime::param time) override;
+		void write(unsigned address, uint8_t value, EmuTime::param time) override;
 	} debuggable;
 
 	FloatSetting vibratoPercent;
@@ -180,14 +184,15 @@ private:
 	FloatSetting detunePercent;
 	FloatSetting detuneFrequency;
 	TclCallback directionsCallback;
-	ToneGenerator tone[3];
+	std::array<ToneGenerator, 3> tone;
 	NoiseGenerator noise;
 	Amplitude amplitude;
 	Envelope envelope;
-	byte regs[16];
+	std::array<uint8_t, 16> regs;
 	const bool isAY8910;
+	const bool ignorePortDirections;
 	bool doDetune;
-	bool detuneInitialized;
+	bool detuneInitialized = false; // (lazily) initialize detune stuff
 };
 
 SERIALIZE_CLASS_VERSION(AY8910::Generator, 2);

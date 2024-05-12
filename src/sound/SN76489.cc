@@ -1,21 +1,39 @@
 #include "SN76489.hh"
 #include "DeviceConfig.hh"
 #include "Math.hh"
+#include "cstd.hh"
+#include "narrow.hh"
+#include "one_of.hh"
 #include "outer.hh"
+#include "ranges.hh"
 #include "serialize.hh"
 #include "unreachable.hh"
+#include "xrange.hh"
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
-
-using std::string;
+#include <iostream>
 
 namespace openmsx {
 
 // The SN76489 divides the clock input by 8, but all users of the clock apply
 // another divider of 2.
-static const float NATIVE_FREQ_FLOAT = (3579545.0f / 8) / 2;
-static const int NATIVE_FREQ_INT = lrintf(NATIVE_FREQ_FLOAT);
+static constexpr auto NATIVE_FREQ_INT = unsigned(cstd::round((3579545.0 / 8) / 2));
+
+static constexpr auto volTable = [] {
+	std::array<float, 16> result = {};
+	// 2dB per step -> 0.2, sqrt for amplitude -> 0.5
+	double factor = cstd::pow<5, 3>(0.1, 0.2 * 0.5);
+	double out = 32768.0;
+	for (auto i : xrange(15)) {
+		result[i] = narrow_cast<float>(cstd::round(out));
+		out *= factor;
+	}
+	result[15] = 0.0f;
+	return result;
+}();
+
 
 // NoiseShifter:
 
@@ -38,7 +56,7 @@ inline unsigned SN76489::NoiseShifter::getOutput() const
 
 inline void SN76489::NoiseShifter::advance()
 {
-	random = (random >> 1) ^ (-(random & 1) & pattern);
+	random = (random >> 1) ^ ((random & 1) ? pattern : 0);
 }
 
 inline void SN76489::NoiseShifter::queueAdvance(unsigned steps)
@@ -49,7 +67,7 @@ inline void SN76489::NoiseShifter::queueAdvance(unsigned steps)
 
 void SN76489::NoiseShifter::catchUp()
 {
-	for (; stepsBehind; stepsBehind--) {
+	for (/**/; stepsBehind; stepsBehind--) {
 		advance();
 	}
 }
@@ -59,7 +77,7 @@ void SN76489::NoiseShifter::serialize(Archive& ar, unsigned /*version*/)
 {
 	// Make sure there are no queued steps, so we don't have to serialize them.
 	// If we're loading, initState() already set stepsBehind to 0.
-	if (!ar.isLoader()) {
+	if constexpr (!Archive::IS_LOADER) {
 		catchUp();
 	}
 	assert(stepsBehind == 0);
@@ -72,12 +90,14 @@ void SN76489::NoiseShifter::serialize(Archive& ar, unsigned /*version*/)
 // Main class:
 
 SN76489::SN76489(const DeviceConfig& config)
-	: ResampledSoundDevice(config.getMotherBoard(), "SN76489", "DCSG", 4)
+	: ResampledSoundDevice(config.getMotherBoard(), "SN76489", "DCSG", 4, NATIVE_FREQ_INT, false)
 	, debuggable(config.getMotherBoard(), getName())
 {
-	setInputRate(NATIVE_FREQ_INT);
-
-	initVolumeTable(32768);
+	if (false) {
+		std::cout << "volTable:";
+		for (const auto& e : volTable) std::cout << ' ' << e;
+		std::cout << '\n';
+	}
 	initState();
 
 	registerSound(config);
@@ -88,18 +108,6 @@ SN76489::~SN76489()
 	unregisterSound();
 }
 
-void SN76489::initVolumeTable(int volume)
-{
-	float out = volume;
-	// 2dB per step -> 0.2f, sqrt for amplitude -> 0.5f
-	float factor = powf(0.1f, 0.2f * 0.5f);
-	for (int i = 0; i < 15; i++) {
-		volTable[i] = lrintf(out);
-		out *= factor;
-	}
-	volTable[15] = 0;
-}
-
 void SN76489::initState()
 {
 	registerLatch = 0; // TODO: 3 for Sega.
@@ -107,12 +115,12 @@ void SN76489::initState()
 	// The Sega integrated versions start zeroed (max volume), while discrete
 	// chips seem to start with random values (for lack of a reset pin).
 	// For the user's comfort, we init to silence instead.
-	for (unsigned chan = 0; chan < 4; chan++) {
-		regs[chan * 2] = 0;
+	for (auto chan : xrange(4)) {
+		regs[chan * 2 + 0] = 0x0;
 		regs[chan * 2 + 1] = 0xF;
-		counters[chan] = 0;
-		outputs[chan] = 0;
 	}
+	ranges::fill(counters, 0);
+	ranges::fill(outputs, 0);
 
 	initNoise();
 }
@@ -121,16 +129,12 @@ void SN76489::initNoise()
 {
 	// Note: These are the noise patterns for the SN76489A.
 	//       Other chip variants have different noise patterns.
-	unsigned pattern, period;
-	if (regs[6] & 0x4) {
-		// "White" noise: pseudo-random bit sequence.
-		pattern = 0x6000;
-		period = (1 << 15) - 1;
-	} else {
-		// "Periodic" noise: produces a square wave with a short duty cycle.
-		period = 15;
-		pattern = 1 << (period - 1);
-	}
+	unsigned period = (regs[6] & 0x4)
+	                ? ((1 << 15) - 1) // "White" noise: pseudo-random bit sequence.
+	                : 15;          // "Periodic" noise: produces a square wave with a short duty cycle.
+	unsigned pattern = (regs[6] & 0x4)
+	                 ? 0x6000
+	                 : (1 << (period - 1));
 	noiseShifter.initState(pattern, period);
 }
 
@@ -147,32 +151,30 @@ void SN76489::write(byte value, EmuTime::param time)
 	}
 	auto& reg = regs[registerLatch];
 
-	word data;
-	switch (registerLatch) {
-	case 0:
-	case 2:
-	case 4:
-		// Tone period.
-		if (value & 0x80) {
-			data = (reg & 0x3F0) | (value & 0x0F);
-		}  else {
-			data = (reg & 0x00F) | ((value & 0x3F) << 4);
+	auto data = [&]() -> word {
+		switch (registerLatch) {
+		case 0:
+		case 2:
+		case 4:
+			// Tone period.
+			if (value & 0x80) {
+				return word((reg & 0x3F0) | ((value & 0x0F) << 0));
+			}  else {
+				return word((reg & 0x00F) | ((value & 0x3F) << 4));
+			}
+		case 6:
+			// Noise control.
+			return value & 0x07;
+		case 1:
+		case 3:
+		case 5:
+		case 7:
+			// Attenuation.
+			return value & 0x0F;
+		default:
+			UNREACHABLE;
 		}
-		break;
-	case 6:
-		// Noise control.
-		data = value & 0x07;
-		break;
-	case 1:
-	case 3:
-	case 5:
-	case 7:
-		// Attenuation.
-		data = value & 0x0F;
-		break;
-	default:
-		UNREACHABLE;
-	}
+	}();
 
 	// TODO: Warn about access while chip is not ready.
 
@@ -208,37 +210,39 @@ void SN76489::writeRegister(unsigned reg, word value, EmuTime::param time)
  * channel are in phase, but do end up in their own separate mixing buffers.
  */
 
-template <bool NOISE> void SN76489::synthesizeChannel(
-		int*& buffer, unsigned num, unsigned generator)
+template<bool NOISE> void SN76489::synthesizeChannel(
+		float*& buffer, unsigned num, unsigned generator)
 {
-	unsigned period;
-	if (generator == 3) {
-		// Noise channel using its own generator.
-		period = 16 << (regs[6] & 3);
-	} else {
-		// Tone or noise channel using a tone generator.
-		period = regs[2 * generator];
-		if (period == 0) {
-			// TODO: Sega variants have a non-flipping output for period 0.
-			period = 0x400;
+	unsigned period = [&] {
+		if (generator == 3) {
+			// Noise channel using its own generator.
+			return unsigned(16 << (regs[6] & 3));
+		} else {
+			// Tone or noise channel using a tone generator.
+			unsigned p = regs[2 * generator];
+			if (p == 0) {
+				// TODO: Sega variants have a non-flipping output for period 0.
+				p = 0x400;
+			}
+			return p;
 		}
-	}
+	}();
 
 	auto output = outputs[generator];
 	unsigned counter = counters[generator];
 
 	unsigned channel = NOISE ? 3 : generator;
-	int volume = volTable[regs[2 * channel + 1]];
-	if (volume == 0) {
+	auto volume = volTable[regs[2 * channel + 1]];
+	if (volume == 0.0f) {
 		// Channel is silent, don't synthesize it.
 		buffer = nullptr;
 	}
 	if (buffer) {
 		// Synthesize channel.
-		if (NOISE) {
+		if constexpr (NOISE) {
 			noiseShifter.catchUp();
 		}
-		int* buf = buffer;
+		auto* buf = buffer;
 		unsigned remaining = num;
 		while (remaining != 0) {
 			if (counter == 0) {
@@ -265,7 +269,7 @@ template <bool NOISE> void SN76489::synthesizeChannel(
 			unsigned remaining = num - counter;
 			output ^= 1; // partial cycle
 			unsigned cycles = (remaining - 1) / period;
-			if (NOISE) {
+			if constexpr (NOISE) {
 				noiseShifter.queueAdvance((cycles + output) / 2);
 			}
 			output ^= cycles & 1; // full cycles
@@ -276,11 +280,11 @@ template <bool NOISE> void SN76489::synthesizeChannel(
 
 	if (!NOISE || generator == 3) {
 		outputs[generator] = output;
-		counters[generator] = counter;
+		counters[generator] = narrow_cast<word>(counter);
 	}
 }
 
-void SN76489::generateChannels(int** buffers, unsigned num)
+void SN76489::generateChannels(std::span<float*> buffers, unsigned num)
 {
 	// Channel 3: noise.
 	if ((regs[6] & 3) == 3) {
@@ -288,7 +292,7 @@ void SN76489::generateChannels(int** buffers, unsigned num)
 		synthesizeChannel<true>(buffers[3], num, 2);
 		// Assume the noise phase counter and output bit keep updating even
 		// if they are currently not driving the noise shift register.
-		int* noBuffer = nullptr;
+		float* noBuffer = nullptr;
 		synthesizeChannel<false>(noBuffer, num, 3);
 	} else {
 		// Use the channel 3 generator output.
@@ -296,7 +300,7 @@ void SN76489::generateChannels(int** buffers, unsigned num)
 	}
 
 	// Channels 0, 1, 2: tone.
-	for (unsigned channel = 0; channel < 3; channel++) {
+	for (auto channel : xrange(3)) {
 		synthesizeChannel<false>(buffers[channel], num, channel);
 	}
 }
@@ -304,14 +308,12 @@ void SN76489::generateChannels(int** buffers, unsigned num)
 template<typename Archive>
 void SN76489::serialize(Archive& ar, unsigned version)
 {
-	// Don't serialize volTable since it holds computed constants, not state.
+	ar.serialize("regs",          regs,
+	             "registerLatch", registerLatch,
+	             "counters",      counters,
+	             "outputs",       outputs);
 
-	ar.serialize("regs", regs);
-	ar.serialize("registerLatch", registerLatch);
-	ar.serialize("counters", counters);
-	ar.serialize("outputs", outputs);
-
-	if (ar.isLoader()) {
+	if constexpr (Archive::IS_LOADER) {
 		// Initialize the computed NoiseShifter members, based on the
 		// register contents we just loaded, before we load the shift
 		// register state.
@@ -327,14 +329,21 @@ INSTANTIATE_SERIALIZE_METHODS(SN76489);
 
 // The frequency registers are 10 bits wide, so we have to split them over
 // two debuggable entries.
-static const byte SN76489_DEBUG_MAP[][2] = {
-	{0, 0}, {0, 1}, {1, 0},
-	{2, 0}, {2, 1}, {3, 0},
-	{4, 0}, {4, 1}, {5, 0},
-	{6, 0}, {7, 0}
+static constexpr std::array SN76489_DEBUG_MAP = {
+	std::array<byte, 2>{0, 0},
+	std::array<byte, 2>{0, 1},
+	std::array<byte, 2>{1, 0},
+	std::array<byte, 2>{2, 0},
+	std::array<byte, 2>{2, 1},
+	std::array<byte, 2>{3, 0},
+	std::array<byte, 2>{4, 0},
+	std::array<byte, 2>{4, 1},
+	std::array<byte, 2>{5, 0},
+	std::array<byte, 2>{6, 0},
+	std::array<byte, 2>{7, 0},
 };
 
-SN76489::Debuggable::Debuggable(MSXMotherBoard& motherBoard_, const string& name_)
+SN76489::Debuggable::Debuggable(MSXMotherBoard& motherBoard_, const std::string& name_)
 	: SimpleDebuggable(
 		motherBoard_, name_ + " regs",
 		"SN76489 regs - note the period regs are split over two entries", 11)
@@ -343,31 +352,32 @@ SN76489::Debuggable::Debuggable(MSXMotherBoard& motherBoard_, const string& name
 
 byte SN76489::Debuggable::read(unsigned address, EmuTime::param time)
 {
-	byte reg = SN76489_DEBUG_MAP[address][0];
-	byte hi = SN76489_DEBUG_MAP[address][1];
+	auto [reg, hi] = SN76489_DEBUG_MAP[address];
 
 	auto& sn76489 = OUTER(SN76489, debuggable);
 	word data = sn76489.peekRegister(reg, time);
-	return hi ? (data >> 4) : (data & 0xF);
+	return hi ? narrow_cast<byte>(data >> 4)
+	          : narrow_cast<byte>(data & 0xF);
 }
 
 void SN76489::Debuggable::write(unsigned address, byte value, EmuTime::param time)
 {
-	byte reg = SN76489_DEBUG_MAP[address][0];
-	byte hi = SN76489_DEBUG_MAP[address][1];
+	auto reg = SN76489_DEBUG_MAP[address][0];
+	auto hi  = SN76489_DEBUG_MAP[address][1];
 
 	auto& sn76489 = OUTER(SN76489, debuggable);
-	word data;
-	if (reg == 0 || reg == 2 || reg == 4) {
-		data = sn76489.peekRegister(reg, time);
-		if (hi) {
-			data = ((value & 0x3F) << 4) | (data & 0x0F);
+	auto data = [&]() -> word {
+		if (reg == one_of(0, 2, 4)) {
+			word d = sn76489.peekRegister(reg, time);
+			if (hi) {
+				return word(((value & 0x3F) << 4) | (d & 0x0F));
+			} else {
+				return word((d & 0x3F0) | (value & 0x0F));
+			}
 		} else {
-			data = (data & 0x3F0) | (value & 0x0F);
+			return value & 0x0F;
 		}
-	} else {
-		data = value & 0x0F;
-	}
+	}();
 	sn76489.writeRegister(reg, data, time);
 }
 

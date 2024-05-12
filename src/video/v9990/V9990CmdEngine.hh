@@ -2,7 +2,6 @@
 #define V9990CMDENGINE_HH
 
 #include "Observer.hh"
-#include "EmuDuration.hh"
 #include "EmuTime.hh"
 #include "serialize_meta.hh"
 #include "openmsx.hh"
@@ -21,9 +20,9 @@ class V9990CmdEngine final : private Observer<Setting>
 {
 public:
 	// status bits
-	static const byte TR = 0x80;
-	static const byte BD = 0x10;
-	static const byte CE = 0x01;
+	static constexpr byte TR = 0x80;
+	static constexpr byte BD = 0x10;
+	static constexpr byte CE = 0x01;
 
 	V9990CmdEngine(V9990& vdp, EmuTime::param time,
 	               RenderSettings& settings);
@@ -34,10 +33,10 @@ public:
 	  */
 	void reset(EmuTime::param time);
 
-	/** Synchronises the command engine with the V9990
+	/** Synchronizes the command engine with the V9990
 	  * @param time The moment in emulated time to sync to.
 	  */
-	inline void sync(EmuTime::param time) {
+	void sync(EmuTime::param time) {
 		if (CMD >> 4) sync2(time);
 	}
 	void sync2(EmuTime::param time);
@@ -52,28 +51,44 @@ public:
 
 	/** read the command data byte
 	  */
-	byte getCmdData(EmuTime::param time);
+	[[nodiscard]] byte getCmdData(EmuTime::param time);
 
 	/** read the command data byte (without side-effects)
 	  */
-	byte peekCmdData(EmuTime::param time);
+	[[nodiscard]] byte peekCmdData(EmuTime::param time) const;
 
 	/** Get command engine related status bits
 	  *  - TR command data transfer ready (bit 7)
 	  *  - BD border color detect         (bit 4)
 	  *  - CE command being executed      (bit 0)
 	  */
-	byte getStatus(EmuTime::param time) {
+	[[nodiscard]] byte getStatus(EmuTime::param time) const {
 		// note: used for both normal and debug read
-		sync(time);
+		const_cast<V9990CmdEngine*>(this)->sync(time);
 		return status;
 	}
 
-	word getBorderX(EmuTime::param time) {
+	[[nodiscard]] word getBorderX(EmuTime::param time) const {
 		// note: used for both normal and debug read
-		sync(time);
+		const_cast<V9990CmdEngine*>(this)->sync(time);
 		return borderX;
 	}
+
+	/** Calculate an (under-)estimation for when the command will finish.
+	  * The main purpose of this function is to insert extra sync points
+	  * so that the Command-End (CE) interrupt properly synchronizes with
+	  * CPU emulation.
+	  * This estimation:
+	  * - Is the current time (engineTime) when no command is executing
+	  *   or the command doesn't require extra syncs.
+	  * - Is allowed to be an underestimation, on the condition that (when
+	  *   that point in time is reached) the new estimation is more
+	  *   accurate and converges to the actual end time.
+	  */
+	[[nodiscard]] EmuTime estimateCmdEnd() const;
+
+	[[nodiscard]] const V9990& getVDP() const { return vdp; }
+	[[nodiscard]] bool getBrokenTiming() const { return brokenTiming; }
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
@@ -82,127 +97,127 @@ private:
 	class V9990P1 {
 	public:
 		using Type = byte;
-		static const word BITS_PER_PIXEL  = 4;
-		static const word PIXELS_PER_BYTE = 2;
-		static inline unsigned getPitch(unsigned width);
-		static inline unsigned addressOf(unsigned x, unsigned y, unsigned pitch);
-		static inline byte point(V9990VRAM& vram,
-		                         unsigned x, unsigned y, unsigned pitch);
-		static inline byte shift(byte value, unsigned fromX, unsigned toX);
-		static inline byte shiftMask(unsigned x);
-		static inline const byte* getLogOpLUT(byte op);
-		static inline byte logOp(const byte* lut, byte src, byte dst);
-		static inline void pset(
+		static constexpr word BITS_PER_PIXEL  = 4;
+		static constexpr word PIXELS_PER_BYTE = 2;
+		static unsigned getPitch(unsigned width);
+		static unsigned addressOf(unsigned x, unsigned y, unsigned pitch);
+		static byte point(const V9990VRAM& vram,
+		                  unsigned x, unsigned y, unsigned pitch);
+		static byte shift(byte value, unsigned fromX, unsigned toX);
+		static byte shiftMask(unsigned x);
+		static std::span<const byte, 256 * 256> getLogOpLUT(byte op);
+		static byte logOp(std::span<const byte, 256 * 256> lut, byte src, byte dst);
+		static void pset(
 			V9990VRAM& vram, unsigned x, unsigned y, unsigned pitch,
-			byte srcColor, word mask, const byte* lut, byte op);
-		static inline void psetColor(
+			byte srcColor, word mask, std::span<const byte, 256 * 256> lut, byte op);
+		static void psetColor(
 			V9990VRAM& vram, unsigned x, unsigned y, unsigned pitch,
-			word color, word mask, const byte* lut, byte op);
+			word color, word mask, std::span<const byte, 256 * 256> lut, byte op);
 	};
 
 	class V9990P2 {
 	public:
 		using Type = byte;
-		static const word BITS_PER_PIXEL  = 4;
-		static const word PIXELS_PER_BYTE = 2;
-		static inline unsigned getPitch(unsigned width);
-		static inline unsigned addressOf(unsigned x, unsigned y, unsigned pitch);
-		static inline byte point(V9990VRAM& vram,
-		                         unsigned x, unsigned y, unsigned pitch);
-		static inline byte shift(byte value, unsigned fromX, unsigned toX);
-		static inline byte shiftMask(unsigned x);
-		static inline const byte* getLogOpLUT(byte op);
-		static inline byte logOp(const byte* lut, byte src, byte dst);
-		static inline void pset(
+		static constexpr word BITS_PER_PIXEL  = 4;
+		static constexpr word PIXELS_PER_BYTE = 2;
+		static unsigned getPitch(unsigned width);
+		static unsigned addressOf(unsigned x, unsigned y, unsigned pitch);
+		static byte point(const V9990VRAM& vram,
+		                  unsigned x, unsigned y, unsigned pitch);
+		static byte shift(byte value, unsigned fromX, unsigned toX);
+		static byte shiftMask(unsigned x);
+		static std::span<const byte, 256 * 256> getLogOpLUT(byte op);
+		static byte logOp(std::span<const byte, 256 * 256> lut, byte src, byte dst);
+		static void pset(
 			V9990VRAM& vram, unsigned x, unsigned y, unsigned pitch,
-			byte srcColor, word mask, const byte* lut, byte op);
-		static inline void psetColor(
+			byte srcColor, word mask, std::span<const byte, 256 * 256> lut, byte op);
+		static void psetColor(
 			V9990VRAM& vram, unsigned x, unsigned y, unsigned pitch,
-			word color, word mask, const byte* lut, byte op);
+			word color, word mask, std::span<const byte, 256 * 256> lut, byte op);
 	};
 
 	class V9990Bpp2 {
 	public:
 		using Type = byte;
-		static const word BITS_PER_PIXEL  = 2;
-		static const word PIXELS_PER_BYTE = 4;
-		static inline unsigned getPitch(unsigned width);
-		static inline unsigned addressOf(unsigned x, unsigned y, unsigned pitch);
-		static inline byte point(V9990VRAM& vram,
-		                         unsigned x, unsigned y, unsigned pitch);
-		static inline byte shift(byte value, unsigned fromX, unsigned toX);
-		static inline byte shiftMask(unsigned x);
-		static inline const byte* getLogOpLUT(byte op);
-		static inline byte logOp(const byte* lut, byte src, byte dst);
-		static inline void pset(
+		static constexpr word BITS_PER_PIXEL  = 2;
+		static constexpr word PIXELS_PER_BYTE = 4;
+		static unsigned getPitch(unsigned width);
+		static unsigned addressOf(unsigned x, unsigned y, unsigned pitch);
+		static byte point(const V9990VRAM& vram,
+		                  unsigned x, unsigned y, unsigned pitch);
+		static byte shift(byte value, unsigned fromX, unsigned toX);
+		static byte shiftMask(unsigned x);
+		static std::span<const byte, 256 * 256> getLogOpLUT(byte op);
+		static byte logOp(std::span<const byte, 256 * 256> lut, byte src, byte dst);
+		static void pset(
 			V9990VRAM& vram, unsigned x, unsigned y, unsigned pitch,
-			byte srcColor, word mask, const byte* lut, byte op);
-		static inline void psetColor(
+			byte srcColor, word mask, std::span<const byte, 256 * 256> lut, byte op);
+		static void psetColor(
 			V9990VRAM& vram, unsigned x, unsigned y, unsigned pitch,
-			word color, word mask, const byte* lut, byte op);
+			word color, word mask, std::span<const byte, 256 * 256> lut, byte op);
 	};
 
 	class V9990Bpp4 {
 	public:
 		using Type = byte;
-		static const word BITS_PER_PIXEL  = 4;
-		static const word PIXELS_PER_BYTE = 2;
-		static inline unsigned getPitch(unsigned width);
-		static inline unsigned addressOf(unsigned x, unsigned y, unsigned pitch);
-		static inline byte point(V9990VRAM& vram,
-		                         unsigned x, unsigned y, unsigned pitch);
-		static inline byte shift(byte value, unsigned fromX, unsigned toX);
-		static inline byte shiftMask(unsigned x);
-		static inline const byte* getLogOpLUT(byte op);
-		static inline byte logOp(const byte* lut, byte src, byte dst);
-		static inline void pset(
+		static constexpr word BITS_PER_PIXEL  = 4;
+		static constexpr word PIXELS_PER_BYTE = 2;
+		static unsigned getPitch(unsigned width);
+		static unsigned addressOf(unsigned x, unsigned y, unsigned pitch);
+		static byte point(const V9990VRAM& vram,
+		                  unsigned x, unsigned y, unsigned pitch);
+		static byte shift(byte value, unsigned fromX, unsigned toX);
+		static byte shiftMask(unsigned x);
+		static std::span<const byte, 256 * 256> getLogOpLUT(byte op);
+		static byte logOp(std::span<const byte, 256 * 256> lut, byte src, byte dst);
+		static void pset(
 			V9990VRAM& vram, unsigned x, unsigned y, unsigned pitch,
-			byte srcColor, word mask, const byte* lut, byte op);
-		static inline void psetColor(
+			byte srcColor, word mask, std::span<const byte, 256 * 256> lut, byte op);
+		static void psetColor(
 			V9990VRAM& vram, unsigned x, unsigned y, unsigned pitch,
-			word color, word mask, const byte* lut, byte op);
+			word color, word mask, std::span<const byte, 256 * 256> lut, byte op);
 	};
 
 	class V9990Bpp8 {
 	public:
 		using Type = byte;
-		static const word BITS_PER_PIXEL  = 8;
-		static const word PIXELS_PER_BYTE = 1;
-		static inline unsigned getPitch(unsigned width);
-		static inline unsigned addressOf(unsigned x, unsigned y, unsigned pitch);
-		static inline byte point(V9990VRAM& vram,
-		                         unsigned x, unsigned y, unsigned pitch);
-		static inline byte shift(byte value, unsigned fromX, unsigned toX);
-		static inline byte shiftMask(unsigned x);
-		static inline const byte* getLogOpLUT(byte op);
-		static inline byte logOp(const byte* lut, byte src, byte dst);
-		static inline void pset(
+		static constexpr word BITS_PER_PIXEL  = 8;
+		static constexpr word PIXELS_PER_BYTE = 1;
+		static unsigned getPitch(unsigned width);
+		static unsigned addressOf(unsigned x, unsigned y, unsigned pitch);
+		static byte point(const V9990VRAM& vram,
+		                  unsigned x, unsigned y, unsigned pitch);
+		static byte shift(byte value, unsigned fromX, unsigned toX);
+		static byte shiftMask(unsigned x);
+		static std::span<const byte, 256 * 256> getLogOpLUT(byte op);
+		static byte logOp(std::span<const byte, 256 * 256> lut, byte src, byte dst);
+		static void pset(
 			V9990VRAM& vram, unsigned x, unsigned y, unsigned pitch,
-			byte srcColor, word mask, const byte* lut, byte op);
-		static inline void psetColor(
+			byte srcColor, word mask, std::span<const byte, 256 * 256> lut, byte op);
+		static void psetColor(
 			V9990VRAM& vram, unsigned x, unsigned y, unsigned pitch,
-			word color, word mask, const byte* lut, byte op);
+			word color, word mask, std::span<const byte, 256 * 256> lut, byte op);
 	};
 
 	class V9990Bpp16 {
 	public:
 		using Type = word;
-		static const word BITS_PER_PIXEL  = 16;
-		static const word PIXELS_PER_BYTE = 0;
-		static inline unsigned getPitch(unsigned width);
-		static inline unsigned addressOf(unsigned x, unsigned y, unsigned pitch);
-		static inline word point(V9990VRAM& vram,
-		                         unsigned x, unsigned y, unsigned pitch);
-		static inline word shift(word value, unsigned fromX, unsigned toX);
-		static inline word shiftMask(unsigned x);
-		static inline const byte* getLogOpLUT(byte op);
-		static inline word logOp(const byte* lut, word src, word dst, bool transp);
-		static inline void pset(
+		static constexpr word BITS_PER_PIXEL  = 16;
+		static constexpr word PIXELS_PER_BYTE = 0;
+		static unsigned getPitch(unsigned width);
+		static unsigned addressOf(unsigned x, unsigned y, unsigned pitch);
+		static word point(const V9990VRAM& vram,
+		                  unsigned x, unsigned y, unsigned pitch);
+		static word shift(word value, unsigned fromX, unsigned toX);
+		static word shiftMask(unsigned x);
+		static std::span<const byte, 256 * 256> getLogOpLUT(byte op);
+		static word logOp(std::span<const byte, 256 * 256> lut, word src, word dst, bool transp);
+		static void pset(
 			V9990VRAM& vram, unsigned x, unsigned y, unsigned pitch,
-			word srcColor, word mask, const byte* lut, byte op);
-		static inline void psetColor(
+			word srcColor, word mask, std::span<const byte, 256 * 256> lut, byte op);
+		static void psetColor(
 			V9990VRAM& vram, unsigned x, unsigned y, unsigned pitch,
-			word color, word mask, const byte* lut, byte op);
+			word color, word mask, std::span<const byte, 256 * 256> lut, byte op);
 	};
 
 	void startSTOP  (EmuTime::param time);
@@ -301,24 +316,23 @@ private:
 	 */
 	bool brokenTiming;
 
-	/** The running command is complete. Perform neccessary clean-up actions.
+	/** The running command is complete. Perform necessary clean-up actions.
 	  */
 	void cmdReady(EmuTime::param time);
 
 	/** For debugging: Print the info about the current command.
 	  */
-	void reportV9990Command();
+	void reportV9990Command() const;
 
 	// Observer<Setting>
-	void update(const Setting& setting) override;
+	void update(const Setting& setting) noexcept override;
 
 	void setCommandMode();
-	EmuDuration getTiming(const unsigned table[4][3][4]) const;
 
-	inline unsigned getWrappedNX() const {
+	[[nodiscard]] word getWrappedNX() const {
 		return NX ? NX : 2048;
 	}
-	inline unsigned getWrappedNY() const {
+	[[nodiscard]] word getWrappedNY() const {
 		return NY ? NY : 4096;
 	}
 };

@@ -3,8 +3,8 @@
 
 #include "EmuTime.hh"
 #include "serialize_meta.hh"
-#include "string_view.hh"
 #include <memory>
+#include <string_view>
 
 namespace openmsx {
 
@@ -21,23 +21,25 @@ class Connector
 {
 public:
 	Connector(const Connector&) = delete;
+	Connector(Connector&&) = delete;
 	Connector& operator=(const Connector&) = delete;
+	Connector& operator=(Connector&&) = delete;
 
 	/**
 	 * Name that identifies this connector.
 	 */
-	const std::string& getName() const { return name; }
+	[[nodiscard]] const std::string& getName() const { return name; }
 
 	/**
 	 * Get a description for this connector
 	 */
-	virtual const std::string getDescription() const = 0;
+	[[nodiscard]] virtual std::string_view getDescription() const = 0;
 
 	/**
 	 * A Connector belong to a certain class.
 	 * Only Pluggables of this class can be plugged in this Connector.
 	 */
-	virtual string_view getClass() const = 0;
+	[[nodiscard]] virtual std::string_view getClass() const = 0;
 
 	/**
 	 * This plugs a Pluggable in this Connector.
@@ -56,9 +58,9 @@ public:
 	/**
 	 * Returns the Pluggable currently plugged in.
 	 */
-	Pluggable& getPlugged() const { return *plugged; }
+	[[nodiscard]] Pluggable& getPlugged() const { return *plugged; }
 
-	PluggingController& getPluggingController() const {
+	[[nodiscard]] PluggingController& getPluggingController() const {
 		return pluggingController;
 	}
 

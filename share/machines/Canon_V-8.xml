@@ -6,8 +6,9 @@
     <manufacturer>Canon</manufacturer>
     <code>V-8</code>
     <release_year></release_year>
-    <description>Very compact and rather minimal MSX1 machine</description>
+    <description>Very compact and rather minimal MSX1 machine, with only 8kB RAM.</description>
     <type>MSX</type>
+    <region>jp</region>
   </info>
 
   <!-- Based on serial 131844, thanks to Ricardo Jurczyk Pinheiro
@@ -34,7 +35,7 @@
       <sound>
         <volume>16000</volume>
       </sound>
-      <io base="0xA8" num="4"/>
+      <io base="0xA8" num="8"/> <!-- S-3527 mirrors -->
       <keyboard_type>jp_jis</keyboard_type>
       <has_keypad>false</has_keypad>
       <key_ghosting_sgc_protected>false</key_ghosting_sgc_protected>
@@ -49,12 +50,12 @@
 
     <PSG id="PSG">
       <type>YM2149</type> <!-- in S-3527 MSX-ENGINE -->
-      <keyboardlayout>jis</keyboardlayout>
+      <keyboardlayout>JIS</keyboardlayout>
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="8" type="IO"/> <!-- S-3527 mirrors -->
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <primary slot="0">

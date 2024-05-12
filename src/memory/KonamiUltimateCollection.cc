@@ -1,6 +1,8 @@
 #include "KonamiUltimateCollection.hh"
+#include "narrow.hh"
+#include "ranges.hh"
 #include "serialize.hh"
-#include <vector>
+#include <array>
 
 /******************************************************************************
  * DOCUMENTATION AS PROVIDED BY MANUEL PAZOS, WHO DEVELOPED THE CARTRIDGE     *
@@ -33,20 +35,20 @@ all Konami and Konami SCC ROMs should work with "Konami" mapper in KUC.
 
 namespace openmsx {
 
-static std::vector<AmdFlash::SectorInfo> getSectorInfo()
-{
-	std::vector<AmdFlash::SectorInfo> sectorInfo;
-	// 8 * 8kB
-	sectorInfo.insert(end(sectorInfo), 8, {8 * 1024, false});
-	// 127 * 64kB
-	sectorInfo.insert(end(sectorInfo), 127, {64 * 1024, false});
-	return sectorInfo;
-}
+static constexpr auto sectorInfo = [] {
+	// 8 * 8kB, followed by 127 * 64kB
+	using Info = AmdFlash::SectorInfo;
+	std::array<Info, 8 + 127> result = {};
+	std::fill(result.begin(), result.begin() + 8, Info{ 8 * 1024, false});
+	std::fill(result.begin() + 8, result.end(),   Info{64 * 1024, false});
+	return result;
+}();
 
 KonamiUltimateCollection::KonamiUltimateCollection(
 		const DeviceConfig& config, Rom&& rom_)
 	: MSXRom(config, std::move(rom_))
-	, flash(rom, getSectorInfo(), 0x207E, true, config)
+	, flash(rom, sectorInfo, 0x207E,
+	        AmdFlash::Addressing::BITS_12, config)
 	, scc("KUC SCC", config, getCurrentTime(), SCC::SCC_Compatible)
 	, dac("KUC DAC", "Konami Ultimate Collection DAC", config)
 {
@@ -64,14 +66,12 @@ void KonamiUltimateCollection::reset(EmuTime::param time)
 	mapperReg = 0;
 	offsetReg = 0;
 	sccMode = 0;
-	for (int bank = 0; bank < 4; ++bank) {
-		bankRegs[bank] = bank;
-	}
+	ranges::iota(bankRegs, byte(0));
 
 	scc.reset(time);
 	dac.reset(time);
 
-	invalidateMemCache(0x0000, 0x10000); // flush all to be sure
+	invalidateDeviceRWCache(); // flush all to be sure
 }
 
 unsigned KonamiUltimateCollection::getFlashAddr(unsigned addr) const
@@ -107,7 +107,7 @@ bool KonamiUltimateCollection::isSCCAccess(word addr) const
 byte KonamiUltimateCollection::readMem(word addr, EmuTime::param time)
 {
 	if (isSCCAccess(addr)) {
-		return scc.readMem(addr & 0xFF, time);
+		return scc.readMem(narrow_cast<uint8_t>(addr & 0xFF), time);
 	}
 
 	unsigned flashAddr = getFlashAddr(addr);
@@ -119,7 +119,7 @@ byte KonamiUltimateCollection::readMem(word addr, EmuTime::param time)
 byte KonamiUltimateCollection::peekMem(word addr, EmuTime::param time) const
 {
 	if (isSCCAccess(addr)) {
-		return scc.peekMem(addr & 0xFF, time);
+		return scc.peekMem(narrow_cast<uint8_t>(addr & 0xFF), time);
 	}
 
 	unsigned flashAddr = getFlashAddr(addr);
@@ -135,7 +135,7 @@ const byte* KonamiUltimateCollection::getReadCacheLine(word addr) const
 	unsigned flashAddr = getFlashAddr(addr);
 	return (flashAddr != unsigned(-1))
 		? flash.getReadCacheLine(flashAddr)
-		: unmappedRead;
+		: unmappedRead.data();
 }
 
 void KonamiUltimateCollection::writeMem(word addr, byte value, EmuTime::param time)
@@ -151,7 +151,7 @@ void KonamiUltimateCollection::writeMem(word addr, byte value, EmuTime::param ti
 	// SCC registers
 
 	if (isSCCAccess(addr)) {
-		scc.writeMem(addr & 0xFF, value, time);
+		scc.writeMem(narrow_cast<uint8_t>(addr & 0xFF), value, time);
 		return; // write to SCC blocks write to other functions
 	}
 
@@ -165,7 +165,7 @@ void KonamiUltimateCollection::writeMem(word addr, byte value, EmuTime::param ti
 		} else if (addr == 0x7FFE) {
 			offsetReg = value;
 		}
-		invalidateMemCache(0x0000, 0x10000); // flush all to be sure
+		invalidateDeviceRCache(); // flush all to be sure
 	}
 
 
@@ -183,7 +183,7 @@ void KonamiUltimateCollection::writeMem(word addr, byte value, EmuTime::param ti
 				// [0x9000,0x97FF] [0xB000,0xB7FF]
 				// Masking of the mapper bits is done on write
 				bankRegs[page8kB] = value;
-				invalidateMemCache(0x4000 + 0x2000 * page8kB, 0x2000);
+				invalidateDeviceRCache(0x4000 + 0x2000 * page8kB, 0x2000);
 			}
 		} else {
 			// Konami
@@ -195,7 +195,7 @@ void KonamiUltimateCollection::writeMem(word addr, byte value, EmuTime::param ti
 				if (!((addr < 0x5000) || ((0x5800 <= addr) && (addr < 0x6000)))) {
 					// Masking of the mapper bits is done on write
 					bankRegs[page8kB] = value;
-					invalidateMemCache(0x4000 + 0x2000 * page8kB, 0x2000);
+					invalidateDeviceRCache(0x4000 + 0x2000 * page8kB, 0x2000);
 				}
 			}
 		}
@@ -205,8 +205,8 @@ void KonamiUltimateCollection::writeMem(word addr, byte value, EmuTime::param ti
 			sccMode = value;
 			scc.setChipMode((value & 0x20) ? SCC::SCC_plusmode
 						       : SCC::SCC_Compatible);
-			invalidateMemCache(0x9800, 0x800);
-			invalidateMemCache(0xB800, 0x800);
+			invalidateDeviceRCache(0x9800, 0x800);
+			invalidateDeviceRCache(0xB800, 0x800);
 		}
 	}
 
@@ -219,7 +219,7 @@ byte* KonamiUltimateCollection::getWriteCacheLine(word addr) const
 {
 	return ((0x4000 <= addr) && (addr < 0xC000))
 	       ? nullptr        // [0x4000,0xBFFF] isn't cacheable
-	       : unmappedWrite;
+	       : unmappedWrite.data();
 }
 
 template<typename Archive>
@@ -228,13 +228,13 @@ void KonamiUltimateCollection::serialize(Archive& ar, unsigned /*version*/)
 	// skip MSXRom base class
 	ar.template serializeBase<MSXDevice>(*this);
 
-	ar.serialize("flash", flash);
-	ar.serialize("scc", scc);
-	ar.serialize("DAC", dac);
-	ar.serialize("mapperReg", mapperReg);
-	ar.serialize("offsetReg", offsetReg);
-	ar.serialize("sccMode", sccMode);
-	ar.serialize("bankRegs", bankRegs);
+	ar.serialize("flash",     flash,
+	             "scc",       scc,
+	             "DAC",       dac,
+	             "mapperReg", mapperReg,
+	             "offsetReg", offsetReg,
+	             "sccMode",   sccMode,
+	             "bankRegs",  bankRegs);
 }
 INSTANTIATE_SERIALIZE_METHODS(KonamiUltimateCollection);
 REGISTER_MSXDEVICE(KonamiUltimateCollection, "KonamiUltimateCollection");

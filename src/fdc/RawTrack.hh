@@ -1,8 +1,11 @@
 #ifndef RAWTRACK_HH
 #define RAWTRACK_HH
 
-#include "openmsx.hh"
+#include "narrow.hh"
 #include "serialize_meta.hh"
+#include <cstdint>
+#include <optional>
+#include <span>
 #include <vector>
 
 namespace openmsx {
@@ -68,19 +71,20 @@ public:
 	// speed can vary and thus the disk can be formatted with slightly more
 	// or slightly less raw bytes per track. This class can also represent
 	// tracks of different lengths.
-	static const unsigned STANDARD_SIZE = 6250;
+	static constexpr unsigned STANDARD_SIZE = 6250;
 
 	struct Sector
 	{
-		int addrIdx;
-		int dataIdx;
-		byte track;
-		byte head;
-		byte sector;
-		byte sizeCode;
-		bool deleted;
-		bool addrCrcErr;
-		bool dataCrcErr;
+		// note: initialize to avoid UMR on savestate
+		int addrIdx = 0;
+		int dataIdx = 0;
+		uint8_t track = 0;
+		uint8_t head = 0;
+		uint8_t sector = 0;
+		uint8_t sizeCode = 0;
+		bool deleted = false;
+		bool addrCrcErr = false;
+		bool dataCrcErr = false;
 
 		template<typename Archive>
 		void serialize(Archive& ar, unsigned version);
@@ -93,45 +97,46 @@ public:
 	void clear(unsigned size);
 
 	/** Get track length. */
-	unsigned getLength() const { return unsigned(data.size()); }
+	[[nodiscard]] unsigned getLength() const { return unsigned(data.size()); }
 
 	void addIdam(unsigned idx);
 
 	// In the methods below, 'index' is allowed to be 'out-of-bounds',
 	// it will wrap like in a circular buffer.
 
-	byte read(int idx) const { return data[wrapIndex(idx)]; }
-	void write(int idx, byte val, bool setIdam = false);
-	int wrapIndex(int idx) const {
+	[[nodiscard]] uint8_t read(int idx) const { return data[wrapIndex(idx)]; }
+	void write(int idx, uint8_t val, bool setIdam = false);
+	[[nodiscard]] int wrapIndex(int idx) const {
 		// operator% is not a modulo but a remainder operation (makes a
 		// difference for negative inputs). Hence the extra test.
-		int tmp = idx % int(data.size());
-		return (tmp >= 0) ? tmp : int(tmp + data.size());
+		int size = narrow<int>(data.size());
+		int tmp = idx % size;
+		return (tmp >= 0) ? tmp : (tmp + size);
 	}
 
-	      byte* getRawBuffer()       { return data.data(); }
-	const byte* getRawBuffer() const { return data.data(); }
-	const std::vector<unsigned>& getIdamBuffer() const { return idam; }
+	[[nodiscard]] std::span<      uint8_t> getRawBuffer()       { return data; }
+	[[nodiscard]] std::span<const uint8_t> getRawBuffer() const { return data; }
+	[[nodiscard]] const auto& getIdamBuffer() const { return idam; }
 
 	/** Get info on all sectors in this track. */
-	std::vector<Sector> decodeAll() const;
+	[[nodiscard]] std::vector<Sector> decodeAll() const;
 
 	/** Get the next sector (starting from a certain index). */
-	bool decodeNextSector(unsigned startIdx, Sector& sector) const;
+	[[nodiscard]] std::optional<Sector> decodeNextSector(unsigned startIdx) const;
 
 	/** Get a sector with a specific number.
 	  * Note that if a sector with the same number occurs multiple times,
 	  * this method will always return the same (the first) sector. So
 	  * don't use it in the implementation of FDC / DiskDrive code.
 	  */
-	bool decodeSector(byte sectorNum, Sector& sector) const;
+	[[nodiscard]] std::optional<Sector> decodeSector(uint8_t sectorNum) const;
 
 	/** Like memcpy() but copy from/to circular buffer. */
-	void readBlock (int idx, unsigned size, byte* destination) const;
-	void writeBlock(int idx, unsigned size, const byte* source);
+	void readBlock (int idx, std::span<uint8_t> destination) const;
+	void writeBlock(int idx, std::span<const uint8_t> source);
 
 	/** Convenience method to calculate CRC for part of this track. */
-	word calcCrc(int idx, int size) const;
+	[[nodiscard]] uint16_t calcCrc(int idx, int size) const;
 	void updateCrc(CRC16& crc, int idx, int size) const;
 
 	void applyWd2793ReadTrackQuirk();
@@ -140,8 +145,9 @@ public:
 	void serialize(Archive& ar, unsigned version);
 
 private:
-	bool decodeSectorImpl(int idx, Sector& sector) const;
+	[[nodiscard]] std::optional<Sector> decodeSectorImpl(int idx) const;
 
+private:
 	// Index into 'data'-array to positions where an address mark
 	// starts (it points to the 'FE' byte in the 'A1 A1 A1 FE ..'
 	// sequence.
@@ -150,7 +156,7 @@ private:
 	// MFM-decoded raw data, this does NOT include the missing clock
 	// transitions that can occur in the encodings of the 'A1' and
 	// 'C2' bytes.
-	std::vector<byte> data;
+	std::vector<uint8_t> data;
 };
 SERIALIZE_CLASS_VERSION(RawTrack, 2);
 

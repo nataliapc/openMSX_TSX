@@ -1,9 +1,12 @@
 #include "SensorKid.hh"
-#include "CliComm.hh"
+
 #include "CommandController.hh"
+#include "MSXCliComm.hh"
 #include "MSXException.hh"
 #include "StringSetting.hh"
 #include "serialize.hh"
+
+#include "narrow.hh"
 
 namespace openmsx {
 
@@ -11,12 +14,14 @@ SensorKid::SensorKid(const DeviceConfig& config)
 	: MSXDevice(config)
 	, portStatusCallback(getCommandController(),
 		getName() + "_port_status_callback",
-		"Tcl proc to call when an Sensor Kid port status is changed")
+		"Tcl proc to call when an Sensor Kid port status is changed",
+		"", Setting::DONT_SAVE)
 	, acquireCallback(getCommandController(),
 		getName() + "_acquire_callback",
-		"Tcl proc called to aquire analog data. "
+		"Tcl proc called to acquire analog data. "
 		"Input: port number (0-3). "
-		"Output: the value for that port (0-255).")
+		"Output: the value for that port (0-255).",
+		"", Setting::DONT_SAVE)
 {
 	reset(getCurrentTime());
 }
@@ -65,14 +70,15 @@ byte SensorKid::readIO(word port, EmuTime::param /* time */)
 		//  for 12,11,1,0 we return 1
 		//  for 10        we return 0
 		//  for 9..2      we return one of the analog bits
-		byte result;
-		if (mb4052_count == 10) {
-			result = 0;
-		} else if ((mb4052_count < 10) && (mb4052_count > 1)) {
-			result = (mb4052_ana >> (mb4052_count - 2)) & 1;
-		} else {
-			result = 1;
-		}
+		byte result = [&]  {
+			if (mb4052_count == 10) {
+				return byte(0);
+			} else if ((mb4052_count < 10) && (mb4052_count > 1)) {
+				return byte((mb4052_ana >> (mb4052_count - 2)) & 1);
+			} else {
+				return byte(1);
+			}
+		}();
 		return 0xFE | result; // other bits read as '1'.
 	} else {
 		// port 1
@@ -81,7 +87,7 @@ byte SensorKid::readIO(word port, EmuTime::param /* time */)
 	}
 }
 
-byte SensorKid::getAnalog(byte chi)
+byte SensorKid::getAnalog(byte chi) const
 {
 	// bits 2 and 3 in the 'port-0' byte select between 4 possible channels
 	// for some reason bits 2 and 3 are swapped and then shifted down
@@ -90,19 +96,20 @@ byte SensorKid::getAnalog(byte chi)
 	// Execute Tcl callback
 	//   input: the port number (0-3)
 	//   output: the analog value for that port (0-255)
-	// On the real cartrige
+	// On the real cartridge
 	//  port 0 is connected to a light sensor         HIKARI
 	//  port 1 is connector to a temperature sensor   ONDO
 	//  port 2 is connected to a microphone           OTO
 	//  port 3 is not connected, always return 255
-	int result = 255;
+	byte result = 255;
 	try {
 		auto obj = acquireCallback.execute(port);
 		if (obj != TclObject()) {
-			result = obj.getInt(getCommandController().getInterpreter());
-			if ((result < 0) || (result > 255)) {
+			auto tmp = obj.getInt(getCommandController().getInterpreter());
+			if ((tmp < 0) || (tmp > 255)) {
 				throw MSXException("outside range 0..255");
 			}
+			result = narrow_cast<byte>(tmp);
 		}
 	} catch (MSXException& e) {
 		getCliComm().printWarning(
@@ -113,16 +120,16 @@ byte SensorKid::getAnalog(byte chi)
 	return result;
 }
 
-void SensorKid::putPort(byte data, byte diff)
+void SensorKid::putPort(byte data, byte diff) const
 {
 	// When the upper 2 bits (bit 6 and 7) change we send a message.
 	// I assume the cartridge also has two digital output pins?
 	if (diff & 0x80) {
-		//std::cout << "Status Port 0: " << int((data & 0x80) == 0) << std::endl;
+		//std::cout << "Status Port 0: " << int((data & 0x80) == 0) << '\n';
 		portStatusCallback.execute(0, (data & 0x80) == 0);
 	}
 	if (diff & 0x40) {
-		//std::cout << "Status Port 1:  " << int((data & 0x40) == 0) << std::endl;
+		//std::cout << "Status Port 1:  " << int((data & 0x40) == 0) << '\n';
 		portStatusCallback.execute(1, (data & 0x40) == 0);
 	}
 }
@@ -131,9 +138,9 @@ template<typename Archive>
 void SensorKid::serialize(Archive& ar, unsigned /*version*/)
 {
 	ar.template serializeBase<MSXDevice>(*this);
-	ar.serialize("prev", prev);
-	ar.serialize("mb4052_ana", mb4052_ana);
-	ar.serialize("mb4052_count", mb4052_count);
+	ar.serialize("prev",         prev,
+	             "mb4052_ana",   mb4052_ana,
+	             "mb4052_count", mb4052_count);
 }
 INSTANTIATE_SERIALIZE_METHODS(SensorKid);
 REGISTER_MSXDEVICE(SensorKid, "SensorKid");

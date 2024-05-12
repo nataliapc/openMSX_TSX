@@ -2,15 +2,16 @@
 #define HEXDUMP_HH
 
 #include "MemBuffer.hh"
-#include "string_view.hh"
-#include <string>
 #include <cstdint>
+#include <span>
+#include <string>
+#include <string_view>
 #include <utility>
 
 namespace HexDump {
-	std::string encode(const uint8_t* input, size_t len, bool newlines = true);
-	std::pair<openmsx::MemBuffer<uint8_t>, size_t> decode(string_view input);
-	bool decode_inplace(string_view input, uint8_t* output, size_t outSize);
+	[[nodiscard]] std::string encode(std::span<const uint8_t> input, bool newlines = true);
+	[[nodiscard]] std::pair<openmsx::MemBuffer<uint8_t>, size_t> decode(std::string_view input);
+	[[nodiscard]] bool decode_inplace(std::string_view input, std::span<uint8_t> output);
 }
 
 #endif

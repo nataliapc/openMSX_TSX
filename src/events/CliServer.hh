@@ -22,9 +22,10 @@ public:
 
 private:
 	void mainLoop();
-	SOCKET createSocket();
+	[[nodiscard]] SOCKET createSocket();
 	void exitAcceptLoop();
 
+private:
 	CommandController& commandController;
 	EventDistributor& eventDistributor;
 	GlobalCliComm& cliComm;
@@ -33,6 +34,7 @@ private:
 	std::string socketName;
 	SOCKET listenSock;
 	Poller poller;
+	[[no_unique_address]] SocketActivator socketActivator;
 };
 
 } // namespace openmsx

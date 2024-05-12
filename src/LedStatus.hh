@@ -1,15 +1,15 @@
 #ifndef LEDSTATUS_HH
 #define LEDSTATUS_HH
 
+#include "ReadOnlySetting.hh"
 #include "RTSchedulable.hh"
-#include <memory>
+#include <array>
 #include <cstdint>
 
 namespace openmsx {
 
 class CommandController;
 class MSXCliComm;
-class ReadOnlySetting;
 class RTScheduler;
 class Interpreter;
 
@@ -29,21 +29,21 @@ public:
 	LedStatus(RTScheduler& rtScheduler,
 	          CommandController& commandController,
 	          MSXCliComm& msxCliComm);
-	~LedStatus();
 
 	void setLed(Led led, bool status);
 
 private:
-	void handleEvent(Led led);
+	void handleEvent(Led led) noexcept;
 
 	// RTSchedulable
 	void executeRT() override;
 
+private:
 	MSXCliComm& msxCliComm;
 	Interpreter& interp;
-	std::unique_ptr<ReadOnlySetting> ledStatus[NUM_LEDS];
+	std::array<ReadOnlySetting, NUM_LEDS> ledStatus;
 	uint64_t lastTime;
-	bool ledValue[NUM_LEDS];
+	std::array<bool, NUM_LEDS> ledValue;
 };
 
 } // namespace openmsx

@@ -21,7 +21,7 @@ public:
 	static constexpr size_t MAX_MESSAGE_SIZE = 256;
 
 	// Pluggable (part)
-	string_view getClass() const final override;
+	[[nodiscard]] std::string_view getClass() const final;
 
 	// SerialDataInterface (part)
 	void recvByte(byte value, EmuTime::param time) override;
@@ -30,7 +30,7 @@ public:
 	void setParityBit(bool enable, ParityBit parity) override;
 
 protected:
-	explicit MidiOutDevice();
+	explicit MidiOutDevice() = default;
 
 	/** Discard any buffered partial MIDI message.
 	  */
@@ -41,11 +41,11 @@ protected:
 	  * instead, in which case this method will not be called.
 	  */
 	virtual void recvMessage(
-			const std::vector<uint8_t>& message, EmuTime::param time);
+		const std::vector<uint8_t>& message, EmuTime::param time);
 
 private:
 	std::vector<uint8_t> buffer;
-	bool isSysEx;
+	bool isSysEx = false;
 };
 
 } // namespace openmsx

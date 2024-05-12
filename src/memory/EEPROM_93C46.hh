@@ -1,8 +1,9 @@
-#ifndef EEPROM_93C46_H
-#define EEPROM_93C46_H
+#ifndef EEPROM_93C46_HH
+#define EEPROM_93C46_HH
 
 #include "EmuTime.hh"
 #include "SRAM.hh"
+
 #include <climits>
 #include <string>
 
@@ -20,12 +21,12 @@ public:
 	static constexpr uint8_t DATA_BITS = 8; // only 8-bit mode implemented
 
 public:
-	EEPROM_93C46(const XMLElement& xml); // unittest
+	explicit EEPROM_93C46(const XMLElement& xml); // unittest
 	EEPROM_93C46(const std::string& name, const DeviceConfig& config);
 
 	void reset();
-	
-	bool read_DO(EmuTime::param time) const;
+
+	[[nodiscard]] bool read_DO(EmuTime::param time) const;
 	void write_CS (bool value, EmuTime::param time);
 	void write_CLK(bool value, EmuTime::param time);
 	void write_DI (bool value, EmuTime::param time);
@@ -34,18 +35,18 @@ public:
 	void serialize(Archive& ar, unsigned version);
 
 	// for unittest
-	const uint8_t* backdoor() const {
+	[[nodiscard]] const uint8_t* backdoor() const {
 		return &sram[0];
 	}
 
 private:
-	uint8_t read(unsigned addr);
+	[[nodiscard]] uint8_t read(unsigned addr) const;
 	void write(unsigned addr, uint8_t value, EmuTime::param time);
 	void writeAll(uint8_t value, EmuTime::param time);
 	void erase(unsigned addr, EmuTime::param time);
 	void eraseAll(EmuTime::param time);
 
-	bool ready(EmuTime::param time) const;
+	[[nodiscard]] bool ready(EmuTime::param time) const;
 	void clockEvent(EmuTime::param time);
 	void execute_command(EmuTime::param time);
 
@@ -56,13 +57,13 @@ public: // for serialize
 		WAIT_FOR_COMMAND,
 		READING_DATA,
 		WAIT_FOR_WRITE,
-		WAIT_FOR_WRITEALL,
+		WAIT_FOR_WRITE_ALL,
 	};
 
 private:
 	SRAM sram;
-	EmuTime completionTime = EmuTime::zero;
-	EmuTime csTime = EmuTime::zero;
+	EmuTime completionTime = EmuTime::zero();
+	EmuTime csTime = EmuTime::zero();
 	State state = IN_RESET;
 	uint16_t shiftRegister = 0;
 	uint8_t bits = 0;
@@ -72,8 +73,7 @@ private:
 	bool pinDI = false;
 	bool writeProtected = true;
 
-	//static constexpr int SHIFT_REG_BITS = sizeof(shiftRegister) * CHAR_BIT;
-	static constexpr int SHIFT_REG_BITS = sizeof(uint16_t) * CHAR_BIT; // vs workaround ??
+	static constexpr int SHIFT_REG_BITS = sizeof(shiftRegister) * CHAR_BIT;
 };
 
 } // namespace openmsx

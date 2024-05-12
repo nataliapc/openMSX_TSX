@@ -4,10 +4,13 @@
 #include "DiskImageUtils.hh"
 #include "circular_buffer.hh"
 #include "openmsx.hh"
-#include <vector>
-#include <string>
+#include <array>
+#include <fstream>
 #include <memory>
-#include <iosfwd>
+#include <optional>
+#include <span>
+#include <string>
+#include <vector>
 
 namespace openmsx {
 
@@ -23,24 +26,24 @@ public:
 	~NowindHost();
 
 	// public for usb-host implementation
-	bool isDataAvailable() const;
+	[[nodiscard]] bool isDataAvailable() const;
 
 	// read one byte of response-data from the host (msx <- pc)
 	byte read();
 
 	// like read(), but without side effects (doesn't consume the data)
-	byte peek() const;
+	[[nodiscard]] byte peek() const;
 
 	// Write one byte of command-data to the host   (msx -> pc)
 	// Time parameter is in milliseconds. Emulators can pass emulation
-	// time, usbhost can pass real time.
+	// time, USB-host can pass real time.
 	void write(byte data, unsigned time);
 
-	void setAllowOtherDiskroms(bool allow) { allowOtherDiskroms = allow; }
-	bool getAllowOtherDiskroms() const { return allowOtherDiskroms; }
+	void setAllowOtherDiskRoms(bool allow) { allowOtherDiskRoms = allow; }
+	[[nodiscard]] bool getAllowOtherDiskRoms() const { return allowOtherDiskRoms; }
 
 	void setEnablePhantomDrives(bool enable) { enablePhantomDrives = enable; }
-	bool getEnablePhantomDrives() const { return enablePhantomDrives; }
+	[[nodiscard]] bool getEnablePhantomDrives() const { return enablePhantomDrives; }
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
@@ -59,7 +62,7 @@ public:
 
 private:
 	void msxReset();
-	SectorAccessibleDisk* getDisk() const;
+	[[nodiscard]] SectorAccessibleDisk* getDisk() const;
 	void executeCommand();
 
 	void send(byte value);
@@ -73,26 +76,26 @@ private:
 	void INIENV();
 	void setDateMSX();
 
-	unsigned getSectorAmount() const;
-	unsigned getStartSector() const;
-	unsigned getStartAddress() const;
-	unsigned getCurrentAddress() const;
+	[[nodiscard]] unsigned getSectorAmount() const;
+	[[nodiscard]] unsigned getStartSector() const;
+	[[nodiscard]] unsigned getStartAddress() const;
+	[[nodiscard]] unsigned getCurrentAddress() const;
 
-	void diskReadInit(SectorAccessibleDisk& disk);
+	void diskReadInit(const SectorAccessibleDisk& disk);
 	void doDiskRead1();
 	void doDiskRead2();
 	void transferSectors(unsigned transferAddress, unsigned amount);
 	void transferSectorsBackwards(unsigned transferAddress, unsigned amount);
 
-	void diskWriteInit(SectorAccessibleDisk& disk);
+	void diskWriteInit(const SectorAccessibleDisk& disk);
 	void doDiskWrite1();
 	void doDiskWrite2();
 
-	unsigned getFCB() const;
-	std::string extractName(int begin, int end) const;
-	unsigned readHelper1(unsigned dev, char* buffer);
-	void readHelper2(unsigned len, const char* buffer);
-	int getDeviceNum() const;
+	[[nodiscard]] word getFCB() const;
+	[[nodiscard]] std::string extractName(int begin, int end) const;
+	unsigned readHelper1(unsigned dev, std::span<char, 256> buffer);
+	void readHelper2(std::span<const char> buffer);
+	[[nodiscard]] int getDeviceNum() const;
 	int getFreeDeviceNum();
 	void deviceOpen();
 	void deviceClose();
@@ -101,32 +104,33 @@ private:
 
 	void callImage(const std::string& filename);
 
-
-	static const unsigned MAX_DEVICES = 16;
+private:
+	static constexpr unsigned MAX_DEVICES = 16;
 
 	const Drives& drives;
 
 	cb_queue<byte> hostToMsxFifo;
 
-	struct {
-		std::unique_ptr<std::fstream> fs; // not in use when fs == nullptr
-		unsigned fcb;
-	} devices[MAX_DEVICES];
+	struct Device {
+		std::optional<std::fstream> fs; // not in use when fs == nullopt
+		word fcb;
+	};
+	std::array<Device, MAX_DEVICES> devices;
 
 	// state-machine
-	std::vector<SectorBuffer> buffer;// work buffer for diskread/write
-	unsigned lastTime;       // last time a byte was received from MSX
-	State state;
+	std::vector<SectorBuffer> buffer;// work buffer for disk read/write
+	unsigned lastTime = 0;   // last time a byte was received from MSX
+	State state = STATE_SYNC1;
 	unsigned recvCount;      // how many bytes recv in this state
-	unsigned transfered;     // progress within diskread/write
-	unsigned retryCount;     // only used for diskread
+	unsigned transferred;    // progress within disk read/write
+	unsigned retryCount;     // only used for disk read
 	unsigned transferSize;   // size of current chunk
-	byte cmdData[9];         // reg_[cbedlhfa] + cmd
-	byte extraData[240 + 2]; // extra data for diskread/write
+	std::array<byte, 9> cmdData; // reg_[cbedlhfa] + cmd
+	std::array<byte, 240 + 2> extraData; // extra data for disk read/write
 
-	byte romdisk;            // index of romdisk (255 = no romdisk)
-	bool allowOtherDiskroms;
-	bool enablePhantomDrives;
+	byte romDisk = 255;      // index of rom disk (255 = no rom disk)
+	bool allowOtherDiskRoms = false;
+	bool enablePhantomDrives = true;
 };
 
 } // namespace openmsx

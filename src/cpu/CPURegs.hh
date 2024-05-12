@@ -3,67 +3,67 @@
 
 #include "serialize_meta.hh"
 #include "openmsx.hh"
-#include "build-info.hh"
+#include <bit>
 #include <cassert>
 
 namespace openmsx {
 
-template<bool BigEndian> struct z80regpair_8bit;
-template<> struct z80regpair_8bit<false> { byte l, h; };
-template<> struct z80regpair_8bit<true>  { byte h, l; };
-union z80regpair {
-	z80regpair_8bit<OPENMSX_BIGENDIAN> b;
+template<std::endian> struct z80regPair_8bit;
+template<> struct z80regPair_8bit<std::endian::little> { byte l, h; };
+template<> struct z80regPair_8bit<std::endian::big   > { byte h, l; };
+union z80regPair {
+	z80regPair_8bit<std::endian::native> b;
 	word w;
 };
 
 class CPURegs
 {
 public:
-	explicit CPURegs(bool r800) : HALT_(0), Rmask(r800 ? 0xff : 0x7f) {}
-	inline byte getA()   const { return AF_.b.h; }
-	inline byte getF()   const { return AF_.b.l; }
-	inline byte getB()   const { return BC_.b.h; }
-	inline byte getC()   const { return BC_.b.l; }
-	inline byte getD()   const { return DE_.b.h; }
-	inline byte getE()   const { return DE_.b.l; }
-	inline byte getH()   const { return HL_.b.h; }
-	inline byte getL()   const { return HL_.b.l; }
-	inline byte getA2()  const { return AF2_.b.h; }
-	inline byte getF2()  const { return AF2_.b.l; }
-	inline byte getB2()  const { return BC2_.b.h; }
-	inline byte getC2()  const { return BC2_.b.l; }
-	inline byte getD2()  const { return DE2_.b.h; }
-	inline byte getE2()  const { return DE2_.b.l; }
-	inline byte getH2()  const { return HL2_.b.h; }
-	inline byte getL2()  const { return HL2_.b.l; }
-	inline byte getIXh() const { return IX_.b.h; }
-	inline byte getIXl() const { return IX_.b.l; }
-	inline byte getIYh() const { return IY_.b.h; }
-	inline byte getIYl() const { return IY_.b.l; }
-	inline byte getPCh() const { return PC_.b.h; }
-	inline byte getPCl() const { return PC_.b.l; }
-	inline byte getSPh() const { return SP_.b.h; }
-	inline byte getSPl() const { return SP_.b.l; }
+	explicit CPURegs(bool r800) : Rmask(r800 ? 0xff : 0x7f) {}
+	[[nodiscard]] inline byte getA()   const { return AF_.b.h; }
+	[[nodiscard]] inline byte getF()   const { return AF_.b.l; }
+	[[nodiscard]] inline byte getB()   const { return BC_.b.h; }
+	[[nodiscard]] inline byte getC()   const { return BC_.b.l; }
+	[[nodiscard]] inline byte getD()   const { return DE_.b.h; }
+	[[nodiscard]] inline byte getE()   const { return DE_.b.l; }
+	[[nodiscard]] inline byte getH()   const { return HL_.b.h; }
+	[[nodiscard]] inline byte getL()   const { return HL_.b.l; }
+	[[nodiscard]] inline byte getA2()  const { return AF2_.b.h; }
+	[[nodiscard]] inline byte getF2()  const { return AF2_.b.l; }
+	[[nodiscard]] inline byte getB2()  const { return BC2_.b.h; }
+	[[nodiscard]] inline byte getC2()  const { return BC2_.b.l; }
+	[[nodiscard]] inline byte getD2()  const { return DE2_.b.h; }
+	[[nodiscard]] inline byte getE2()  const { return DE2_.b.l; }
+	[[nodiscard]] inline byte getH2()  const { return HL2_.b.h; }
+	[[nodiscard]] inline byte getL2()  const { return HL2_.b.l; }
+	[[nodiscard]] inline byte getIXh() const { return IX_.b.h; }
+	[[nodiscard]] inline byte getIXl() const { return IX_.b.l; }
+	[[nodiscard]] inline byte getIYh() const { return IY_.b.h; }
+	[[nodiscard]] inline byte getIYl() const { return IY_.b.l; }
+	[[nodiscard]] inline byte getPCh() const { return PC_.b.h; }
+	[[nodiscard]] inline byte getPCl() const { return PC_.b.l; }
+	[[nodiscard]] inline byte getSPh() const { return SP_.b.h; }
+	[[nodiscard]] inline byte getSPl() const { return SP_.b.l; }
 
-	inline unsigned getAF()  const { return AF_.w; }
-	inline unsigned getBC()  const { return BC_.w; }
-	inline unsigned getDE()  const { return DE_.w; }
-	inline unsigned getHL()  const { return HL_.w; }
-	inline unsigned getAF2() const { return AF2_.w; }
-	inline unsigned getBC2() const { return BC2_.w; }
-	inline unsigned getDE2() const { return DE2_.w; }
-	inline unsigned getHL2() const { return HL2_.w; }
-	inline unsigned getIX()  const { return IX_.w; }
-	inline unsigned getIY()  const { return IY_.w; }
-	inline unsigned getPC()  const { return PC_.w; }
-	inline unsigned getSP()  const { return SP_.w; }
+	[[nodiscard]] inline word getAF()  const { return AF_.w; }
+	[[nodiscard]] inline word getBC()  const { return BC_.w; }
+	[[nodiscard]] inline word getDE()  const { return DE_.w; }
+	[[nodiscard]] inline word getHL()  const { return HL_.w; }
+	[[nodiscard]] inline word getAF2() const { return AF2_.w; }
+	[[nodiscard]] inline word getBC2() const { return BC2_.w; }
+	[[nodiscard]] inline word getDE2() const { return DE2_.w; }
+	[[nodiscard]] inline word getHL2() const { return HL2_.w; }
+	[[nodiscard]] inline word getIX()  const { return IX_.w; }
+	[[nodiscard]] inline word getIY()  const { return IY_.w; }
+	[[nodiscard]] inline word getPC()  const { return PC_.w; }
+	[[nodiscard]] inline word getSP()  const { return SP_.w; }
 
-	inline byte getIM()  const { return IM_; }
-	inline byte getI()   const { return I_; }
-	inline byte getR()   const { return (R_ & Rmask) | (R2_ & ~Rmask); }
-	inline bool getIFF1()     const { return IFF1_; }
-	inline bool getIFF2()     const { return IFF2_; }
-	inline byte getHALT()     const { return HALT_; }
+	[[nodiscard]] inline byte getIM()  const { return IM_; }
+	[[nodiscard]] inline byte getI()   const { return I_; }
+	[[nodiscard]] inline byte getR()   const { return (R_ & Rmask) | (R2_ & ~Rmask); }
+	[[nodiscard]] inline bool getIFF1()     const { return IFF1_; }
+	[[nodiscard]] inline bool getIFF2()     const { return IFF2_; }
+	[[nodiscard]] inline byte getHALT()     const { return HALT_; }
 
 	inline void setA(byte x)   { AF_.b.h = x; }
 	inline void setF(byte x)   { AF_.b.l = x; }
@@ -90,18 +90,18 @@ public:
 	inline void setSPh(byte x) { SP_.b.h = x; }
 	inline void setSPl(byte x) { SP_.b.l = x; }
 
-	inline void setAF(unsigned x)  { AF_.w = x; }
-	inline void setBC(unsigned x)  { BC_.w = x; }
-	inline void setDE(unsigned x)  { DE_.w = x; }
-	inline void setHL(unsigned x)  { HL_.w = x; }
-	inline void setAF2(unsigned x) { AF2_.w = x; }
-	inline void setBC2(unsigned x) { BC2_.w = x; }
-	inline void setDE2(unsigned x) { DE2_.w = x; }
-	inline void setHL2(unsigned x) { HL2_.w = x; }
-	inline void setIX(unsigned x)  { IX_.w = x; }
-	inline void setIY(unsigned x)  { IY_.w = x; }
-	inline void setPC(unsigned x)  { PC_.w = x; }
-	inline void setSP(unsigned x)  { SP_.w = x; }
+	inline void setAF(word x)  { AF_.w = x; }
+	inline void setBC(word x)  { BC_.w = x; }
+	inline void setDE(word x)  { DE_.w = x; }
+	inline void setHL(word x)  { HL_.w = x; }
+	inline void setAF2(word x) { AF2_.w = x; }
+	inline void setBC2(word x) { BC2_.w = x; }
+	inline void setDE2(word x) { DE2_.w = x; }
+	inline void setHL2(word x) { HL2_.w = x; }
+	inline void setIX(word x)  { IX_.w = x; }
+	inline void setIY(word x)  { IY_.w = x; }
+	inline void setPC(word x)  { PC_.w = x; }
+	inline void setSP(word x)  { SP_.w = x; }
 
 	inline void setIM(byte x) { IM_ = x; }
 	inline void setI(byte x)  { I_ = x; }
@@ -148,25 +148,25 @@ public:
 	inline void setCurrentCall() {
 		prev_ |= 4;
 	}
-	// Set POPRET-flag on current instruction.
+	// Set POP-RET-flag on current instruction.
 	inline void setCurrentPopRet() {
 		prev_ |= 8;
 	}
 
 	// Previous instruction was EI?
-	inline bool prevWasEI()   const {
+	[[nodiscard]] inline bool prevWasEI()   const {
 		return (prev_ & (1 << 8)) != 0;
 	}
 	// Previous instruction was LD A,I or LD A,R?  (only set for Z80)
-	inline bool prevWasLDAI() const {
+	[[nodiscard]] inline bool prevWasLDAI() const {
 		return (prev_ & (2 << 8)) != 0;
 	}
 	// Previous-previous instruction was a CALL?  (only set for R800)
-	inline bool prev2WasCall() const {
+	[[nodiscard]] inline bool prev2WasCall() const {
 		return (prev_ & (4 << (2 * 8))) != 0;
 	}
 	// Previous instruction was a POP or RET?  (only set for R800)
-	inline bool prevWasPopRet() const {
+	[[nodiscard]] inline bool prevWasPopRet() const {
 		return (prev_ & (8 << 8)) != 0;
 	}
 
@@ -188,18 +188,18 @@ public:
 		// to be correct after a CALL instruction.
 		assert((prev_ & 0xF7) == 0);
 	}
-	
+
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 private:
-	z80regpair PC_;
-	z80regpair AF_, BC_, DE_, HL_;
-	z80regpair AF2_, BC2_, DE2_, HL2_;
-	z80regpair IX_, IY_, SP_;
+	z80regPair PC_;
+	z80regPair AF_, BC_, DE_, HL_;
+	z80regPair AF2_, BC2_, DE2_, HL2_;
+	z80regPair IX_, IY_, SP_;
 	bool IFF1_, IFF2_;
-	byte HALT_;
+	byte HALT_ = 0;
 	byte IM_, I_;
 	byte R_, R2_; // refresh = R & Rmask | R2 & ~Rmask
 	const byte Rmask; // 0x7F for Z80, 0xFF for R800
@@ -217,48 +217,48 @@ SERIALIZE_CLASS_VERSION(CPURegs, 3);
 #if 0
 class CPURegs {
 public:
-	inline byte getA()   const { return AF >> 8; }
-	inline byte getF()   const { return AF & 255; }
-	inline byte getB()   const { return BC >> 8; }
-	inline byte getC()   const { return BC & 255; }
-	inline byte getD()   const { return DE >> 8; }
-	inline byte getE()   const { return DE & 255; }
-	inline byte getH()   const { return HL >> 8; }
-	inline byte getL()   const { return HL & 255; }
-	inline byte getA2()  const { return AF2 >> 8; }
-	inline byte getF2()  const { return AF2 & 255; }
-	inline byte getB2()  const { return BC2 >> 8; }
-	inline byte getC2()  const { return BC2 & 255; }
-	inline byte getD2()  const { return DE2 >> 8; }
-	inline byte getE2()  const { return DE2 & 255; }
-	inline byte getH2()  const { return HL2 >> 8; }
-	inline byte getL2()  const { return HL2 & 255; }
-	inline byte getIXh() const { return IX >> 8; }
-	inline byte getIXl() const { return IX & 255; }
-	inline byte getIYh() const { return IY >> 8; }
-	inline byte getIYl() const { return IY & 255; }
-	inline byte getPCh() const { return PC >> 8; }
-	inline byte getPCl() const { return PC & 255; }
-	inline byte getSPh() const { return SP >> 8; }
-	inline byte getSPl() const { return SP & 255; }
-	inline word getAF()  const { return AF; }
-	inline word getBC()  const { return BC; }
-	inline word getDE()  const { return DE; }
-	inline word getHL()  const { return HL; }
-	inline word getAF2() const { return AF2; }
-	inline word getBC2() const { return BC2; }
-	inline word getDE2() const { return DE2; }
-	inline word getHL2() const { return HL2; }
-	inline word getIX()  const { return IX; }
-	inline word getIY()  const { return IY; }
-	inline word getPC()  const { return PC; }
-	inline word getSP()  const { return SP; }
-	inline byte getIM()  const { return IM; }
-	inline byte getI()   const { return I; }
-	inline byte getR()   const { return (R & 0x7F) | (R2 & 0x80); }
-	inline bool getIFF1()     const { return IFF1; }
-	inline bool getIFF2()     const { return IFF2; }
-	inline bool getHALT()     const { return HALT; }
+	[[nodiscard]] inline byte getA()   const { return AF >> 8; }
+	[[nodiscard]] inline byte getF()   const { return AF & 255; }
+	[[nodiscard]] inline byte getB()   const { return BC >> 8; }
+	[[nodiscard]] inline byte getC()   const { return BC & 255; }
+	[[nodiscard]] inline byte getD()   const { return DE >> 8; }
+	[[nodiscard]] inline byte getE()   const { return DE & 255; }
+	[[nodiscard]] inline byte getH()   const { return HL >> 8; }
+	[[nodiscard]] inline byte getL()   const { return HL & 255; }
+	[[nodiscard]] inline byte getA2()  const { return AF2 >> 8; }
+	[[nodiscard]] inline byte getF2()  const { return AF2 & 255; }
+	[[nodiscard]] inline byte getB2()  const { return BC2 >> 8; }
+	[[nodiscard]] inline byte getC2()  const { return BC2 & 255; }
+	[[nodiscard]] inline byte getD2()  const { return DE2 >> 8; }
+	[[nodiscard]] inline byte getE2()  const { return DE2 & 255; }
+	[[nodiscard]] inline byte getH2()  const { return HL2 >> 8; }
+	[[nodiscard]] inline byte getL2()  const { return HL2 & 255; }
+	[[nodiscard]] inline byte getIXh() const { return IX >> 8; }
+	[[nodiscard]] inline byte getIXl() const { return IX & 255; }
+	[[nodiscard]] inline byte getIYh() const { return IY >> 8; }
+	[[nodiscard]] inline byte getIYl() const { return IY & 255; }
+	[[nodiscard]] inline byte getPCh() const { return PC >> 8; }
+	[[nodiscard]] inline byte getPCl() const { return PC & 255; }
+	[[nodiscard]] inline byte getSPh() const { return SP >> 8; }
+	[[nodiscard]] inline byte getSPl() const { return SP & 255; }
+	[[nodiscard]] inline word getAF()  const { return AF; }
+	[[nodiscard]] inline word getBC()  const { return BC; }
+	[[nodiscard]] inline word getDE()  const { return DE; }
+	[[nodiscard]] inline word getHL()  const { return HL; }
+	[[nodiscard]] inline word getAF2() const { return AF2; }
+	[[nodiscard]] inline word getBC2() const { return BC2; }
+	[[nodiscard]] inline word getDE2() const { return DE2; }
+	[[nodiscard]] inline word getHL2() const { return HL2; }
+	[[nodiscard]] inline word getIX()  const { return IX; }
+	[[nodiscard]] inline word getIY()  const { return IY; }
+	[[nodiscard]] inline word getPC()  const { return PC; }
+	[[nodiscard]] inline word getSP()  const { return SP; }
+	[[nodiscard]] inline byte getIM()  const { return IM; }
+	[[nodiscard]] inline byte getI()   const { return I; }
+	[[nodiscard]] inline byte getR()   const { return (R & 0x7F) | (R2 & 0x80); }
+	[[nodiscard]] inline bool getIFF1()     const { return IFF1; }
+	[[nodiscard]] inline bool getIFF2()     const { return IFF2; }
+	[[nodiscard]] inline bool getHALT()     const { return HALT; }
 
 	inline void setA(byte x)   { AF = (AF & 0x00FF) | (x << 8); }
 	inline void setF(byte x)   { AF = (AF & 0xFF00) | x; }

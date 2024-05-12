@@ -19,73 +19,75 @@
 #include "DeviceConfig.hh"
 #include "XMLElement.hh"
 #include "MSXException.hh"
+#include "enumerate.hh"
+#include "narrow.hh"
 #include "serialize.hh"
+#include <array>
 #include <cassert>
-#include <cstring>
 #include <memory>
 
 namespace openmsx {
 
-static const unsigned MAX_DEV = 8;
+static constexpr unsigned MAX_DEV = 8;
 
-static const byte REG_OWN_ID      = 0x00;
-static const byte REG_CONTROL     = 0x01;
-static const byte REG_TIMEO       = 0x02;
-static const byte REG_TSECS       = 0x03;
-static const byte REG_THEADS      = 0x04;
-static const byte REG_TCYL_HI     = 0x05;
-static const byte REG_TCYL_LO     = 0x06;
-static const byte REG_ADDR_HI     = 0x07;
-static const byte REG_ADDR_2      = 0x08;
-static const byte REG_ADDR_3      = 0x09;
-static const byte REG_ADDR_LO     = 0x0a;
-static const byte REG_SECNO       = 0x0b;
-static const byte REG_HEADNO      = 0x0c;
-static const byte REG_CYLNO_HI    = 0x0d;
-static const byte REG_CYLNO_LO    = 0x0e;
-static const byte REG_TLUN        = 0x0f;
-static const byte REG_CMD_PHASE   = 0x10;
-static const byte REG_SYN         = 0x11;
-static const byte REG_TCH         = 0x12;
-static const byte REG_TCM         = 0x13;
-static const byte REG_TCL         = 0x14;
-static const byte REG_DST_ID      = 0x15;
-static const byte REG_SRC_ID      = 0x16;
-static const byte REG_SCSI_STATUS = 0x17; // (r)
-static const byte REG_CMD         = 0x18;
-static const byte REG_DATA        = 0x19;
-static const byte REG_QUEUE_TAG   = 0x1a;
-static const byte REG_AUX_STATUS  = 0x1f; // (r)
+static constexpr uint8_t REG_OWN_ID      = 0x00;
+static constexpr uint8_t REG_CONTROL     = 0x01;
+static constexpr uint8_t REG_TIMEO       = 0x02;
+static constexpr uint8_t REG_TSECS       = 0x03;
+static constexpr uint8_t REG_THEADS      = 0x04;
+static constexpr uint8_t REG_TCYL_HI     = 0x05;
+static constexpr uint8_t REG_TCYL_LO     = 0x06;
+static constexpr uint8_t REG_ADDR_HI     = 0x07;
+static constexpr uint8_t REG_ADDR_2      = 0x08;
+static constexpr uint8_t REG_ADDR_3      = 0x09;
+static constexpr uint8_t REG_ADDR_LO     = 0x0a;
+static constexpr uint8_t REG_SECNO       = 0x0b;
+static constexpr uint8_t REG_HEADNO      = 0x0c;
+static constexpr uint8_t REG_CYLNO_HI    = 0x0d;
+static constexpr uint8_t REG_CYLNO_LO    = 0x0e;
+static constexpr uint8_t REG_TLUN        = 0x0f;
+static constexpr uint8_t REG_CMD_PHASE   = 0x10;
+static constexpr uint8_t REG_SYN         = 0x11;
+static constexpr uint8_t REG_TCH         = 0x12;
+static constexpr uint8_t REG_TCM         = 0x13;
+static constexpr uint8_t REG_TCL         = 0x14;
+static constexpr uint8_t REG_DST_ID      = 0x15;
+static constexpr uint8_t REG_SRC_ID      = 0x16;
+static constexpr uint8_t REG_SCSI_STATUS = 0x17; // (r)
+static constexpr uint8_t REG_CMD         = 0x18;
+static constexpr uint8_t REG_DATA        = 0x19;
+static constexpr uint8_t REG_QUEUE_TAG   = 0x1a;
+static constexpr uint8_t REG_AUX_STATUS  = 0x1f; // (r)
 
-static const byte REG_CDBSIZE     = 0x00;
-static const byte REG_CDB1        = 0x03;
-static const byte REG_CDB2        = 0x04;
-static const byte REG_CDB3        = 0x05;
-static const byte REG_CDB4        = 0x06;
-static const byte REG_CDB5        = 0x07;
-static const byte REG_CDB6        = 0x08;
-static const byte REG_CDB7        = 0x09;
-static const byte REG_CDB8        = 0x0a;
-static const byte REG_CDB9        = 0x0b;
-static const byte REG_CDB10       = 0x0c;
-static const byte REG_CDB11       = 0x0d;
-static const byte REG_CDB12       = 0x0e;
+static constexpr uint8_t REG_CDBSIZE     = 0x00;
+static constexpr uint8_t REG_CDB1        = 0x03;
+static constexpr uint8_t REG_CDB2        = 0x04;
+static constexpr uint8_t REG_CDB3        = 0x05;
+static constexpr uint8_t REG_CDB4        = 0x06;
+static constexpr uint8_t REG_CDB5        = 0x07;
+static constexpr uint8_t REG_CDB6        = 0x08;
+static constexpr uint8_t REG_CDB7        = 0x09;
+static constexpr uint8_t REG_CDB8        = 0x0a;
+static constexpr uint8_t REG_CDB9        = 0x0b;
+static constexpr uint8_t REG_CDB10       = 0x0c;
+static constexpr uint8_t REG_CDB11       = 0x0d;
+static constexpr uint8_t REG_CDB12       = 0x0e;
 
-static const byte OWN_EAF         = 0x08; // ENABLE ADVANCED FEATURES
+static constexpr uint8_t OWN_EAF         = 0x08; // ENABLE ADVANCED FEATURES
 
 // SCSI STATUS
-static const byte SS_RESET        = 0x00; // reset
-static const byte SS_RESET_ADV    = 0x01; // reset w/adv. features
-static const byte SS_XFER_END     = 0x16; // select and transfer complete
-static const byte SS_SEL_TIMEOUT  = 0x42; // selection timeout
-static const byte SS_DISCONNECT   = 0x85;
+static constexpr uint8_t SS_RESET        = 0x00; // reset
+static constexpr uint8_t SS_RESET_ADV    = 0x01; // reset w/adv. features
+static constexpr uint8_t SS_XFER_END     = 0x16; // select and transfer complete
+static constexpr uint8_t SS_SEL_TIMEOUT  = 0x42; // selection timeout
+static constexpr uint8_t SS_DISCONNECT   = 0x85;
 
 // AUX STATUS
-static const byte AS_DBR          = 0x01; // data buffer ready
-static const byte AS_CIP          = 0x10; // command in progress, chip is busy
-static const byte AS_BSY          = 0x20; // Level 2 command in progress
-static const byte AS_LCI          = 0x40; // last command ignored
-static const byte AS_INT          = 0x80;
+static constexpr uint8_t AS_DBR          = 0x01; // data buffer ready
+static constexpr uint8_t AS_CIP          = 0x10; // command in progress, chip is busy
+static constexpr uint8_t AS_BSY          = 0x20; // Level 2 command in progress
+static constexpr uint8_t AS_LCI          = 0x40; // last command ignored
+static constexpr uint8_t AS_INT          = 0x80;
 
 /* command phase
 0x00    NO_SELECT
@@ -105,10 +107,8 @@ static const byte AS_INT          = 0x80;
 
 WD33C93::WD33C93(const DeviceConfig& config)
 {
-	devBusy = false;
-
-	for (auto* t : config.getXML()->getChildren("target")) {
-		unsigned id = t->getAttributeAsInt("id");
+	for (const auto* t : config.getXML()->getChildren("target")) {
+		unsigned id = t->getAttributeValueAsInt("id", 0);
 		if (id >= MAX_DEV) {
 			throw MSXException("Invalid SCSI id: ", id,
 			                   " (should be 0..", MAX_DEV - 1, ')');
@@ -117,7 +117,7 @@ WD33C93::WD33C93(const DeviceConfig& config)
 			throw MSXException("Duplicate SCSI id: ", id);
 		}
 		DeviceConfig conf(config, *t);
-		auto& type = t->getChild("type").getData();
+		auto type = t->getChildData("type");
 		if (type == "SCSIHD") {
 			dev[id] = std::make_unique<SCSIHD>(conf, buffer,
 			        SCSIDevice::MODE_SCSI1 | SCSIDevice::MODE_UNITATTENTION |
@@ -137,10 +137,7 @@ WD33C93::WD33C93(const DeviceConfig& config)
 	reset(false);
 
 	// avoid UMR on savestate
-	memset(buffer.data(), 0, SCSIDevice::BUFFER_SIZE);
-	counter = 0;
-	blockCounter = 0;
-	targetId = 0;
+	ranges::fill(buffer, 0);
 }
 
 void WD33C93::disconnect()
@@ -157,7 +154,7 @@ void WD33C93::disconnect()
 	tc = 0;
 }
 
-void WD33C93::execCmd(byte value)
+void WD33C93::execCmd(uint8_t value)
 {
 	if (regs[REG_AUX_STATUS] & AS_CIP) {
 		// CIP error
@@ -169,9 +166,9 @@ void WD33C93::execCmd(byte value)
 	bool atn = false;
 	switch (value) {
 	case 0x00: // Reset controller (software reset)
-		memset(regs + 1, 0, 0x1a);
+		ranges::fill(subspan<0x1a>(regs, 1), 0);
 		disconnect();
-		latch = 0; // TODO: is this correct? Some doc says: reset to zero by masterreset-signal but not by reset command.
+		latch = 0; // TODO: is this correct? Some doc says: reset to zero by master-reset-signal but not by reset command.
 		regs[REG_SCSI_STATUS] =
 			(regs[REG_OWN_ID] & OWN_EAF) ? SS_RESET_ADV : SS_RESET;
 		break;
@@ -184,8 +181,8 @@ void WD33C93::execCmd(byte value)
 		break;
 
 	case 0x06: // Select with ATN (Lv2)
-		atn = true;
-		// fall-through
+		//atn = true; // never read
+		[[fallthrough]];
 	case 0x07: // Select Without ATN (Lv2)
 		targetId = regs[REG_DST_ID] & 7;
 		regs[REG_SCSI_STATUS] = SS_SEL_TIMEOUT;
@@ -195,7 +192,7 @@ void WD33C93::execCmd(byte value)
 
 	case 0x08: // Select with ATN and transfer (Lv2)
 		atn = true;
-		// fall-through
+		[[fallthrough]];
 	case 0x09: // Select without ATN and Transfer (Lv2)
 		targetId = regs[REG_DST_ID] & 7;
 
@@ -206,7 +203,7 @@ void WD33C93::execCmd(byte value)
 			}
 			devBusy = true;
 			counter = dev[targetId]->executeCmd(
-				&regs[REG_CDB1], phase, blockCounter);
+				subspan<12>(regs, REG_CDB1), phase, blockCounter);
 
 			switch (phase) {
 			case SCSI::STATUS:
@@ -238,19 +235,19 @@ void WD33C93::execCmd(byte value)
 
 	case 0x18: // Translate Address (Lv2)
 	default:
-		// unsupport command
+		// unsupported command
 		break;
 	}
 }
 
-void WD33C93::writeAdr(byte value)
+void WD33C93::writeAdr(uint8_t value)
 {
 	latch = value & 0x1f;
 }
 
 // Latch incremented by one each time a register is accessed,
 // except for the address-, aux.status-, data- and command registers.
-void WD33C93::writeCtrl(byte value)
+void WD33C93::writeCtrl(uint8_t value)
 {
 	switch (latch) {
 	case REG_OWN_ID:
@@ -309,9 +306,9 @@ void WD33C93::writeCtrl(byte value)
 	latch = (latch + 1) & 0x1f;
 }
 
-byte WD33C93::readAuxStatus()
+uint8_t WD33C93::readAuxStatus()
 {
-	byte rv = regs[REG_AUX_STATUS];
+	uint8_t rv = regs[REG_AUX_STATUS];
 
 	if (phase == SCSI::EXECUTE) {
 		counter = dev[targetId]->executingCmd(phase, blockCounter);
@@ -336,9 +333,9 @@ byte WD33C93::readAuxStatus()
 
 // Latch incremented by one each time a register is accessed,
 // except for the address-, aux.status-, data- and command registers.
-byte WD33C93::readCtrl()
+uint8_t WD33C93::readCtrl()
 {
-	byte rv;
+	uint8_t rv;
 	switch (latch) {
 	case REG_SCSI_STATUS:
 		rv = regs[REG_SCSI_STATUS];
@@ -377,15 +374,15 @@ byte WD33C93::readCtrl()
 		return rv; // no latch-inc for address-, aux.status-, data- and command regs.
 
 	case REG_TCH:
-		rv = (tc >> 16) & 0xff;
+		rv = narrow_cast<uint8_t>((tc >> 16) & 0xff);
 		break;
 
 	case REG_TCM:
-		rv = (tc >>  8) & 0xff;
+		rv = narrow_cast<uint8_t>((tc >>  8) & 0xff);
 		break;
 
 	case REG_TCL:
-		rv = (tc >>  0) & 0xff;
+		rv = narrow_cast<uint8_t>((tc >>  0) & 0xff);
 		break;
 
 	case REG_AUX_STATUS:
@@ -400,37 +397,37 @@ byte WD33C93::readCtrl()
 	return rv;
 }
 
-byte WD33C93::peekAuxStatus() const
+uint8_t WD33C93::peekAuxStatus() const
 {
 	return regs[REG_AUX_STATUS];
 }
 
-byte WD33C93::peekCtrl() const
+uint8_t WD33C93::peekCtrl() const
 {
 	switch (latch) {
 	case REG_TCH:
-		return (tc >> 16) & 0xff;
+		return narrow_cast<uint8_t>((tc >> 16) & 0xff);
 	case REG_TCM:
-		return (tc >>  8) & 0xff;
+		return narrow_cast<uint8_t>((tc >>  8) & 0xff);
 	case REG_TCL:
-		return (tc >>  0) & 0xff;
+		return narrow_cast<uint8_t>((tc >>  0) & 0xff);
 	default:
 		return regs[latch];
 	}
 }
 
-void WD33C93::reset(bool scsireset)
+void WD33C93::reset(bool scsiReset)
 {
 	// initialized register
-	memset(regs, 0, 0x1b);
-	memset(regs + 0x1b, 0xff, 4);
+	ranges::fill(subspan<0x1b>(regs, 0x00), 0x00);
+	ranges::fill(subspan<0x04>(regs, 0x1b), 0xff);
 	regs[REG_AUX_STATUS] = AS_INT;
 	myId  = 0;
 	latch = 0;
 	tc    = 0;
 	phase = SCSI::BUS_FREE;
 	bufIdx  = 0;
-	if (scsireset) {
+	if (scsiReset) {
 		for (auto& d : dev) {
 			d->reset();
 		}
@@ -438,7 +435,7 @@ void WD33C93::reset(bool scsireset)
 }
 
 
-static std::initializer_list<enum_string<SCSI::Phase>> phaseInfo = {
+static constexpr std::initializer_list<enum_string<SCSI::Phase>> phaseInfo = {
 	{ "UNDEFINED",   SCSI::UNDEFINED   },
 	{ "BUS_FREE",    SCSI::BUS_FREE    },
 	{ "ARBITRATION", SCSI::ARBITRATION },
@@ -457,22 +454,22 @@ SERIALIZE_ENUM(SCSI::Phase, phaseInfo);
 template<typename Archive>
 void WD33C93::serialize(Archive& ar, unsigned /*version*/)
 {
-	ar.serialize_blob("buffer", buffer.data(), buffer.size());
-	char tag[8] = { 'd', 'e', 'v', 'i', 'c', 'e', 'X', 0 };
-	for (unsigned i = 0; i < MAX_DEV; ++i) {
+	ar.serialize_blob("buffer", buffer);
+	std::array<char, 8> tag = {'d', 'e', 'v', 'i', 'c', 'e', 'X', 0};
+	for (auto [i, d] : enumerate(dev)) {
 		tag[6] = char('0' + i);
-		ar.serializePolymorphic(tag, *dev[i]);
+		ar.serializePolymorphic(tag.data(), *d);
 	}
-	ar.serialize("bufIdx", bufIdx);
-	ar.serialize("counter", counter);
-	ar.serialize("blockCounter", blockCounter);
-	ar.serialize("tc", tc);
-	ar.serialize("phase", phase);
-	ar.serialize("myId", myId);
-	ar.serialize("targetId", targetId);
-	ar.serialize_blob("registers", regs, sizeof(regs));
-	ar.serialize("latch", latch);
-	ar.serialize("devBusy", devBusy);
+	ar.serialize("bufIdx",       bufIdx,
+	             "counter",      counter,
+	             "blockCounter", blockCounter,
+	             "tc",           tc,
+	             "phase",        phase,
+	             "myId",         myId,
+	             "targetId",     targetId);
+	ar.serialize_blob("registers", regs);
+	ar.serialize("latch",   latch,
+	             "devBusy", devBusy);
 }
 INSTANTIATE_SERIALIZE_METHODS(WD33C93);
 

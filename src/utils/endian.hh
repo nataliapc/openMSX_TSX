@@ -1,27 +1,37 @@
 #ifndef ENDIAN_HH
 #define ENDIAN_HH
 
-#include "build-info.hh"
+#include "inline.hh"
+#include "narrow.hh"
+
+#include <array>
+#include <bit>
+#include <cassert>
+#include <concepts>
 #include <cstdint>
 #include <cstring>
 #include <cassert>
 
 namespace Endian {
 
-// Revese bytes in a 16-bit number: 0x1234 becomes 0x3412
-static inline uint16_t bswap16(uint16_t x)
+inline constexpr bool BIG    = std::endian::native == std::endian::big;
+inline constexpr bool LITTLE = std::endian::native == std::endian::little;
+static_assert(BIG || LITTLE, "mixed endian not supported");
+
+// Reverse bytes in a 16-bit number: 0x1234 becomes 0x3412
+[[nodiscard]] static inline uint16_t byteswap16(uint16_t x)
 {
 	// This sequence generates 'optimal' code on a wide range of gcc/clang
 	// versions (a single rotate instruction on x86). The newer compiler
 	// versions also do 'the right thing' for the simpler expression below.
 	// Those newer compilers also support __builtin_bswap16() but that
 	// doesn't generate better code (and is less portable).
-	return ((x & 0x00FF) << 8) | ((x & 0xFF00) >> 8);
+	return uint16_t(((x & 0x00FF) << 8) | ((x & 0xFF00) >> 8));
 	//return (x << 8) | (x >> 8);
 }
 
-// Revese bytes in a 32-bit number: 0x12345678 becomes 0x78563412
-static inline uint32_t bswap32(uint32_t x)
+// Reverse bytes in a 32-bit number: 0x12345678 becomes 0x78563412
+[[nodiscard]] static inline uint32_t byteswap32(uint32_t x)
 {
 #if (__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 3))
 	// Starting from gcc-4.3 there's a builtin function for this.
@@ -35,46 +45,44 @@ static inline uint32_t bswap32(uint32_t x)
 #endif
 }
 
-// Revese bytes in a 64-bit value: 0x1122334455667788 becomes 0x8877665544332211
-static inline uint64_t bswap64(uint64_t x)
+// Reverse bytes in a 64-bit value: 0x1122334455667788 becomes 0x8877665544332211
+[[nodiscard]] static inline uint64_t byteswap64(uint64_t x)
 {
 #if (__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 3))
 	// Starting from gcc-4.3 there's a builtin function for this.
 	// E.g. on x86 this is translated to a single 'bswap' instruction.
 	return __builtin_bswap64(x);
 #else
-	return (uint64_t(bswap32(x >>  0)) << 32) |
-	       (uint64_t(bswap32(x >> 32)) <<  0);
+	return (uint64_t(byteswap32(narrow_cast<uint32_t>(x >>  0))) << 32) |
+	       (uint64_t(byteswap32(narrow_cast<uint32_t>(x >> 32))) <<  0);
 #endif
 }
 
-// Use overloading to get a (statically) polymorphic bswap() function.
-static inline uint16_t bswap(uint16_t x) { return bswap16(x); }
-static inline uint32_t bswap(uint32_t x) { return bswap32(x); }
-static inline uint64_t bswap(uint64_t x) { return bswap64(x); }
+// Use overloading to get a (statically) polymorphic byteswap() function.
+[[nodiscard]] static inline uint16_t byteswap(uint16_t x) { return byteswap16(x); }
+[[nodiscard]] static inline uint32_t byteswap(uint32_t x) { return byteswap32(x); }
+[[nodiscard]] static inline uint64_t byteswap(uint64_t x) { return byteswap64(x); }
 
 
 // Identity operator, simply returns the given value.
 struct Ident {
-	template <typename T> inline T operator()(T t) const { return t; }
+	[[nodiscard]] inline auto operator()(std::integral auto t) const { return t; }
 };
 
 // Byte-swap operator, swap bytes in the given value (16 or 32 bit).
-struct BSwap {
-	template <typename T> inline T operator()(T t) const { return bswap(t); }
+struct ByteSwap {
+	[[nodiscard]] inline auto operator()(std::integral auto t) const { return byteswap(t); }
 };
 
 // Helper class that stores a value and allows to read/write that value. Though
 // right before it is loaded/stored the value is transformed by a configurable
 // operation.
 // TODO If needed this can be extended with stuff like operator+= ....
-template<typename T, typename Op> class EndianT {
+template<std::integral T, std::invocable<T> Op> class EndianT {
 public:
-	// TODO These constructors are useful, but they prevent this type from
-	//      being used in a union. This limitation is removed in C++11.
-	//EndianT()                      { /* leave uninitialized */ }
-	//EndianT(T t_)                  { Op op; t = op(t_); }
-	inline operator T() const      { Op op; return op(t); }
+	EndianT() = default; // leave uninitialized
+	explicit EndianT(T t_)                  { Op op; t = op(t_); }
+	[[nodiscard]] inline operator T() const { Op op; return op(t); }
 	inline EndianT& operator=(T a) { Op op; t = op(a); return *this; }
 private:
 	T t;
@@ -105,57 +113,63 @@ private:
 //
 template<bool> struct ConvBig;
 template<> struct ConvBig   <true > : Ident {};
-template<> struct ConvBig   <false> : BSwap {};
+template<> struct ConvBig   <false> : ByteSwap {};
 template<bool> struct ConvLittle;
-template<> struct ConvLittle<true > : BSwap {};
+template<> struct ConvLittle<true > : ByteSwap {};
 template<> struct ConvLittle<false> : Ident {};
-using B16 = EndianT<uint16_t, ConvBig   <openmsx::OPENMSX_BIGENDIAN>>;
-using L16 = EndianT<uint16_t, ConvLittle<openmsx::OPENMSX_BIGENDIAN>>;
-using B32 = EndianT<uint32_t, ConvBig   <openmsx::OPENMSX_BIGENDIAN>>;
-using L32 = EndianT<uint32_t, ConvLittle<openmsx::OPENMSX_BIGENDIAN>>;
+using B16 = EndianT<uint16_t, ConvBig   <BIG>>;
+using L16 = EndianT<uint16_t, ConvLittle<BIG>>;
+using B32 = EndianT<uint32_t, ConvBig   <BIG>>;
+using L32 = EndianT<uint32_t, ConvLittle<BIG>>;
+using B64 = EndianT<uint64_t, ConvBig   <BIG>>;
+using L64 = EndianT<uint64_t, ConvLittle<BIG>>;
 static_assert(sizeof(B16)  == 2, "must have size 2");
 static_assert(sizeof(L16)  == 2, "must have size 2");
 static_assert(sizeof(B32)  == 4, "must have size 4");
 static_assert(sizeof(L32)  == 4, "must have size 4");
+static_assert(sizeof(B64)  == 8, "must have size 8");
+static_assert(sizeof(L64)  == 8, "must have size 8");
 static_assert(alignof(B16) <= 2, "may have alignment 2");
 static_assert(alignof(L16) <= 2, "may have alignment 2");
 static_assert(alignof(B32) <= 4, "may have alignment 4");
 static_assert(alignof(L32) <= 4, "may have alignment 4");
+static_assert(alignof(B64) <= 8, "may have alignment 8");
+static_assert(alignof(L64) <= 8, "may have alignment 8");
 
 
-// Helper functions to read/write aligned 16/24/32 bit values.
-static inline void writeB16(void* p, uint16_t x)
+// Helper functions to read/write aligned 16/32 bit values.
+inline void writeB16(void* p, uint16_t x)
 {
-	*reinterpret_cast<B16*>(p) = x;
+	*std::bit_cast<B16*>(p) = x;
 }
-static inline void writeL16(void* p, uint16_t x)
+inline void writeL16(void* p, uint16_t x)
 {
-	*reinterpret_cast<L16*>(p) = x;
+	*std::bit_cast<L16*>(p) = x;
 }
-static inline void writeB32(void* p, uint32_t x)
+inline void writeB32(void* p, uint32_t x)
 {
-	*reinterpret_cast<B32*>(p) = x;
+	*std::bit_cast<B32*>(p) = x;
 }
-static inline void writeL32(void* p, uint32_t x)
+inline void writeL32(void* p, uint32_t x)
 {
-	*reinterpret_cast<L32*>(p) = x;
+	*std::bit_cast<L32*>(p) = x;
 }
 
-static inline uint16_t readB16(const void* p)
+[[nodiscard]] inline uint16_t readB16(const void* p)
 {
-	return *reinterpret_cast<const B16*>(p);
+	return *std::bit_cast<const B16*>(p);
 }
-static inline uint16_t readL16(const void* p)
+[[nodiscard]] inline uint16_t readL16(const void* p)
 {
-	return *reinterpret_cast<const L16*>(p);
+	return *std::bit_cast<const L16*>(p);
 }
-static inline uint32_t readB32(const void* p)
+[[nodiscard]] inline uint32_t readB32(const void* p)
 {
-	return *reinterpret_cast<const B32*>(p);
+	return *std::bit_cast<const B32*>(p);
 }
-static inline uint32_t readL32(const void* p)
+[[nodiscard]] inline uint32_t readL32(const void* p)
 {
-	return *reinterpret_cast<const L32*>(p);
+	return *std::bit_cast<const L32*>(p);
 }
 
 // Read/write big/little 16/24/32/64-bit values to/from a (possibly) unaligned
@@ -165,66 +179,79 @@ static inline uint32_t readL32(const void* p)
 // endianess). If the architecture does not support unaligned memory operations
 // (e.g. early ARM architectures), the operation is split into byte accesses.
 
-template<bool SWAP, typename T> static inline void write_UA(void* p, T x)
+template<bool SWAP> static ALWAYS_INLINE void write_UA(void* p, std::integral auto x)
 {
-	if (SWAP) x = bswap(x);
+	if constexpr (SWAP) x = byteswap(x);
 	memcpy(p, &x, sizeof(x));
 }
-static inline void write_UA_B16(void* p, uint16_t x)
+ALWAYS_INLINE void write_UA_B16(void* p, uint16_t x)
 {
-	write_UA<!openmsx::OPENMSX_BIGENDIAN>(p, x);
+	write_UA<LITTLE>(p, x);
 }
-static inline void write_UA_L16(void* p, uint16_t x)
+ALWAYS_INLINE void write_UA_L16(void* p, uint16_t x)
 {
-	write_UA< openmsx::OPENMSX_BIGENDIAN>(p, x);
+	write_UA<BIG>(p, x);
 }
-static inline void write_UA_B32(void* p, uint32_t x)
+ALWAYS_INLINE void write_UA_L24(void* p, uint32_t x)
 {
-	write_UA<!openmsx::OPENMSX_BIGENDIAN>(p, x);
+	assert(x < 0x1000000);
+	auto* v = static_cast<uint8_t*>(p);
+	v[0] = (x >>  0) & 0xff;
+	v[1] = (x >>  8) & 0xff;
+	v[2] = (x >> 16) & 0xff;
 }
-static inline void write_UA_L32(void* p, uint32_t x)
+ALWAYS_INLINE void write_UA_B32(void* p, uint32_t x)
 {
-	write_UA< openmsx::OPENMSX_BIGENDIAN>(p, x);
+	write_UA<LITTLE>(p, x);
 }
-static inline void write_UA_B64(void* p, uint64_t x)
+ALWAYS_INLINE void write_UA_L32(void* p, uint32_t x)
 {
-	write_UA<!openmsx::OPENMSX_BIGENDIAN>(p, x);
+	write_UA<BIG>(p, x);
 }
-static inline void write_UA_L64(void* p, uint64_t x)
+ALWAYS_INLINE void write_UA_B64(void* p, uint64_t x)
 {
-	write_UA< openmsx::OPENMSX_BIGENDIAN>(p, x);
+	write_UA<LITTLE>(p, x);
+}
+ALWAYS_INLINE void write_UA_L64(void* p, uint64_t x)
+{
+	write_UA<BIG>(p, x);
 }
 
-template<bool SWAP, typename T> static inline T read_UA(const void* p)
+template<bool SWAP, std::integral T> [[nodiscard]] static ALWAYS_INLINE T read_UA(const void* p)
 {
 	T x;
 	memcpy(&x, p, sizeof(x));
-	if (SWAP) x = bswap(x);
+	if constexpr (SWAP) x = byteswap(x);
 	return x;
 }
-static inline uint16_t read_UA_B16(const void* p)
+[[nodiscard]] ALWAYS_INLINE uint16_t read_UA_B16(const void* p)
 {
-	return read_UA<!openmsx::OPENMSX_BIGENDIAN, uint16_t>(p);
+	return read_UA<LITTLE, uint16_t>(p);
 }
-static inline uint16_t read_UA_L16(const void* p)
+[[nodiscard]] ALWAYS_INLINE uint16_t read_UA_L16(const void* p)
 {
-	return read_UA< openmsx::OPENMSX_BIGENDIAN, uint16_t>(p);
+	return read_UA<BIG, uint16_t>(p);
 }
-static inline uint32_t read_UA_B32(const void* p)
+[[nodiscard]] ALWAYS_INLINE uint32_t read_UA_L24(const void* p)
 {
-	return read_UA<!openmsx::OPENMSX_BIGENDIAN, uint32_t>(p);
+	const auto* v = static_cast<const uint8_t*>(p);
+	return (v[0] << 0) | (v[1] << 8) | (v[2] << 16);
 }
-static inline uint32_t read_UA_L32(const void* p)
+[[nodiscard]] ALWAYS_INLINE uint32_t read_UA_B32(const void* p)
 {
-	return read_UA< openmsx::OPENMSX_BIGENDIAN, uint32_t>(p);
+	return read_UA<LITTLE, uint32_t>(p);
 }
-static inline uint64_t read_UA_B64(const void* p)
+[[nodiscard]] ALWAYS_INLINE uint32_t read_UA_L32(const void* p)
 {
-	return read_UA<!openmsx::OPENMSX_BIGENDIAN, uint64_t>(p);
+	return read_UA<BIG, uint32_t>(p);
 }
-static inline uint64_t read_UA_L64(const void* p)
+[[nodiscard]] ALWAYS_INLINE uint64_t read_UA_B64(const void* p)
 {
-	return read_UA< openmsx::OPENMSX_BIGENDIAN, uint64_t>(p);
+	return read_UA<LITTLE, uint64_t>(p);
+}
+[[nodiscard]] ALWAYS_INLINE uint64_t read_UA_L64(const void* p)
+{
+	return read_UA<BIG, uint64_t>(p);
 }
 
 
@@ -232,18 +259,18 @@ static inline uint64_t read_UA_L64(const void* p)
 
 class UA_B16 {
 public:
-	inline operator uint16_t() const     { return read_UA_B16(x); }
-	inline UA_B16& operator=(uint16_t a) { write_UA_B16(x, a); return *this; }
+	[[nodiscard]] inline operator uint16_t() const { return read_UA_B16(x.data()); }
+	inline UA_B16& operator=(uint16_t a) { write_UA_B16(x.data(), a); return *this; }
 private:
-	uint8_t x[2];
+	std::array<uint8_t, 2> x;
 };
 
 class UA_L16 {
 public:
-	inline operator uint16_t() const     { return read_UA_L16(x); }
-	inline UA_L16& operator=(uint16_t a) { write_UA_L16(x, a); return *this; }
+	[[nodiscard]] inline operator uint16_t() const { return read_UA_L16(x.data()); }
+	inline UA_L16& operator=(uint16_t a) { write_UA_L16(x.data(), a); return *this; }
 private:
-	uint8_t x[2];
+	std::array<uint8_t, 2> x;
 };
 
 class UA_L24 {
@@ -265,18 +292,18 @@ private:
 
 class UA_B32 {
 public:
-	inline operator uint32_t() const     { return read_UA_B32(x); }
-	inline UA_B32& operator=(uint32_t a) { write_UA_B32(x, a); return *this; }
+	[[nodiscard]] inline operator uint32_t() const { return read_UA_B32(x.data()); }
+	inline UA_B32& operator=(uint32_t a) { write_UA_B32(x.data(), a); return *this; }
 private:
-	uint8_t x[4];
+	std::array<uint8_t, 4> x;
 };
 
 class UA_L32 {
 public:
-	inline operator uint32_t() const     { return read_UA_L32(x); }
-	inline UA_L32& operator=(uint32_t a) { write_UA_L32(x, a); return *this; }
+	[[nodiscard]] inline operator uint32_t() const { return read_UA_L32(x.data()); }
+	inline UA_L32& operator=(uint32_t a) { write_UA_L32(x.data(), a); return *this; }
 private:
-	uint8_t x[4];
+	std::array<uint8_t, 4> x;
 };
 
 static_assert(sizeof(UA_B16)  == 2, "must have size 2");

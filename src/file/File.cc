@@ -4,29 +4,27 @@
 #include "GZFileAdapter.hh"
 #include "ZipFileAdapter.hh"
 #include "checked_cast.hh"
-#include <cassert>
-#include <cstring>
+#include "ranges.hh"
+#include <array>
 #include <memory>
-
-using std::string;
 
 namespace openmsx {
 
 File::File() = default;
 
-static std::unique_ptr<FileBase> init(string_view filename, File::OpenMode mode)
+[[nodiscard]] static std::unique_ptr<FileBase> init(std::string filename, File::OpenMode mode)
 {
-	static const byte GZ_HEADER[3]  = { 0x1F, 0x8B, 0x08 };
-	static const byte ZIP_HEADER[4] = { 0x50, 0x4B, 0x03, 0x04 };
+	static constexpr std::array<uint8_t, 3> GZ_HEADER  = {0x1F, 0x8B, 0x08};
+	static constexpr std::array<uint8_t, 4> ZIP_HEADER = {0x50, 0x4B, 0x03, 0x04};
 
-	std::unique_ptr<FileBase> file = std::make_unique<LocalFile>(filename, mode);
+	std::unique_ptr<FileBase> file = std::make_unique<LocalFile>(std::move(filename), mode);
 	if (file->getSize() >= 4) {
-		byte buf[4];
-		file->read(buf, 4);
+		std::array<uint8_t, 4> buf;
+		file->read(buf);
 		file->seek(0);
-		if (memcmp(buf, GZ_HEADER, 3) == 0) {
+		if (ranges::equal(subspan<3>(buf), GZ_HEADER)) {
 			file = std::make_unique<GZFileAdapter>(std::move(file));
-		} else if (memcmp(buf, ZIP_HEADER, 4) == 0) {
+		} else if (ranges::equal(subspan<4>(buf), ZIP_HEADER)) {
 			file = std::make_unique<ZipFileAdapter>(std::move(file));
 		} else {
 			// only pre-cache non-compressed files
@@ -38,28 +36,43 @@ static std::unique_ptr<FileBase> init(string_view filename, File::OpenMode mode)
 	return file;
 }
 
+File::File(std::string filename, OpenMode mode)
+	: file(init(std::move(filename), mode))
+{
+}
+
 File::File(const Filename& filename, OpenMode mode)
-	: file(init(filename.getResolved(), mode))
+	: File(filename.getResolved(), mode)
 {
 }
 
-File::File(string_view filename, OpenMode mode)
-	: file(init(filename, mode))
+File::File(Filename&& filename, OpenMode mode)
+	: File(std::move(filename).getResolved(), mode)
 {
 }
 
-File::File(string_view filename, const char* mode)
-	: file(std::make_unique<LocalFile>(filename, mode))
+File::File(std::string filename, const char* mode)
+	: file(std::make_unique<LocalFile>(std::move(filename), mode))
 {
 }
 
 File::File(const Filename& filename, const char* mode)
-	: file(std::make_unique<LocalFile>(filename.getResolved(), mode))
+	: File(filename.getResolved(), mode)
+{
+}
+
+File::File(Filename&& filename, const char* mode)
+	: File(std::move(filename).getResolved(), mode)
 {
 }
 
 File::File(File&& other) noexcept
 	: file(std::move(other.file))
+{
+}
+
+File::File(std::unique_ptr<FileBase> file_)
+	: file(std::move(file_))
 {
 }
 
@@ -76,19 +89,19 @@ void File::close()
 	file.reset();
 }
 
-void File::read(void* buffer, size_t num)
+void File::read(std::span<uint8_t> buffer)
 {
-	file->read(buffer, num);
+	file->read(buffer);
 }
 
-void File::write(const void* buffer, size_t num)
+void File::write(std::span<const uint8_t> buffer)
 {
-	file->write(buffer, num);
+	file->write(buffer);
 }
 
-const byte* File::mmap(size_t& size)
+std::span<const uint8_t> File::mmap()
 {
-	return file->mmap(size);
+	return file->mmap();
 }
 
 void File::munmap()
@@ -121,19 +134,19 @@ void File::flush()
 	file->flush();
 }
 
-const string File::getURL() const
+const std::string& File::getURL() const
 {
 	return file->getURL();
 }
 
-const string File::getLocalReference() const
+std::string File::getLocalReference() const
 {
 	return file->getLocalReference();
 }
 
-const string File::getOriginalName()
+std::string_view File::getOriginalName()
 {
-	string orig = file->getOriginalName();
+	std::string_view orig = file->getOriginalName();
 	return !orig.empty() ? orig : getURL();
 }
 

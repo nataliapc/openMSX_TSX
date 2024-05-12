@@ -6,8 +6,9 @@
     <manufacturer>Panasonic</manufacturer>
     <code>FS-A1WX</code>
     <release_year>1988</release_year>
-    <description/>
+    <description>Japanese MSX2+ with turbo CPU mode, Ren-sha turbo slider, disk drive, MSX-MUSIC and built in software. No MSX-MUSIC.</description>
     <type>MSX2+</type>
+    <region>jp</region>
   </info>
 
   <RenShaTurbo>
@@ -45,6 +46,7 @@
           <sound>
             <volume>9000</volume>
           </sound>
+          <ym2413-core>NukeYKT</ym2413-core>
         </MSX-MUSIC>
       </secondary>
 
@@ -136,13 +138,13 @@
       <vram>128</vram>
     </VDP>
 
-    <PSG id="psg">
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+    <PSG id="PSG">
+      <io base="0xA0" num="4" type="IO"/>
       <sound>
         <volume>21000</volume>
       </sound>
       <keyboardlayout>JIS</keyboardlayout>
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <RTC id="Real time clock">

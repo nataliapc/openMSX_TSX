@@ -5,9 +5,13 @@
 #include "VDPVRAM.hh"
 #include "VRAMObserver.hh"
 #include "DisplayMode.hh"
+#include "narrow.hh"
+#include "ranges.hh"
 #include "serialize_meta.hh"
 #include "unreachable.hh"
+#include <array>
 #include <cstdint>
+#include <span>
 
 namespace openmsx {
 
@@ -40,6 +44,19 @@ public:
 		  */
 		byte colorAttrib;
 	};
+
+	static constexpr SpritePattern doublePattern(SpritePattern a)
+	{
+		// bit-pattern "abcd...." gets expanded to "aabbccdd"
+		// upper 16 bits (of a 32 bit number) contain the pattern
+		// lower 16 bits must be zero
+		//                               // abcdefghijklmnop0000000000000000
+		a = (a | (a >> 8)) & 0xFF00FF00; // abcdefgh00000000ijklmnop00000000
+		a = (a | (a >> 4)) & 0xF0F0F0F0; // abcd0000efgh0000ijkl0000mnop0000
+		a = (a | (a >> 2)) & 0xCCCCCCCC; // ab00cd00ef00gh00ij00kl00mn00op00
+		a = (a | (a >> 1)) & 0xAAAAAAAA; // a0b0c0d0e0f0g0h0i0j0k0l0m0n0o0p0
+		return a | (a >> 1);             // aabbccddeeffgghhiijjkkllmmnnoopp
+	}
 
 	/** Create a sprite checker.
 	  * @param vdp The VDP this sprite checker is part of.
@@ -99,8 +116,8 @@ public:
 		// The following is only required when switching from sprite
 		// mode0 to some other mode (in other case it has no effect).
 		// Because in mode 0, currentLine is not updated.
-		currentLine = frameStartTime.getTicksTill_fast(time)
-		                 / VDP::TICKS_PER_LINE;
+		currentLine = narrow<int>(frameStartTime.getTicksTill_fast(time)
+		                 / VDP::TICKS_PER_LINE);
 		// Every line in mode0 has 0 sprites, but none of the lines
 		// are ever requested by the renderer, except for the last
 		// line, because sprites are checked one line before they
@@ -141,6 +158,15 @@ public:
 		// TODO: Precalc something?
 	}
 
+	/** Informs the sprite checker of a change in the TP bit (R#8 bit 5)
+	  * @param tp The new transparency value.
+	  * @param time The moment in emulated time this change occurs.
+	  */
+	inline void updateTransparency(bool tp, EmuTime::param time) {
+		(void)tp;
+		sync(time);
+	}
+
 	/** Informs the sprite checker of a vertical scroll change.
 	  * @param scroll The new scroll value.
 	  * @param time The moment in emulated time this change occurs.
@@ -162,8 +188,8 @@ public:
 		// the display line. In reality, sprite checking is probably done
 		// during most of the line. Run tests on real MSX to make a more
 		// accurate model of sprite checking.
-		int limit = frameStartTime.getTicksTill_fast(time)
-		               / VDP::TICKS_PER_LINE;
+		int limit = narrow<int>(frameStartTime.getTicksTill_fast(time)
+		               / VDP::TICKS_PER_LINE);
 		if (currentLine < limit) {
 			// Call the right update method for the current display mode.
 			(this->*updateSpritesMethod)(limit);
@@ -172,14 +198,14 @@ public:
 
 	/** Get X coordinate of sprite collision.
 	  */
-	inline int getCollisionX(EmuTime::param time) {
+	[[nodiscard]] inline int getCollisionX(EmuTime::param time) {
 		sync(time);
 		return collisionX;
 	}
 
 	/** Get Y coordinate of sprite collision.
 	  */
-	inline int getCollisionY(EmuTime::param time) {
+	[[nodiscard]] inline int getCollisionY(EmuTime::param time) {
 		sync(time);
 		return collisionY;
 	}
@@ -198,7 +224,7 @@ public:
 	inline void frameStart(EmuTime::param time) {
 		frameStartTime.reset(time);
 		currentLine = 0;
-		for (auto& c : spriteCount) c = 0;
+		ranges::fill(spriteCount, 0);
 		// TODO: Reset anything else? Does the real VDP?
 	}
 
@@ -215,24 +241,23 @@ public:
 	  * after the sprites are checked, or you'll get last frame's sprites.
 	  * @param line The absolute line number for which sprites should
 	  *   be returned. Range is [0..313) for PAL and [0..262) for NTSC.
-	  * @param visibleSprites Output parameter in which the pointer to
-	  *   a SpriteInfo array containing the sprites to be displayed is
-	  *   returned.
-	  *   The array's contents are valid until the next time the VDP
+	  * @return The to-be-displayed sprites.
+	  *   The buffers content remains valid until the next time the VDP
 	  *   is scheduled.
-	  * @return The number of sprites stored in the visibleSprites array.
+	  *   This buffer is followed by a sentinel, this sentinel is NOT
+	  *   included in the returned span (IOW the span can be extended with
+	  *   one extra element which is the sentinel).
 	  */
-	inline int getSprites(int line, const SpriteInfo*& visibleSprites) const {
+	[[nodiscard]] inline std::span<const SpriteInfo> getSprites(int line) const {
 		// Compensate for the fact sprites are checked one line earlier
 		// than they are displayed.
 		line--;
 
 		// TODO: Is there ever a sprite on absolute line 0?
 		//       Maybe there is, but it is never displayed.
-		if (line < 0) return 0;
+		if (line < 0) return {};
 
-		visibleSprites = spriteBuffer[line];
-		return spriteCount[line];
+		return subspan(spriteBuffer[line], 0, spriteCount[line]);
 	}
 
 	// VRAMObserver implementation:
@@ -286,8 +311,8 @@ private:
 	  *   Bit 31 is the leftmost bit of the sprite.
 	  *   Unused bits are zero.
 	  */
-	inline SpritePattern calculatePatternNP(unsigned patternNr, unsigned y);
-	inline SpritePattern calculatePatternPlanar(unsigned patternNr, unsigned y);
+	[[nodiscard]] inline SpritePattern calculatePatternNP(unsigned patternNr, unsigned y) const;
+	[[nodiscard]] inline SpritePattern calculatePatternPlanar(unsigned patternNr, unsigned y) const;
 
 	/** Check sprite collision and number of sprites per line.
 	  * This routine implements sprite mode 1 (MSX1).
@@ -313,6 +338,7 @@ private:
 	  */
 	inline void checkSprites2(int minLine, int maxLine);
 
+private:
 	using UpdateSpritesMethod = void (SpriteChecker::*)(int limit);
 	UpdateSpritesMethod updateSpritesMethod;
 
@@ -355,17 +381,17 @@ private:
 	/** Buffer containing the sprites that are visible on each
 	  * display line.
 	  */
-	SpriteInfo spriteBuffer[313][32 + 1]; // +1 for sentinel
+	std::array<std::array<SpriteInfo, 32 + 1>, 313> spriteBuffer; // +1 for sentinel
 
 	/** Buffer containing the number of sprites that are visible
 	  * on each display line.
 	  * In other words, spriteCount[i] is the number of sprites
 	  * in spriteBuffer[i].
 	  */
-	uint8_t spriteCount[313];
+	std::array<uint8_t, 313> spriteCount;
 
 	/** Is current display mode planar or not?
-	  * TODO: Introduce separate update methods for planar/nonplanar modes.
+	  * TODO: Introduce separate update methods for planar/non-planar modes.
 	  */
 	bool planar;
 };

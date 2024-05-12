@@ -6,8 +6,9 @@
     <manufacturer>Sony</manufacturer>
     <code>HB-F500P</code>
     <release_year>1985</release_year>
-    <description/>
+    <description>First European (desktop) MSX2 by Sony, with 64kB RAM, built in double sided disk drive and 3 cartridge slots. Memory layout is special, not all software handles it correctly.</description>
     <type>MSX2</type>
+    <region>eu</region>
   </info>
 
   <CassettePort/>
@@ -18,7 +19,7 @@
       <sound>
         <volume>16000</volume>
       </sound>
-      <io base="0xA8" num="4"/>
+      <io base="0xA8" num="8"/> <!-- S-3527 mirrors -->
       <keyboard_type>gb</keyboard_type>
       <has_keypad>true</has_keypad>
       <key_ghosting_sgc_protected>true</key_ghosting_sgc_protected>
@@ -38,8 +39,8 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="8" type="IO"/> <!-- S-3527 mirrors -->
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <RTC id="Real time clock">
@@ -49,7 +50,9 @@
     </RTC>
 
     <PrinterPort id="Printer Port">
-      <io base="0x90" num="2"/>
+      <io base="0x90" num="8" type="IO"/> <!-- S-3527 mirrors -->
+      <status_readable_on_all_ports>true</status_readable_on_all_ports> <!-- S-3527 property -->
+      <unused_bits>0x00</unused_bits> <!-- as measured on one Sony HB-F500P -->
     </PrinterPort>
 
     <primary slot="0">

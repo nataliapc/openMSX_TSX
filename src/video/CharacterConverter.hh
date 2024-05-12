@@ -3,6 +3,9 @@
 
 #include "openmsx.hh"
 
+#include <cstdint>
+#include <span>
+
 namespace openmsx {
 
 class VDP;
@@ -12,10 +15,11 @@ class DisplayMode;
 
 /** Utility class for converting VRAM contents to host pixels.
   */
-template <class Pixel>
 class CharacterConverter
 {
 public:
+	using Pixel = uint32_t;
+
 	/** Create a new bitmap scanline converter.
 	  * @param vdp The VDP of which the VRAM will be converted.
 	  * @param palFg Pointer to 16-entries array that specifies
@@ -27,14 +31,17 @@ public:
 	  *   This is kept as a pointer, so any changes to the palette
 	  *   are immediately picked up by convertLine.
 	  */
-	CharacterConverter(VDP& vdp, const Pixel* palFg, const Pixel* palBg);
+	CharacterConverter(VDP& vdp, std::span<const Pixel, 16> palFg, std::span<const Pixel, 16> palBg);
 
-	/** Convert a line of V9938 VRAM to 512 host pixels.
+	/** Convert a line of V9938 VRAM to 256 or 512 host pixels.
 	  * Call this method in non-planar display modes (Graphic4 and Graphic5).
-	  * @param linePtr Pointer to array where host pixels will be written to.
+	  * @param buf Buffer where host pixels will be written to.
+	  *            Depending on the screen mode, the buffer must contain at
+	  *            least 256 or 512 pixels, but more is allowed (the extra
+	  *            pixels aren't touched).
 	  * @param line Display line number [0..255].
 	  */
-	void convertLine(Pixel* linePtr, int line);
+	void convertLine(std::span<Pixel> buf, int line) const;
 
 	/** Select the display mode to use for scanline conversion.
 	  * @param mode The new display mode.
@@ -42,27 +49,28 @@ public:
 	void setDisplayMode(DisplayMode mode);
 
 private:
-	inline void renderText1   (Pixel* pixelPtr, int line);
-	inline void renderText1Q  (Pixel* pixelPtr, int line);
-	inline void renderText2   (Pixel* pixelPtr, int line);
-	inline void renderGraphic1(Pixel* pixelPtr, int line);
-	inline void renderGraphic2(Pixel* pixelPtr, int line);
-	inline void renderMulti   (Pixel* pixelPtr, int line);
-	inline void renderMultiQ  (Pixel* pixelPtr, int line);
-	inline void renderBogus   (Pixel* pixelPtr);
-	inline void renderBlank   (Pixel* pixelPtr);
+	inline void renderText1   (std::span<Pixel, 256> buf, int line) const;
+	inline void renderText1Q  (std::span<Pixel, 256> buf, int line) const;
+	inline void renderText2   (std::span<Pixel, 512> buf, int line) const;
+	inline void renderGraphic1(std::span<Pixel, 256> buf, int line) const;
+	inline void renderGraphic2(std::span<Pixel, 256> buf, int line) const;
+	inline void renderMulti   (std::span<Pixel, 256> buf, int line) const;
+	inline void renderMultiQ  (std::span<Pixel, 256> buf, int line) const;
+	inline void renderBogus   (std::span<Pixel, 256> buf) const;
+	inline void renderBlank   (std::span<Pixel, 256> buf) const;
 	inline void renderMultiHelper(Pixel* pixelPtr, int line,
-	                       int mask, int patternQuarter);
+	                       unsigned mask, unsigned patternQuarter) const;
 
-	const byte* getNamePtr(int line, int scroll);
+	[[nodiscard]] std::span<const byte, 32> getNamePtr(int line, int scroll) const;
 
+private:
 	VDP& vdp;
 	VDPVRAM& vram;
 
-	const Pixel* const palFg;
-	const Pixel* const palBg;
+	std::span<const Pixel, 16> palFg;
+	std::span<const Pixel, 16> palBg;
 
-	unsigned modeBase;
+	unsigned modeBase = 0; // not strictly needed, but avoids Coverity warning
 };
 
 } // namespace openmsx

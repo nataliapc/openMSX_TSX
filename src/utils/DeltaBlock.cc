@@ -1,9 +1,10 @@
 #include "DeltaBlock.hh"
-#include "snappy.hh"
-#include "likely.hh"
-#include <algorithm>
+
+#include "ranges.hh"
+#include "lz4.hh"
+
+#include <bit>
 #include <cassert>
-#include <cstring>
 #include <tuple>
 #include <utility>
 #if STATISTICS
@@ -15,13 +16,11 @@
 
 namespace openmsx {
 
-using std::vector;
-
 // --- Compressed integers ---
 
 // See https://en.wikipedia.org/wiki/LEB128 for a description of the
 // 'unsigned LEB' format.
-static void storeUleb(vector<uint8_t>& result, size_t value)
+static void storeUleb(std::vector<uint8_t>& result, size_t value)
 {
 	do {
 		uint8_t b = value & 0x7F;
@@ -31,12 +30,14 @@ static void storeUleb(vector<uint8_t>& result, size_t value)
 	} while (value);
 }
 
-static size_t loadUleb(const uint8_t*& data)
+[[nodiscard]] static constexpr size_t loadUleb(std::span<const uint8_t>& data)
 {
 	size_t result = 0;
 	int shift = 0;
 	while (true) {
-		uint8_t b = *data++;
+		assert(!data.empty());
+		uint8_t b = data.front();
+		data = data.subspan(1);
 		result |= size_t(b & 0x7F) << shift;
 		if ((b & 0x80) == 0) return result;
 		shift += 7;
@@ -50,14 +51,14 @@ template<int N> bool comp(const uint8_t* p, const uint8_t* q);
 
 template<> bool comp<4>(const uint8_t* p, const uint8_t* q)
 {
-	return *reinterpret_cast<const uint32_t*>(p) ==
-	       *reinterpret_cast<const uint32_t*>(q);
+	return *std::bit_cast<const uint32_t*>(p) ==
+	       *std::bit_cast<const uint32_t*>(q);
 }
 
 template<> bool comp<8>(const uint8_t* p, const uint8_t* q)
 {
-	return *reinterpret_cast<const uint64_t*>(p) ==
-	       *reinterpret_cast<const uint64_t*>(q);
+	return *std::bit_cast<const uint64_t*>(p) ==
+	       *std::bit_cast<const uint64_t*>(q);
 }
 
 #ifdef __SSE2__
@@ -66,8 +67,8 @@ template<> bool comp<16>(const uint8_t* p, const uint8_t* q)
 	// Tests show that (on my machine) using 1 128-bit load is faster than
 	// 2 64-bit loads. Even though the actual comparison is slightly more
 	// complicated with SSE instructions.
-	__m128i a = _mm_load_si128(reinterpret_cast<const __m128i*>(p));
-	__m128i b = _mm_load_si128(reinterpret_cast<const __m128i*>(q));
+	__m128i a = _mm_load_si128(std::bit_cast<const __m128i*>(p));
+	__m128i b = _mm_load_si128(std::bit_cast<const __m128i*>(q));
 	__m128i d = _mm_cmpeq_epi8(a, b);
 	return _mm_movemask_epi8(d) == 0xffff;
 }
@@ -93,7 +94,7 @@ static std::pair<const uint8_t*, const uint8_t*> scan_mismatch(
 	// bytes. This routine also benefits from AVX2 instructions. Though not
 	// all x86_64 CPUs have AVX2 (all have SSE2), so using them requires
 	// extra run-time checks and that's not worth it at this point.
-	static const int WORD_SIZE =
+	constexpr int WORD_SIZE =
 #ifdef __SSE2__
 		sizeof(__m128i);
 #else
@@ -102,18 +103,18 @@ static std::pair<const uint8_t*, const uint8_t*> scan_mismatch(
 
 	// Region too small or
 	// both buffers are differently aligned.
-	if (unlikely((p_end - p) < (2 * WORD_SIZE)) ||
-	    unlikely((reinterpret_cast<uintptr_t>(p) & (WORD_SIZE - 1)) !=
-	             (reinterpret_cast<uintptr_t>(q) & (WORD_SIZE - 1)))) {
+	if (((p_end - p) < (2 * WORD_SIZE)) ||
+	    ((std::bit_cast<uintptr_t>(p) & (WORD_SIZE - 1)) !=
+	     (std::bit_cast<uintptr_t>(q) & (WORD_SIZE - 1)))) [[unlikely]] {
 		goto end;
 	}
 
 	// Align to WORD_SIZE boundary. No need for end-of-buffer checks.
-	if (unlikely(reinterpret_cast<uintptr_t>(p) & (WORD_SIZE - 1))) {
+	if (std::bit_cast<uintptr_t>(p) & (WORD_SIZE - 1)) [[unlikely]] {
 		do {
 			if (*p != *q) return {p, q};
 			p += 1; q += 1;
-		} while (reinterpret_cast<uintptr_t>(p) & (WORD_SIZE - 1));
+		} while (std::bit_cast<uintptr_t>(p) & (WORD_SIZE - 1));
 	}
 
 	// Fast path. Compare words-at-a-time.
@@ -151,7 +152,7 @@ end:	return std::mismatch(p, p_end, q);
 // Unlike scan_mismatch() it's less obvious how to perform this function
 // word-at-a-time (it's possible with some bit hacks). Though luckily this
 // function is also less performance critical.
-static std::pair<const uint8_t*, const uint8_t*> scan_match(
+[[nodiscard]] static constexpr std::pair<const uint8_t*, const uint8_t*> scan_match(
 	const uint8_t* p, const uint8_t* p_end, const uint8_t* q, const uint8_t* q_end)
 {
 	assert((p_end - p) == (q_end - q));
@@ -182,17 +183,19 @@ static std::pair<const uint8_t*, const uint8_t*> scan_match(
 //   n2 number of bytes are different, and here are the bytes
 //   n3 number of bytes are equal
 //   ...
-static vector<uint8_t> calcDelta(const uint8_t* oldBuf, const uint8_t* newBuf, size_t size)
+[[nodiscard]] static std::vector<uint8_t> calcDelta(
+	const uint8_t* oldBuf, std::span<const uint8_t> newBuf)
 {
-	vector<uint8_t> result;
+	std::vector<uint8_t> result;
 
-	auto* p = oldBuf;
-	auto* q = newBuf;
-	auto* p_end = p + size;
-	auto* q_end = q + size;
+	const auto* p = oldBuf;
+	const auto* q = newBuf.data();
+	auto size = newBuf.size();
+	const auto* p_end = p + size;
+	const auto* q_end = q + size;
 
 	// scan equal bytes (possibly zero)
-	auto* q1 = q;
+	const auto* q1 = q;
 	std::tie(p, q) = scan_mismatch(p, p_end, q, q_end);
 	auto n1 = q - q1;
 	storeUleb(result, n1);
@@ -200,12 +203,12 @@ static vector<uint8_t> calcDelta(const uint8_t* oldBuf, const uint8_t* newBuf, s
 	while (q != q_end) {
 		assert(*p != *q);
 
-		auto* q2 = q;
+		const auto* q2 = q;
 	different:
 		std::tie(p, q) = scan_match(p + 1, p_end, q + 1, q_end);
 		auto n2 = q - q2;
 
-		auto* q3 = q;
+		const auto* q3 = q;
 		std::tie(p, q) = scan_mismatch(p, p_end, q, q_end);
 		auto n3 = q - q3;
 		if ((q != q_end) && (n3 <= 2)) goto different;
@@ -221,19 +224,17 @@ static vector<uint8_t> calcDelta(const uint8_t* oldBuf, const uint8_t* newBuf, s
 }
 
 // Apply a previously calculated 'delta' to 'oldBuf' to get 'newbuf'.
-static void applyDeltaInPlace(uint8_t* buf, size_t size, const uint8_t* delta)
+static void applyDeltaInPlace(std::span<uint8_t> buf, std::span<const uint8_t> delta)
 {
-	auto* end = buf + size;
-
-	while (buf != end) {
+	while (!buf.empty()) {
 		auto n1 = loadUleb(delta);
-		buf += n1;
-		if (buf == end) break;
+		buf = buf.subspan(n1);
+		if (buf.empty()) break;
 
 		auto n2 = loadUleb(delta);
-		memcpy(buf, delta, n2);
-		buf   += n2;
-		delta += n2;
+		ranges::copy(delta.subspan(0, n2), buf);
+		buf   = buf  .subspan(n2);
+		delta = delta.subspan(n2);
 	}
 }
 
@@ -241,47 +242,42 @@ static void applyDeltaInPlace(uint8_t* buf, size_t size, const uint8_t* delta)
 
 // class DeltaBlock
 
-size_t DeltaBlock::globalAllocSize = 0;
-
 DeltaBlock::~DeltaBlock()
 {
 	globalAllocSize -= allocSize;
 	std::cout << "stat: ~DeltaBlock " << globalAllocSize
-	          << " (-" << allocSize << ')' << std::endl;
+	          << " (-" << allocSize << ")\n";
 }
 
 #endif
 
 // class DeltaBlockCopy
 
-DeltaBlockCopy::DeltaBlockCopy(const uint8_t* data, size_t size)
-	: block(size)
-	, compressedSize(0)
+DeltaBlockCopy::DeltaBlockCopy(std::span<const uint8_t> data)
+	: block(data.size())
 {
 #ifdef DEBUG
-	sha1 = SHA1::calc(data, size);
+	sha1 = SHA1::calc(data);
 #endif
-	memcpy(block.data(), data, size);
+	ranges::copy(data, block.data());
 	assert(!compressed());
 #if STATISTICS
 	allocSize = size;
 	globalAllocSize += allocSize;
 	std::cout << "stat: DeltaBlockCopy " << globalAllocSize
-	          << " (+" << allocSize << ')' << std::endl;
+	          << " (+" << allocSize << ")\n";
 #endif
 }
 
-void DeltaBlockCopy::apply(uint8_t* dst, size_t size) const
+void DeltaBlockCopy::apply(std::span<uint8_t> dst) const
 {
 	if (compressed()) {
-		snappy::uncompress(
-			reinterpret_cast<const char*>(block.data()), compressedSize,
-			reinterpret_cast<char*>(dst), size);
+		LZ4::decompress(block.data(), dst.data(), int(compressedSize), int(dst.size()));
 	} else {
-		memcpy(dst, block.data(), size);
+		ranges::copy(std::span{block.data(), dst.size()}, dst);
 	}
 #ifdef DEBUG
-	assert(SHA1::calc(dst, size) == sha1);
+	assert(SHA1::calc(dst) == sha1);
 #endif
 }
 
@@ -289,29 +285,29 @@ void DeltaBlockCopy::compress(size_t size)
 {
 	if (compressed()) return;
 
-	size_t dstLen = snappy::maxCompressedLength(size);
+	size_t dstLen = LZ4::compressBound(int(size));
 	MemBuffer<uint8_t> buf2(dstLen);
-	snappy::compress(reinterpret_cast<const char*>(block.data()), size,
-	                 reinterpret_cast<char*>(buf2.data()), dstLen);
+	dstLen = LZ4::compress(block.data(), buf2.data(), int(size));
+
 	if (dstLen >= size) {
 		// compression isn't beneficial
 		return;
 	}
 	compressedSize = dstLen;
-	block.swap(buf2);
+	std::swap(block, buf2);
 	block.resize(compressedSize); // shrink to fit
 	assert(compressed());
 #ifdef DEBUG
 	MemBuffer<uint8_t> buf3(size);
-	apply(buf3.data(), size);
-	assert(memcmp(buf3.data(), buf2.data(), size) == 0);
+	apply({buf3.data(), size});
+	assert(ranges::equal(std::span{buf3.data(), size}, std::span{buf2.data(), size}));
 #endif
 #if STATISTICS
 	int delta = compressedSize - allocSize;
 	allocSize = compressedSize;
 	globalAllocSize += delta;
 	std::cout << "stat: compress " << globalAllocSize
-	          << " (" << delta << ')' << std::endl;
+	          << " (" << delta << ")\n";
 #endif
 }
 
@@ -326,31 +322,31 @@ const uint8_t* DeltaBlockCopy::getData()
 
 DeltaBlockDiff::DeltaBlockDiff(
 		std::shared_ptr<DeltaBlockCopy> prev_,
-		const uint8_t* data, size_t size)
+		std::span<const uint8_t> data)
 	: prev(std::move(prev_))
-	, delta(calcDelta(prev->getData(), data, size))
+	, delta(calcDelta(prev->getData(), data))
 {
 #ifdef DEBUG
-	sha1 = SHA1::calc(data, size);
+	sha1 = SHA1::calc(data);
 
-	MemBuffer<uint8_t> buf(size);
-	apply(buf.data(), size);
-	assert(memcmp(buf.data(), data, size) == 0);
+	MemBuffer<uint8_t> buf(data.size());
+	apply({buf.data(), data.size()});
+	assert(ranges::equal(std::span{buf.data(), data.size()}, data));
 #endif
 #if STATISTICS
 	allocSize = delta.size();
 	globalAllocSize += allocSize;
 	std::cout << "stat: DeltaBlockDiff " << globalAllocSize
-	          << " (+" << allocSize << ')' << std::endl;
+	          << " (+" << allocSize << ")\n";
 #endif
 }
 
-void DeltaBlockDiff::apply(uint8_t* dst, size_t size) const
+void DeltaBlockDiff::apply(std::span<uint8_t> dst) const
 {
-	prev->apply(dst, size);
-	applyDeltaInPlace(dst, size, delta.data());
+	prev->apply(dst);
+	applyDeltaInPlace(dst, delta);
 #ifdef DEBUG
-	assert(SHA1::calc(dst, size) == sha1);
+	assert(SHA1::calc(dst) == sha1);
 #endif
 }
 
@@ -363,11 +359,11 @@ size_t DeltaBlockDiff::getDeltaSize() const
 // class LastDeltaBlocks
 
 std::shared_ptr<DeltaBlock> LastDeltaBlocks::createNew(
-		const void* id, const uint8_t* data, size_t size)
+		const void* id, std::span<const uint8_t> data)
 {
-	auto it = std::lower_bound(begin(infos), end(infos), std::make_tuple(id, size),
-		[](const Info& info, const std::tuple<const void*, size_t>& info2) {
-			return std::make_tuple(info.id, info.size) < info2; });
+	auto size = data.size();
+	auto it = ranges::lower_bound(infos, std::tuple(id, size), {},
+		[](const Info& info) { return std::tuple(info.id, info.size); });
 	if ((it == end(infos)) || (it->id != id) || (it->size != size)) {
 		// no previous info yet
 		it = infos.emplace(it, id, size);
@@ -384,7 +380,7 @@ std::shared_ptr<DeltaBlock> LastDeltaBlocks::createNew(
 		}
 		// Heuristic: create a new block when too many small
 		// differences have accumulated.
-		auto b = std::make_shared<DeltaBlockCopy>(data, size);
+		auto b = std::make_shared<DeltaBlockCopy>(data);
 		it->ref = b;
 		it->last = b;
 		it->accSize = 0;
@@ -392,7 +388,7 @@ std::shared_ptr<DeltaBlock> LastDeltaBlocks::createNew(
 	} else {
 		// Create diff based on earlier reference block.
 		// Reference remains unchanged.
-		auto b = std::make_shared<DeltaBlockDiff>(ref, data, size);
+		auto b = std::make_shared<DeltaBlockDiff>(ref, data);
 		it->last = b;
 		it->accSize += b->getDeltaSize();
 		return b;
@@ -400,11 +396,10 @@ std::shared_ptr<DeltaBlock> LastDeltaBlocks::createNew(
 }
 
 std::shared_ptr<DeltaBlock> LastDeltaBlocks::createNullDiff(
-		const void* id, const uint8_t* data, size_t size)
+		const void* id, std::span<const uint8_t> data)
 {
-	auto it = std::lower_bound(begin(infos), end(infos), id,
-		[](const Info& info, const void* id2) {
-			return info.id < id2; });
+	auto size = data.size();
+	auto it = ranges::lower_bound(infos, id, {}, &Info::id);
 	if ((it == end(infos)) || (it->id != id)) {
 		// no previous block yet
 		it = infos.emplace(it, id, size);
@@ -413,14 +408,14 @@ std::shared_ptr<DeltaBlock> LastDeltaBlocks::createNullDiff(
 
 	auto last = it->last.lock();
 	if (!last) {
-		auto b = std::make_shared<DeltaBlockCopy>(data, size);
+		auto b = std::make_shared<DeltaBlockCopy>(data);
 		it->ref = b;
 		it->last = b;
 		it->accSize = 0;
 		return b;
 	} else {
 #ifdef DEBUG
-		assert(SHA1::calc(data, size) == last->sha1);
+		assert(SHA1::calc(data) == last->sha1);
 #endif
 		return last;
 	}

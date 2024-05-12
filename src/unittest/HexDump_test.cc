@@ -1,17 +1,22 @@
 #include "catch.hpp"
+
 #include "HexDump.hh"
+
+#include "ranges.hh"
+
+#include <bit>
 
 static void test_decode(const std::string& encoded, const std::string& decoded)
 {
-	auto p = HexDump::decode(encoded);
-	REQUIRE(p.second == decoded.size());
-	CHECK(memcmp(p.first.data(), decoded.data(), decoded.size()) == 0);
+	auto [buf, bufSize] = HexDump::decode(encoded);
+	REQUIRE(bufSize == decoded.size());
+	CHECK(ranges::equal(std::span{buf.data(), bufSize}, decoded));
 }
 
 static void test(const std::string& decoded, const std::string& encoded)
 {
-	CHECK(HexDump::encode(reinterpret_cast<const uint8_t*>(decoded.data()),
-	                      decoded.size())
+	CHECK(HexDump::encode(std::span{std::bit_cast<const uint8_t*>(decoded.data()),
+	                                decoded.size()})
 	      == encoded);
 	test_decode(encoded, decoded);
 }
@@ -57,7 +62,7 @@ TEST_CASE("HexDump")
 	// Decode-only:
 	// - extra newlines don't matter
 	test_decode("30 31\n32\n33 34", "01234");
-	// - no spaces inbetween is fine as well
+	// - no spaces in between is fine as well
 	test_decode("3031323334", "01234");
 	// - any non [0-9][a-f][A-F] character is ignored
 	test_decode("30|31G32g33+34", "01234");

@@ -4,10 +4,12 @@
 #include "Probe.hh"
 #include "RecordedCommand.hh"
 #include "WatchPoint.hh"
+
 #include "hash_map.hh"
-#include "string_view.hh"
 #include "outer.hh"
 #include "xxhash.hh"
+
+#include <string_view>
 #include <vector>
 #include <memory>
 
@@ -18,44 +20,47 @@ class Debuggable;
 class ProbeBase;
 class ProbeBreakPoint;
 class MSXCPU;
+class SymbolManager;
 
 class Debugger
 {
 public:
-	Debugger(const Debugger&) = delete;
-	Debugger& operator=(const Debugger&) = delete;
-
 	explicit Debugger(MSXMotherBoard& motherBoard);
+	Debugger(const Debugger&) = delete;
+	Debugger(Debugger&&) = delete;
+	Debugger& operator=(const Debugger&) = delete;
+	Debugger& operator=(Debugger&&) = delete;
 	~Debugger();
 
 	void registerDebuggable   (std::string name, Debuggable& debuggable);
-	void unregisterDebuggable (string_view name, Debuggable& debuggable);
-	Debuggable* findDebuggable(string_view name);
+	void unregisterDebuggable (std::string_view name, Debuggable& debuggable);
+	[[nodiscard]] Debuggable* findDebuggable(std::string_view name);
+	[[nodiscard]] const auto& getDebuggables() const { return debuggables; }
 
 	void registerProbe  (ProbeBase& probe);
 	void unregisterProbe(ProbeBase& probe);
-	ProbeBase* findProbe(string_view name);
+	[[nodiscard]] ProbeBase* findProbe(std::string_view name);
+
+	unsigned setWatchPoint(TclObject command, TclObject condition,
+	                       WatchPoint::Type type,
+	                       unsigned beginAddr, unsigned endAddr,
+	                       bool once, unsigned newId = -1);
 
 	void removeProbeBreakPoint(ProbeBreakPoint& bp);
 	void setCPU(MSXCPU* cpu_) { cpu = cpu_; }
 
 	void transfer(Debugger& other);
 
-	MSXMotherBoard& getMotherBoard() { return motherBoard; }
+	[[nodiscard]] MSXMotherBoard& getMotherBoard() { return motherBoard; }
 
 private:
-	Debuggable& getDebuggable(string_view name);
-	ProbeBase& getProbe(string_view name);
+	[[nodiscard]] Debuggable& getDebuggable(std::string_view name);
+	[[nodiscard]] ProbeBase& getProbe(std::string_view name);
 
 	unsigned insertProbeBreakPoint(
 		TclObject command, TclObject condition,
-		ProbeBase& probe, unsigned newId = -1);
-	void removeProbeBreakPoint(string_view name);
-
-	unsigned setWatchPoint(TclObject command, TclObject condition,
-	                       WatchPoint::Type type,
-	                       unsigned beginAddr, unsigned endAddr,
-	                       unsigned newId = -1);
+		ProbeBase& probe, bool once, unsigned newId = -1);
+	void removeProbeBreakPoint(std::string_view name);
 
 	MSXMotherBoard& motherBoard;
 
@@ -64,54 +69,60 @@ private:
 		Cmd(CommandController& commandController,
 		    StateChangeDistributor& stateChangeDistributor,
 		    Scheduler& scheduler);
-		bool needRecord(array_ref<TclObject> tokens) const override;
-		void execute(array_ref<TclObject> tokens,
+		[[nodiscard]] bool needRecord(std::span<const TclObject> tokens) const override;
+		void execute(std::span<const TclObject> tokens,
 			     TclObject& result, EmuTime::param time) override;
-		std::string help(const std::vector<std::string>& tokens) const override;
+		[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override;
 		void tabCompletion(std::vector<std::string>& tokens) const override;
 
 	private:
-		      Debugger& debugger()       { return OUTER(Debugger, cmd); }
-		const Debugger& debugger() const { return OUTER(Debugger, cmd); }
+		[[nodiscard]]       Debugger& debugger()       { return OUTER(Debugger, cmd); }
+		[[nodiscard]] const Debugger& debugger() const { return OUTER(Debugger, cmd); }
+		[[nodiscard]] SymbolManager& getSymbolManager();
 		void list(TclObject& result);
-		void desc(array_ref<TclObject> tokens, TclObject& result);
-		void size(array_ref<TclObject> tokens, TclObject& result);
-		void read(array_ref<TclObject> tokens, TclObject& result);
-		void readBlock(array_ref<TclObject> tokens, TclObject& result);
-		void write(array_ref<TclObject> tokens, TclObject& result);
-		void writeBlock(array_ref<TclObject> tokens, TclObject& result);
-		void setBreakPoint(array_ref<TclObject> tokens, TclObject& result);
-		void removeBreakPoint(array_ref<TclObject> tokens, TclObject& result);
-		void listBreakPoints(array_ref<TclObject> tokens, TclObject& result);
-		std::vector<std::string> getBreakPointIds() const;
-		std::vector<std::string> getWatchPointIds() const;
-		std::vector<std::string> getConditionIds() const;
-		void setWatchPoint(array_ref<TclObject> tokens, TclObject& result);
-		void removeWatchPoint(array_ref<TclObject> tokens, TclObject& result);
-		void listWatchPoints(array_ref<TclObject> tokens, TclObject& result);
-		void setCondition(array_ref<TclObject> tokens, TclObject& result);
-		void removeCondition(array_ref<TclObject> tokens, TclObject& result);
-		void listConditions(array_ref<TclObject> tokens, TclObject& result);
-		void probe(array_ref<TclObject> tokens, TclObject& result);
-		void probeList(array_ref<TclObject> tokens, TclObject& result);
-		void probeDesc(array_ref<TclObject> tokens, TclObject& result);
-		void probeRead(array_ref<TclObject> tokens, TclObject& result);
-		void probeSetBreakPoint(array_ref<TclObject> tokens, TclObject& result);
-		void probeRemoveBreakPoint(array_ref<TclObject> tokens, TclObject& result);
-		void probeListBreakPoints(array_ref<TclObject> tokens, TclObject& result);
+		void desc(std::span<const TclObject> tokens, TclObject& result);
+		void size(std::span<const TclObject> tokens, TclObject& result);
+		void read(std::span<const TclObject> tokens, TclObject& result);
+		void readBlock(std::span<const TclObject> tokens, TclObject& result);
+		void write(std::span<const TclObject> tokens, TclObject& result);
+		void writeBlock(std::span<const TclObject> tokens, TclObject& result);
+		void setBreakPoint(std::span<const TclObject> tokens, TclObject& result);
+		void removeBreakPoint(std::span<const TclObject> tokens, TclObject& result);
+		void listBreakPoints(std::span<const TclObject> tokens, TclObject& result) const;
+		[[nodiscard]] std::vector<std::string> getBreakPointIds() const;
+		[[nodiscard]] std::vector<std::string> getWatchPointIds() const;
+		[[nodiscard]] std::vector<std::string> getConditionIds() const;
+		void setWatchPoint(std::span<const TclObject> tokens, TclObject& result);
+		void removeWatchPoint(std::span<const TclObject> tokens, TclObject& result);
+		void listWatchPoints(std::span<const TclObject> tokens, TclObject& result);
+		void setCondition(std::span<const TclObject> tokens, TclObject& result);
+		void removeCondition(std::span<const TclObject> tokens, TclObject& result);
+		void listConditions(std::span<const TclObject> tokens, TclObject& result) const;
+		void probe(std::span<const TclObject> tokens, TclObject& result);
+		void probeList(std::span<const TclObject> tokens, TclObject& result);
+		void probeDesc(std::span<const TclObject> tokens, TclObject& result);
+		void probeRead(std::span<const TclObject> tokens, TclObject& result);
+		void probeSetBreakPoint(std::span<const TclObject> tokens, TclObject& result);
+		void probeRemoveBreakPoint(std::span<const TclObject> tokens, TclObject& result);
+		void probeListBreakPoints(std::span<const TclObject> tokens, TclObject& result);
+		void symbols(std::span<const TclObject> tokens, TclObject& result);
+		void symbolsTypes(std::span<const TclObject> tokens, TclObject& result) const;
+		void symbolsLoad(std::span<const TclObject> tokens, TclObject& result);
+		void symbolsRemove(std::span<const TclObject> tokens, TclObject& result);
+		void symbolsFiles(std::span<const TclObject> tokens, TclObject& result);
+		void symbolsLookup(std::span<const TclObject> tokens, TclObject& result);
 	} cmd;
 
 	struct NameFromProbe {
-		const std::string& operator()(const ProbeBase* p) const {
+		[[nodiscard]] const std::string& operator()(const ProbeBase* p) const {
 			return p->getName();
 		}
 	};
 
 	hash_map<std::string, Debuggable*, XXHasher> debuggables;
-	hash_set<ProbeBase*, NameFromProbe, XXHasher>  probes;
-	using ProbeBreakPoints = std::vector<std::unique_ptr<ProbeBreakPoint>>;
-	ProbeBreakPoints probeBreakPoints; // unordered
-	MSXCPU* cpu;
+	hash_set<ProbeBase*, NameFromProbe, XXHasher> probes;
+	std::vector<std::unique_ptr<ProbeBreakPoint>> probeBreakPoints; // unordered
+	MSXCPU* cpu = nullptr;
 };
 
 } // namespace openmsx

@@ -1,14 +1,10 @@
 #include "DoubledFrame.hh"
+#include "narrow.hh"
 #include <cstdint>
 
 namespace openmsx {
 
-DoubledFrame::DoubledFrame(const SDL_PixelFormat& format)
-	: FrameSource(format)
-{
-}
-
-void DoubledFrame::init(FrameSource* field_, unsigned skip_)
+void DoubledFrame::init(FrameSource* field_, int skip_)
 {
 	FrameSource::init(FIELD_NONINTERLACED);
 	field = field_;
@@ -18,21 +14,14 @@ void DoubledFrame::init(FrameSource* field_, unsigned skip_)
 
 unsigned DoubledFrame::getLineWidth(unsigned line) const
 {
-	int t = line - skip;
+	int t = narrow<int>(line) - skip;
 	return (t >= 0) ? field->getLineWidth(t / 2) : 1;
 }
 
-const void* DoubledFrame::getLineInfo(
-	unsigned line, unsigned& width, void* buf, unsigned bufWidth) const
+std::span<const FrameSource::Pixel> DoubledFrame::getUnscaledLine(
+	unsigned line, std::span<Pixel> helpBuf) const
 {
-	static const uint32_t blackPixel = 0; // both 16bppp and 32bpp
-	int t = line - skip;
-	if (t >= 0) {
-		return field->getLineInfo(t / 2, width, buf, bufWidth);
-	} else {
-		width = 1;
-		return &blackPixel;
-	}
+	return field->getUnscaledLine(std::max(narrow<int>(line) - skip, 0) / 2, helpBuf);
 }
 
 } // namespace openmsx

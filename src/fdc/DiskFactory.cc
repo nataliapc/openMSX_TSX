@@ -9,10 +9,8 @@
 #include "DirAsDSK.hh"
 #include "DiskPartition.hh"
 #include "MSXException.hh"
+#include "StringOp.hh"
 #include <memory>
-#include <stdexcept>
-
-using std::string;
 
 namespace openmsx {
 
@@ -20,21 +18,21 @@ DiskFactory::DiskFactory(Reactor& reactor_)
 	: reactor(reactor_)
 	, syncDirAsDSKSetting(
 		reactor.getCommandController(), "DirAsDSKmode",
-		"type of syncronisation between host directory and dir-as-dsk diskimage",
+		"type of synchronisation between host directory and dir-as-dsk disk image",
 		DirAsDSK::SYNC_FULL, EnumSetting<DirAsDSK::SyncMode>::Map{
 			{"read_only", DirAsDSK::SYNC_READONLY},
 			{"full",      DirAsDSK::SYNC_FULL}})
 	, bootSectorSetting(
 		reactor.getCommandController(), "bootsector",
 		"boot sector type for dir-as-dsk",
-		DirAsDSK::BOOTSECTOR_DOS2, EnumSetting<DirAsDSK::BootSectorType>::Map{
-			{"DOS1", DirAsDSK::BOOTSECTOR_DOS1},
-			{"DOS2", DirAsDSK::BOOTSECTOR_DOS2}})
+		DirAsDSK::BOOT_SECTOR_DOS2, EnumSetting<DirAsDSK::BootSectorType>::Map{
+			{"DOS1", DirAsDSK::BOOT_SECTOR_DOS1},
+			{"DOS2", DirAsDSK::BOOT_SECTOR_DOS2}})
 {
 }
 
 std::unique_ptr<Disk> DiskFactory::createDisk(
-	const string& diskImage, DiskChanger& diskChanger)
+	const std::string& diskImage, DiskChanger& diskChanger)
 {
 	if (diskImage == "ramdsk") {
 		return std::make_unique<RamDSKDiskImage>();
@@ -79,7 +77,7 @@ std::unique_ptr<Disk> DiskFactory::createDisk(
 		// the name could not be interpreted as a valid
 		// filename.
 		auto pos = diskImage.find_last_of(':');
-		if (pos == string::npos) {
+		if (pos == std::string::npos) {
 			// does not contain ':', throw previous exception
 			throw;
 		}
@@ -93,13 +91,14 @@ std::unique_ptr<Disk> DiskFactory::createDisk(
 			// likely more descriptive.
 			throw e;
 		}
-		unsigned num;
-		try {
-			num = fast_stou(string_view(diskImage).substr(pos + 1));
-		} catch (std::invalid_argument&) {
-			// not a valid partion number, throw previous exception
-			throw e;
-		}
+		unsigned num = [&] {
+			auto n = StringOp::stringToBase<10, unsigned>(std::string_view(diskImage).substr(pos + 1));
+			if (!n) {
+				// not a valid partition number, throw previous exception
+				throw e;
+			}
+			return *n;
+		}();
 		SectorAccessibleDisk& disk = *wholeDisk;
 		return std::make_unique<DiskPartition>(disk, num, std::move(wholeDisk));
 	}

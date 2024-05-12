@@ -9,10 +9,10 @@
 #include "IntegerSetting.hh"
 #include "serialize_meta.hh"
 #include "openmsx.hh"
-#include "array_ref.hh"
+#include <array>
 #include <atomic>
+#include <span>
 #include <string>
-#include <memory>
 
 namespace openmsx {
 
@@ -31,7 +31,7 @@ struct II { // InstructionInfo
 	// Number of instruction byte fetches since the last M1 cycle.
 	// In other words, at the end of an instruction the PC register should
 	// be incremented by this amount.
-	int length;
+	word length;
 
 	// Total duration of the instruction. At the end of the instruction
 	// this value is added to the total cycle counter. For efficiency
@@ -40,7 +40,18 @@ struct II { // InstructionInfo
 	int cycles;
 };
 
-template<class CPU_POLICY>
+enum class ExecIRQ {
+	NMI,  // about to execute NMI routine
+	IRQ,  // about to execute normal IRQ routine
+	NONE, // about to execute regular instruction
+};
+
+struct CacheLines {
+	std::span<const byte*, CacheLine::NUM> read;
+	std::span<      byte*, CacheLine::NUM> write;
+};
+
+template<typename CPU_POLICY>
 class CPUCore final : public CPUBase, public CPURegs, public CPU_POLICY
 {
 public:
@@ -48,7 +59,7 @@ public:
 	        const BooleanSetting& traceSetting,
 	        TclCallback& diHaltCallback, EmuTime::param time);
 
-	void setInterface(MSXCPUInterface* interf) { interface = interf; }
+	void setInterface(MSXCPUInterface* interface_) { interface = interface_; }
 
 	/**
 	 * Reset the CPU.
@@ -70,16 +81,18 @@ public:
 	void exitCPULoopAsync();
 
 	void warp(EmuTime::param time);
-	EmuTime::param getCurrentTime() const;
+	[[nodiscard]] EmuTime::param getCurrentTime() const;
 	void wait(EmuTime::param time);
 	EmuTime waitCycles(EmuTime::param time, unsigned cycles);
 	void setNextSyncPoint(EmuTime::param time);
-	void invalidateMemCache(unsigned start, unsigned size);
-	bool isM1Cycle(unsigned address) const;
+	[[nodiscard]] CacheLines getCacheLines() {
+		return {readCacheLine, writeCacheLine};
+	}
+	[[nodiscard]] bool isM1Cycle(unsigned address) const;
 
 	void disasmCommand(Interpreter& interp,
-	                   array_ref<TclObject> tokens,
-                           TclObject& result) const;
+	                   std::span<const TclObject> tokens,
+	                   TclObject& result) const;
 
 	/**
 	 * Raises the maskable interrupt count.
@@ -110,27 +123,29 @@ public:
 	 */
 	void setFreq(unsigned freq);
 
+	[[nodiscard]] BooleanSetting& getFreqLockedSetting() { return freqLocked; }
+	[[nodiscard]] IntegerSetting& getFreqValueSetting()  { return freqValue; }
+
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 private:
 	void execute2(bool fastForward);
-	bool needExitCPULoop();
+	[[nodiscard]] bool needExitCPULoop();
 	void setSlowInstructions();
 	void doSetFreq();
 
 	// Observer<Setting>  !! non-virtual !!
-	void update(const Setting& setting);
+	void update(const Setting& setting) noexcept;
 
+private:
 	// memory cache
-	const byte* readCacheLine[CacheLine::NUM];
-	byte* writeCacheLine[CacheLine::NUM];
-	bool readCacheTried [CacheLine::NUM];
-	bool writeCacheTried[CacheLine::NUM];
+	std::array<const byte*, CacheLine::NUM> readCacheLine;
+	std::array<      byte*, CacheLine::NUM> writeCacheLine;
 
 	MSXMotherBoard& motherboard;
 	Scheduler& scheduler;
-	MSXCPUInterface* interface;
+	MSXCPUInterface* interface = nullptr;
 
 	const BooleanSetting& traceSetting;
 	TclCallback& diHaltCallback;
@@ -145,30 +160,30 @@ private:
 
 	// state machine variables
 	int slowInstructions;
-	int NMIStatus;
+	int NMIStatus = 0;
 
 	/**
 	 * Set to true when there was a rising edge on the NMI line
 	 * (rising = non-active -> active).
 	 * Set to false when the CPU jumps to the NMI handler address.
 	 */
-	bool nmiEdge;
+	bool nmiEdge = false;
 
-	std::atomic<bool> exitLoop;
+	std::atomic<bool> exitLoop = false;
 
 	/** In sync with traceSetting.getBoolean(). */
 	bool tracingEnabled;
 
-	/** 'normal' Z80 and Z80 in a turboR behave slightly different */
-	const bool isTurboR;
+	/** An NMOS Z80 and a CMOS Z80 behave slightly differently */
+	const bool isCMOS;
 
-
+private:
 	inline void cpuTracePre();
 	inline void cpuTracePost();
 	void cpuTracePost_slow();
 
-	inline byte READ_PORT(unsigned port, unsigned cc);
-	inline void WRITE_PORT(unsigned port, byte value, unsigned cc);
+	inline byte READ_PORT(word port, unsigned cc);
+	inline void WRITE_PORT(word port, byte value, unsigned cc);
 
 	template<bool PRE_PB, bool POST_PB>
 	byte RDMEMslow(unsigned address, unsigned cc);
@@ -181,14 +196,14 @@ private:
 	inline byte RDMEM(unsigned address, unsigned cc);
 
 	template<bool PRE_PB, bool POST_PB>
-	unsigned RD_WORD_slow(unsigned address, unsigned cc);
+	word RD_WORD_slow(unsigned address, unsigned cc);
 	template<bool PRE_PB, bool POST_PB>
-	inline unsigned RD_WORD_impl2(unsigned address, unsigned cc);
+	inline word RD_WORD_impl2(unsigned address, unsigned cc);
 	template<bool PRE_PB, bool POST_PB>
-	inline unsigned RD_WORD_impl (unsigned address, unsigned cc);
+	inline word RD_WORD_impl (unsigned address, unsigned cc);
 	template<unsigned PC_OFFSET>
-	inline unsigned RD_WORD_PC(unsigned cc);
-	inline unsigned RD_WORD(unsigned address, unsigned cc);
+	inline word RD_WORD_PC(unsigned cc);
+	inline word RD_WORD(unsigned address, unsigned cc);
 
 	template<bool PRE_PB, bool POST_PB>
 	void WRMEMslow(unsigned address, byte value, unsigned cc);
@@ -198,27 +213,28 @@ private:
 	inline void WRMEM_impl (unsigned address, byte value, unsigned cc);
 	inline void WRMEM(unsigned address, byte value, unsigned cc);
 
-	void WR_WORD_slow(unsigned address, unsigned value, unsigned cc);
-	inline void WR_WORD(unsigned address, unsigned value, unsigned cc);
+	void WR_WORD_slow(unsigned address, word value, unsigned cc);
+	inline void WR_WORD(unsigned address, word value, unsigned cc);
 
 	template<bool PRE_PB, bool POST_PB>
-	void WR_WORD_rev_slow(unsigned address, unsigned value, unsigned cc);
+	void WR_WORD_rev_slow(unsigned address, word value, unsigned cc);
 	template<bool PRE_PB, bool POST_PB>
-	inline void WR_WORD_rev2(unsigned address, unsigned value, unsigned cc);
+	inline void WR_WORD_rev2(unsigned address, word value, unsigned cc);
 	template<bool PRE_PB, bool POST_PB>
-	inline void WR_WORD_rev (unsigned address, unsigned value, unsigned cc);
+	inline void WR_WORD_rev (unsigned address, word value, unsigned cc);
 
 	void executeInstructions();
 	inline void nmi();
 	inline void irq0();
 	inline void irq1();
 	inline void irq2();
-	void executeSlow();
+	[[nodiscard]] ExecIRQ getExecIRQ() const;
+	void executeSlow(ExecIRQ execIRQ);
 
-	template<Reg8>  inline byte     get8()  const;
-	template<Reg16> inline unsigned get16() const;
-	template<Reg8>  inline void set8 (byte     x);
-	template<Reg16> inline void set16(unsigned x);
+	template<Reg8>  [[nodiscard]] inline byte get8()  const;
+	template<Reg16> [[nodiscard]] inline word get16() const;
+	template<Reg8>  inline void set8 (byte x);
+	template<Reg16> inline void set16(word x);
 
 	template<Reg8 DST, Reg8 SRC, int EE> inline II ld_R_R();
 	template<Reg16 REG, int EE> inline II ld_sp_SS();
@@ -229,7 +245,7 @@ private:
 	inline II ld_xhl_byte();
 	template<Reg16 IXY> inline II ld_xix_byte();
 
-	template<int EE> inline II WR_NN_Y(unsigned reg);
+	template<int EE> inline II WR_NN_Y(word reg);
 	template<Reg16 REG, int EE> inline II ld_xword_SS();
 	template<Reg16 REG> inline II ld_xword_SS_ED();
 	template<Reg16 REG> inline II ld_a_SS();
@@ -241,7 +257,7 @@ private:
 	template<Reg8 DST> inline II ld_R_xhl();
 	template<Reg8 DST, Reg16 IXY> inline II ld_R_xix();
 
-	template<int EE> inline unsigned RD_P_XX();
+	template<int EE> inline word RD_P_XX();
 	template<Reg16 REG, int EE> inline II ld_SS_xword();
 	template<Reg16 REG> inline II ld_SS_xword_ED();
 
@@ -396,9 +412,9 @@ private:
 	inline II rld();
 	inline II rrd();
 
-	template<int EE> inline void PUSH(unsigned reg);
+	template<int EE> inline void PUSH(word reg);
 	template<Reg16 REG, int EE> inline II push_SS();
-	template<int EE> inline unsigned POP();
+	template<int EE> inline word POP();
 	template<Reg16 REG, int EE> inline II pop_SS();
 
 	template<typename COND> inline II call(COND cond);
@@ -446,7 +462,7 @@ private:
 	inline II otdr();
 	inline II otir();
 
-	inline II nop();
+	template<int EE = 0> inline II nop();
 	inline II ccf();
 	inline II cpl();
 	inline II daa();

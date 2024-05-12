@@ -18,27 +18,28 @@ public:
 	virtual void setRxRDY(bool status, EmuTime::param time) = 0;
 	virtual void setDTR(bool status, EmuTime::param time) = 0;
 	virtual void setRTS(bool status, EmuTime::param time) = 0;
-	virtual bool getDSR(EmuTime::param time) = 0;
-	virtual bool getCTS(EmuTime::param time) = 0; // TODO use this
+
+	[[nodiscard]] virtual bool getDSR(EmuTime::param time) = 0;
+	[[nodiscard]] virtual bool getCTS(EmuTime::param time) = 0; // TODO use this
 	virtual void signal(EmuTime::param time) = 0;
 
 protected:
-	I8251Interface() {}
-	~I8251Interface() {}
+	I8251Interface() = default;
+	~I8251Interface() = default;
 };
 
 class I8251 final : public SerialDataInterface
 {
 public:
-	I8251(Scheduler& scheduler, I8251Interface& interf, EmuTime::param time);
+	I8251(Scheduler& scheduler, I8251Interface& interface, EmuTime::param time);
 
 	void reset(EmuTime::param time);
-	byte readIO(word port, EmuTime::param time);
-	byte peekIO(word port, EmuTime::param time) const;
+	[[nodiscard]] byte readIO(word port, EmuTime::param time);
+	[[nodiscard]] byte peekIO(word port, EmuTime::param time) const;
 	void writeIO(word port, byte value, EmuTime::param time);
-	ClockPin& getClockPin() { return clock; }
-	bool isRecvReady() { return recvReady; }
-	bool isRecvEnabled();
+	[[nodiscard]] ClockPin& getClockPin() { return clock; }
+	[[nodiscard]] bool isRecvReady() const { return recvReady; }
+	[[nodiscard]] bool isRecvEnabled() const;
 
 	// SerialDataInterface
 	void setDataBits(DataBits bits) override { recvDataBits = bits; }
@@ -47,7 +48,7 @@ public:
 	void recvByte(byte value, EmuTime::param time) override;
 
 	// Schedulable
-	struct SyncRecv : Schedulable {
+	struct SyncRecv final : Schedulable {
 		friend class I8251;
 		explicit SyncRecv(Scheduler& s) : Schedulable(s) {}
 		void executeUntil(EmuTime::param time) override {
@@ -55,7 +56,7 @@ public:
 			i8251.execRecv(time);
 		}
 	} syncRecv;
-	struct SyncTrans : Schedulable {
+	struct SyncTrans final : Schedulable {
 		friend class I8251;
 		explicit SyncTrans(Scheduler& s) : Schedulable(s) {}
 		void executeUntil(EmuTime::param time) override {
@@ -77,12 +78,13 @@ public:
 private:
 	void setMode(byte newMode);
 	void writeCommand(byte value, EmuTime::param time);
-	byte readStatus(EmuTime::param time);
-	byte readTrans(EmuTime::param time);
+	[[nodiscard]] byte readStatus(EmuTime::param time);
+	[[nodiscard]] byte readTrans(EmuTime::param time);
 	void writeTrans(byte value, EmuTime::param time);
 	void send(byte value, EmuTime::param time);
 
-	I8251Interface& interf;
+private:
+	I8251Interface& interface;
 	ClockPin clock;
 	unsigned charLength;
 
@@ -90,8 +92,8 @@ private:
 	SerialDataInterface::DataBits  recvDataBits;
 	SerialDataInterface::StopBits  recvStopBits;
 	SerialDataInterface::ParityBit recvParityBit;
-	bool                           recvParityEnabled;
-	byte                           recvBuf;
+	bool recvParityEnabled;
+	byte recvBuf;
 	bool recvReady;
 
 	byte sendByte;

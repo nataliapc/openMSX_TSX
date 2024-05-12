@@ -19,7 +19,7 @@ class Video9000 final : public MSXDevice
 {
 public:
 	explicit Video9000(const DeviceConfig& config);
-	~Video9000();
+	~Video9000() override;
 
 	// MSXDevice
 	void init() override;
@@ -30,30 +30,31 @@ public:
 	void serialize(Archive& ar, unsigned version);
 
 private:
-	void recalc();
-	void recalcVideoSource();
+	void recalculate();
+	void recalculateVideoSource();
 
 	// VideoSystemChangeListener
-	void preVideoSystemChange() override;
-	void postVideoSystemChange() override;
+	void preVideoSystemChange() noexcept override;
+	void postVideoSystemChange() noexcept override;
 
 	// VideoLayer
 	void paint(OutputSurface& output) override;
 	void takeRawScreenShot(unsigned height, const std::string& filename) override;
 
 	// EventListener
-	int signalEvent(const std::shared_ptr<const Event>& event) override;
+	int signalEvent(const Event& event) override;
 
 	// Observer<Setting>
-	void update(const Setting& setting) override;
+	void update(const Setting& setting) noexcept override;
 
+private:
 	VideoSourceSetting& videoSourceSetting;
 	VDP* vdp;
 	V9990* v9990;
-	Layer* activeLayer;
-	PostProcessor* v99x8Layer;
-	PostProcessor* v9990Layer;
-	byte value;
+	Layer* activeLayer = nullptr;
+	PostProcessor* v99x8Layer = nullptr;
+	PostProcessor* v9990Layer = nullptr;
+	byte value = 0x10;
 };
 
 } // namespace openmsx

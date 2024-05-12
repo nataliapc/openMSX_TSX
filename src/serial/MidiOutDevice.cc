@@ -10,7 +10,7 @@ static constexpr uint8_t MIDI_MSG_RESET     = 0xFF;
 
 /** Returns the size in bytes of a message that starts with the given status.
   */
-static size_t midiMessageLength(uint8_t status)
+[[nodiscard]] static constexpr size_t midiMessageLength(uint8_t status)
 {
 	if (status < 0x80) {
 		assert(false);
@@ -46,12 +46,7 @@ static size_t midiMessageLength(uint8_t status)
 	}
 }
 
-MidiOutDevice::MidiOutDevice()
-	: isSysEx(false)
-{
-}
-
-string_view MidiOutDevice::getClass() const
+std::string_view MidiOutDevice::getClass() const
 {
 	return "midi out";
 }
@@ -91,7 +86,7 @@ void MidiOutDevice::recvByte(byte value, EmuTime::param time)
 				std::cerr << "Discarding incomplete MIDI message with status "
 				             "0x" << std::hex << int(buffer[0]) << std::dec <<
 				             ", at " << buffer.size() << " of " <<
-				             midiMessageLength(buffer[0]) << " bytes" << std::endl;
+				             midiMessageLength(buffer[0]) << " bytes\n";
 				#endif
 			}
 			buffer = { value };

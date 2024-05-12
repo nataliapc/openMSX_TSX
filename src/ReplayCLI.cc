@@ -1,8 +1,7 @@
 #include "ReplayCLI.hh"
 #include "CommandLineParser.hh"
 #include "TclObject.hh"
-
-using std::string;
+#include <array>
 
 namespace openmsx {
 
@@ -10,33 +9,34 @@ ReplayCLI::ReplayCLI(CommandLineParser& parser_)
 	: parser(parser_)
 {
 	parser.registerOption("-replay", *this);
-	parser.registerFileType("omr", *this);
+	parser.registerFileType(std::array<std::string_view, 1>{"omr"}, *this);
 }
 
-void ReplayCLI::parseOption(const string& option, array_ref<string>& cmdLine)
+void ReplayCLI::parseOption(const std::string& option, std::span<std::string>& cmdLine)
 {
 	parseFileType(getArgument(option, cmdLine), cmdLine);
 }
 
-string_view ReplayCLI::optionHelp() const
+std::string_view ReplayCLI::optionHelp() const
 {
 	return "Load replay and start replaying it in view only mode";
 }
 
-void ReplayCLI::parseFileType(const string& filename,
-                              array_ref<string>& /*cmdLine*/)
+void ReplayCLI::parseFileType(const std::string& filename,
+                              std::span<std::string>& /*cmdLine*/)
 {
-	TclObject command;
-	command.addListElement("reverse");
-	command.addListElement("loadreplay");
-	command.addListElement("-viewonly");
-	command.addListElement(filename);
+	TclObject command = makeTclList("reverse", "loadreplay", "-viewonly", filename);
 	command.executeCommand(parser.getInterpreter());
 }
 
-string_view ReplayCLI::fileTypeHelp() const
+std::string_view ReplayCLI::fileTypeHelp() const
 {
 	return "openMSX replay";
+}
+
+std::string_view ReplayCLI::fileTypeCategoryName() const
+{
+	return "replay";
 }
 
 } // namespace openmsx

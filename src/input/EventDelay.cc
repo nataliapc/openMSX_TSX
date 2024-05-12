@@ -2,13 +2,16 @@
 #include "EventDistributor.hh"
 #include "MSXEventDistributor.hh"
 #include "ReverseManager.hh"
-#include "InputEvents.hh"
+#include "Event.hh"
 #include "Timer.hh"
 #include "MSXException.hh"
-#include "checked_cast.hh"
+#include "narrow.hh"
+#include "one_of.hh"
+#include "ranges.hh"
 #include "stl.hh"
 #include <cassert>
 
+#include <SDL.h>
 
 namespace openmsx {
 
@@ -20,61 +23,33 @@ EventDelay::EventDelay(Scheduler& scheduler_,
 	: Schedulable(scheduler_)
 	, eventDistributor(eventDistributor_)
 	, msxEventDistributor(msxEventDistributor_)
-	, prevEmu(EmuTime::zero)
+	, prevEmu(EmuTime::zero())
 	, prevReal(Timer::getTime())
 	, delaySetting(
 		commandController, "inputdelay",
 		"delay input to avoid key-skips", 0.0, 0.0, 10.0)
 {
-	eventDistributor.registerEventListener(
-		OPENMSX_KEY_DOWN_EVENT, *this, EventDistributor::MSX);
-	eventDistributor.registerEventListener(
-		OPENMSX_KEY_UP_EVENT,   *this, EventDistributor::MSX);
-
-	eventDistributor.registerEventListener(
-		OPENMSX_MOUSE_MOTION_EVENT,      *this, EventDistributor::MSX);
-	eventDistributor.registerEventListener(
-		OPENMSX_MOUSE_BUTTON_DOWN_EVENT, *this, EventDistributor::MSX);
-	eventDistributor.registerEventListener(
-		OPENMSX_MOUSE_BUTTON_UP_EVENT,   *this, EventDistributor::MSX);
-
-	eventDistributor.registerEventListener(
-		OPENMSX_JOY_AXIS_MOTION_EVENT, *this, EventDistributor::MSX);
-	eventDistributor.registerEventListener(
-		OPENMSX_JOY_HAT_EVENT,         *this, EventDistributor::MSX);
-	eventDistributor.registerEventListener(
-		OPENMSX_JOY_BUTTON_DOWN_EVENT, *this, EventDistributor::MSX);
-	eventDistributor.registerEventListener(
-		OPENMSX_JOY_BUTTON_UP_EVENT,   *this, EventDistributor::MSX);
+	using enum EventType;
+	for (auto type : {KEY_DOWN, KEY_UP,
+	                  MOUSE_MOTION, MOUSE_BUTTON_DOWN, MOUSE_BUTTON_UP,
+	                  JOY_AXIS_MOTION, JOY_HAT, JOY_BUTTON_DOWN, JOY_BUTTON_UP}) {
+		eventDistributor.registerEventListener(type, *this, EventDistributor::MSX);
+	}
 
 	reverseManager.registerEventDelay(*this);
 }
 
 EventDelay::~EventDelay()
 {
-	eventDistributor.unregisterEventListener(
-		OPENMSX_KEY_DOWN_EVENT, *this);
-	eventDistributor.unregisterEventListener(
-		OPENMSX_KEY_UP_EVENT,   *this);
-
-	eventDistributor.unregisterEventListener(
-		OPENMSX_MOUSE_MOTION_EVENT,      *this);
-	eventDistributor.unregisterEventListener(
-		OPENMSX_MOUSE_BUTTON_DOWN_EVENT, *this);
-	eventDistributor.unregisterEventListener(
-		OPENMSX_MOUSE_BUTTON_UP_EVENT,   *this);
-
-	eventDistributor.unregisterEventListener(
-		OPENMSX_JOY_AXIS_MOTION_EVENT, *this);
-	eventDistributor.unregisterEventListener(
-		OPENMSX_JOY_HAT_EVENT,         *this);
-	eventDistributor.unregisterEventListener(
-		OPENMSX_JOY_BUTTON_DOWN_EVENT, *this);
-	eventDistributor.unregisterEventListener(
-		OPENMSX_JOY_BUTTON_UP_EVENT,   *this);
+	using enum EventType;
+	for (auto type : {JOY_BUTTON_UP, JOY_BUTTON_DOWN, JOY_HAT, JOY_AXIS_MOTION,
+	                  MOUSE_BUTTON_UP, MOUSE_BUTTON_DOWN, MOUSE_MOTION,
+	                  KEY_UP, KEY_DOWN}) {
+		eventDistributor.unregisterEventListener(type, *this);
+	}
 }
 
-int EventDelay::signalEvent(const EventPtr& event)
+int EventDelay::signalEvent(const Event& event)
 {
 	toBeScheduledEvents.push_back(event);
 	if (delaySetting.getDouble() == 0.0) {
@@ -91,7 +66,7 @@ void EventDelay::sync(EmuTime::param curEmu)
 	auto emuDuration = curEmu - prevEmu;
 	prevEmu = curEmu;
 
-	double factor = emuDuration.toDouble() / realDuration;
+	double factor = emuDuration.toDouble() / narrow_cast<double>(realDuration);
 	EmuDuration extraDelay(delaySetting.getDouble());
 
 #if PLATFORM_ANDROID
@@ -113,19 +88,18 @@ void EventDelay::sync(EmuTime::param curEmu)
 	// take up to 2 vertical interrupts (2 screen refreshes) for the MSX to
 	// see the key press in the keyboard matrix, thus, 2/50 seconds is the
 	// minimum delay required for an MSX running in PAL mode.
-	std::vector<EventPtr> toBeRescheduledEvents;
+	std::vector<Event> toBeRescheduledEvents;
 #endif
 
 	EmuTime time = curEmu + extraDelay;
 	for (auto& e : toBeScheduledEvents) {
 #if PLATFORM_ANDROID
-		if (e->getType() == OPENMSX_KEY_DOWN_EVENT ||
-		    e->getType() == OPENMSX_KEY_UP_EVENT) {
-			auto keyEvent = checked_cast<const KeyEvent*>(e.get());
-			int maskedKeyCode = int(keyEvent->getKeyCode()) & int(Keys::K_MASK);
-			auto it = find_if(begin(nonMatchedKeyPresses), end(nonMatchedKeyPresses),
-				          EqualTupleValue<0>(maskedKeyCode));
-			if (e->getType() == OPENMSX_KEY_DOWN_EVENT) {
+		if (getType(e) == one_of(EventType::KEY_DOWN, EventType::KEY_UP)) {
+			const auto& keyEvent = get_event<KeyEvent>(e);
+			int maskedKeyCode = int(keyEvent.getKeyCode()) & int(Keys::K_MASK);
+			auto it = ranges::find(nonMatchedKeyPresses, maskedKeyCode,
+			                       [](const auto& p) { return p.first; });
+			if (getType(e) == EventType::KEY_DOWN) {
 				if (it == end(nonMatchedKeyPresses)) {
 					nonMatchedKeyPresses.emplace_back(maskedKeyCode, e);
 				} else {
@@ -133,17 +107,17 @@ void EventDelay::sync(EmuTime::param curEmu)
 				}
 			} else {
 				if (it != end(nonMatchedKeyPresses)) {
-					auto timedPressEvent = checked_cast<const TimedEvent*>(it->second.get());
-					auto timedReleaseEvent = checked_cast<const TimedEvent*>(e.get());
-					auto pressRealTime = timedPressEvent->getRealTime();
-					auto releaseRealTime = timedReleaseEvent->getRealTime();
+					const auto& timedPressEvent   = get_event<TimedEvent>(it->second);
+					const auto& timedReleaseEvent = get_event<TimedEvent>(e);
+					auto pressRealTime = timedPressEvent.getRealTime();
+					auto releaseRealTime = timedReleaseEvent.getRealTime();
 					auto deltaTime = releaseRealTime - pressRealTime;
 					if (deltaTime <= 2000000 / 50) {
 						// The key release came less then 2 MSX interrupts from the key press.
 						// Reschedule it for the next sync, with the realTime updated to now, so that it seems like the
 						// key was released now and not when android released it.
-						// Otherwise, the offset calculation for the emutime further down below will go wrong on the next sync
-						EventPtr newKeyupEvent = std::make_shared<KeyUpEvent>(keyEvent->getKeyCode(), keyEvent->getUnicode());
+						// Otherwise, the offset calculation for the emuTime further down below will go wrong on the next sync
+						Event newKeyupEvent = KeyUpEvent(keyEvent.getKeyCode());
 						toBeRescheduledEvents.push_back(newKeyupEvent);
 						continue; // continue with next to be scheduled event
 					}
@@ -153,11 +127,13 @@ void EventDelay::sync(EmuTime::param curEmu)
 		}
 #endif
 		scheduledEvents.push_back(e);
-		auto timedEvent = checked_cast<const TimedEvent*>(e.get());
-		auto eventRealTime = timedEvent->getRealTime();
-		assert(eventRealTime <= curRealTime);
-		auto offset = curRealTime - eventRealTime;
-		EmuDuration emuOffset(factor * offset);
+		const auto& sdlEvent = get_event<SdlEvent>(e);
+		uint32_t eventSdlTime = sdlEvent.getCommonSdlEvent().timestamp;
+		uint32_t sdlNow = SDL_GetTicks();
+		auto sdlOffset = int32_t(sdlNow - eventSdlTime);
+		assert(sdlOffset >= 0);
+		auto offset = 1000 * int64_t(sdlOffset); // ms -> us
+		EmuDuration emuOffset(factor * narrow_cast<double>(offset));
 		auto schedTime = (emuOffset < extraDelay)
 		               ? time - emuOffset
 		               : curEmu;
@@ -167,9 +143,7 @@ void EventDelay::sync(EmuTime::param curEmu)
 	toBeScheduledEvents.clear();
 
 #if PLATFORM_ANDROID
-	toBeScheduledEvents.insert(end(toBeScheduledEvents),
-		make_move_iterator(begin(toBeRescheduledEvents)),
-		make_move_iterator(end  (toBeRescheduledEvents)));
+	append(toBeScheduledEvents, std::move(toBeRescheduledEvents));
 #endif
 }
 
@@ -178,7 +152,7 @@ void EventDelay::executeUntil(EmuTime::param time)
 	try {
 		auto event = std::move(scheduledEvents.front());
 		scheduledEvents.pop_front();
-		msxEventDistributor.distributeEvent(std::move(event), time);
+		msxEventDistributor.distributeEvent(event, time);
 	} catch (MSXException&) {
 		// ignore
 	}

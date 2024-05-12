@@ -2,32 +2,36 @@
 #define MSXFDC_HH
 
 #include "MSXDevice.hh"
+#include "DiskDrive.hh"
+#include "Rom.hh"
+#include <array>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace openmsx {
-
-class DiskDrive;
-class Rom;
 
 class MSXFDC : public MSXDevice
 {
 public:
 	void powerDown(EmuTime::param time) override;
-	byte readMem(word address, EmuTime::param time) override;
-	byte peekMem(word address, EmuTime::param time) const override;
-	const byte* getReadCacheLine(word start) const override;
+	[[nodiscard]] byte readMem(word address, EmuTime::param time) override;
+	[[nodiscard]] byte peekMem(word address, EmuTime::param time) const override;
+	[[nodiscard]] const byte* getReadCacheLine(word start) const override;
+
+	void getExtraDeviceInfo(TclObject& result) const override;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 protected:
 	explicit MSXFDC(const DeviceConfig& config, const std::string& romId = {},
-	                bool needROM = true);
-	~MSXFDC();
+	                bool needROM = true,
+	                DiskDrive::TrackMode trackMode = DiskDrive::TrackMode::NORMAL);
 
-	std::unique_ptr<Rom> rom;
-	std::unique_ptr<DiskDrive> drives[4];
+protected:
+	std::optional<Rom> rom;
+	std::array<std::unique_ptr<DiskDrive>, 4> drives;
 };
 
 REGISTER_BASE_NAME_HELPER(MSXFDC, "FDC");

@@ -1,13 +1,11 @@
-<?xml version="1.0" encoding="iso-8859-1" ?>
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML Basic 1.0//EN"
-"http://www.w3.org/TR/xhtml-basic/xhtml-basic10.dtd">
-
-<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<!DOCTYPE html>
+<html lang="en">
 <head>
-<link title="Purple" rel="stylesheet" href="manual-purple.css" type="text/css" />
-<link title="Minty" rel="alternate stylesheet" href="manual-minty.css" type="text/css" />
-<link title="Plain" rel="alternate stylesheet" href="manual.css" type="text/css" />
-<title>openMSX Compilation Guide</title>
+  <meta charset="utf-8">
+  <link title="Purple" rel="stylesheet" href="manual-purple.css" type="text/css">
+  <link title="Minty" rel="alternate stylesheet" href="manual-minty.css" type="text/css">
+  <link title="Plain" rel="alternate stylesheet" href="manual.css" type="text/css">
+  <title>openMSX Compilation Guide</title>
 </head>
 
 <body>
@@ -48,7 +46,7 @@
 			<li><a class="internal" href="#installstandalone">5.2 Installation</a></li>
 		</ol>
 	</li>
-	<li><a class="internal" href="#androidbuild">6. Android build</a>
+	<li><a class="internal" href="#androidbuild">6. Android build (openMSX 0.15.0 only)</a>
 		<ol class="toc">
 			<li><a class="internal" href="#androidbuildintegrate">6.1 Integrate SDL Android build with openMSX build</a></li>
 			<li><a class="internal" href="#androidcompilationandinstallation">6.2 Compilation and installation</a></li>
@@ -142,13 +140,10 @@ If you have compiled packages from source before, you probably have some of thes
 <dl>
 
 <dt><a class="external" href="http://www.python.org/download/">Python</a></dt>
-<dd>A compact and dynamic programming language. Version 2.6 or later is
-required. However, Python 3.0 contains incompatible changes in the language, so
-make sure you install a version from the 2.x series. Eventually Python will
-replace Make completely in our build system, but at the moment both are
-required. Note: on Windows 7 you may have to add the path to Python (e.g. <code>C:\Python26</code>) to your <code>PATH</code> manually.</dd>
-<dt>There are three compilers that are supported to build openMSX: GCC, clang
-and Visual C++. The GCC compiler builds openMSX on all supported platforms, clang is the default on macOS, while Visual C++ is the primary compiler for Windows.</dt>
+<dd>A compact and dynamic programming language. The latest version should work fine. Note: on Windows 7 you may have to add the path to Python (e.g. <code>C:\Python</code>) to your <code>PATH</code> manually.</dd>
+<dt>C++ compiler</dt>
+<dd>There are three compilers that are supported to build openMSX: GCC, clang
+and Visual C++. The GCC compiler builds openMSX on all supported platforms, clang is the default on macOS, while Visual C++ is the primary compiler for Windows.</dd>
 
 </dl>
 
@@ -165,7 +160,7 @@ Version 3.79 or higher should suffice, but 3.80 or higher is recommended and eve
 
 <dt>g++</dt>
 <dd>The GNU C++ compiler.
-Version 4.8 or later is required to build openMSX.
+At least version 10 is required to build openMSX. Version 11 or higher is recommended.
 </dd>
 
 </dl>
@@ -191,16 +186,9 @@ GCW Zero toolchain. This toolchain is for x86 Linux; if you have an x86 machine 
 Install Xcode from Apple, which you can find in the Mac App Store. The openMSX build is not done inside the Xcode IDE, but it uses the SDK and command line tools that are provided by Xcode.
 </p>
 
-<p>
-<strong>Note:</strong> Currently Xcode 10 and higher have a
-<a href="https://github.com/openMSX/openMSX/issues/1126">known issue</a> and are
-not supported. You can get the older Xcode 9.4.1 distribution from the
-<a href="https://developer.apple.com/download/more/">Apple Developer Portal</a>.
-</p>
-
 <h4>Visual C++</h4>
 
-<p>To build with Visual C++ you need to have the latest version of it installed. Currently, this is 2017.</p>
+<p>To build with Visual C++ you need to have the latest version of it installed. Currently, this is 2019.</p>
 
 <p>Use this way to obtain the Visual C++ compiler:</p>
 <dl>
@@ -220,7 +208,8 @@ component won't install, that's not a problem, just continue.</dd>
 
 </dl>
 
-<h4>Android</h4>
+<h4>Android (openMSX 0.15.0 only)</h4>
+<p><strong>Warning:</strong> the build instructions here are <em>only</em> valid for openMSX 0.15.0!</p>
 <p><strong>Warning:</strong> the build of the Android version is only supported on a Linux or Unix host platform. If you want
 to build the Android version on a Windows host, then you must install a virtual machine with a Linux distribution on it. This is because the Android build depends on the "commandergenius" SDL Android port, which can only be build on Linux and Unix platforms.</p>
 
@@ -294,7 +283,7 @@ openMSX depends on the following libraries:
 <dl>
 
 <dt><a class="external" href="http://www.libsdl.org/">SDL</a></dt>
-<dd>Simple DirectMedia Layer, a cross-platform library that provides low-level access to video, audio and input devices.</dd>
+<dd>Simple DirectMedia Layer version 2, a cross-platform library that provides low-level access to video, audio and input devices.</dd>
 
 <dt><a class="external" href="http://www.libsdl.org/projects/SDL_ttf/">SDL_ttf</a></dt>
 <dd>Library that provides support for TrueType Fonts in SDL.</dd>
@@ -306,7 +295,7 @@ openMSX depends on the following libraries:
 <dd>Library for file compression.</dd>
 
 <dt><a class="external" href="http://www.tcl.tk/">Tcl</a></dt>
-<dd>The Tool Command Language, an embeddable scripting language. openMSX requires Tcl 8.5; older versions will not work.</dd>
+<dd>The Tool Command Language, an embeddable scripting language. openMSX requires Tcl 8.6; older versions will not work.</dd>
 
 <dt><a class="external" href="http://www.opengl.org/">OpenGL</a> (optional)</dt>
 <dd>Library for accelerated graphics. It is likely that OpenGL is already installed on your system. If not, you should probably get the OpenGL implementation from the manufacturer of your graphics card. On Linux, using <a class="external" href="http://www.mesa3d.org/">Mesa</a> with a DRI driver can be an alternative.</dd>
@@ -343,13 +332,16 @@ href="#getsource">Getting the source code</a> chapter.
 
 <h5>Debian and Ubuntu Linux</h5>
 <p>
-You can easily install all required packages using the "build dependencies" feature of the APT package manager:
+You can easily install all required packages using the "build dependencies" feature of the APT package manager (if you have source packages in your package sources list):
 </p>
 <div class="commandline">
 sudo apt-get build-dep openmsx
 </div>
 <p>
 Do note that if the Debian/Ubuntu package that is in the version of the distribution you are currently running is older than the openMSX version you are trying to compile (which is typically so), you might miss some dependencies that were added in the newer version. The build system will complain and you will have to install the remaining (missing) packages manually. Read on to get some tips about that.
+</p>
+<p>
+Typical dependending packages are: <code>libsdl2-ttf-dev</code> <code>libogg-dev</code>  <code>tcl-dev</code>  <code>libogg-dev</code>  <code>libpng-dev</code>  <code>libtheora-dev</code>  <code>libvorbis-dev</code>  <code>libsdl2-dev</code>. The complete list for Debian (which will be very very similar) is <a class="external" href="https://packages.debian.org/source/sid/openmsx">here</a>.
 </p>
 
 <h5>OpenDingux</h5>
@@ -738,6 +730,27 @@ The final output files will be produced in <code>derived/&lt;cpu&gt;-&lt;os&gt;-
 <p>
 The final output is a DMG file (Mac disk image) containing the openMSX application folder and documentation. This file is internet-enabled, which means it will be automatically mounted after it is downloaded.
 </p>
+<p>
+If you have a Apple Developers ID, you can automatically sign the app bundle by providing the following environment variable in your shell, before building the app bundle:
+</p>
+<div class="commandline">
+    <pre>
+export CODE_SIGN_IDENTITY=&lt;your Apple Application Developer ID here&gt;
+make staticbindist
+    </pre>
+</div>
+<p>
+To find the exact string, needed for the CODE_SIGN_IDENTITY, you can use the command:
+</p>
+<div class="commandline">
+security find-identity
+</div>
+<p>
+Check if the code signing was successful with:
+</p>
+<div class="commandline">
+codesign -dv --verbose=4 derived/&lt;cpu&gt;-&lt;os&gt;-&lt;flavour&gt;-3rd/bindist/openMSX.app
+</div>
 
 <h5>Microsoft Windows (MinGW)</h5>
 
@@ -839,7 +852,9 @@ The following step creates .zip and .msi installation packages for openMSX on Wi
 
 <p>Just copy the OPK file into the <code>apps</code> directory.</p>
 
-<h2><a id="androidbuild">6. Android build</a></h2>
+<h2><a id="androidbuild">6. Android build (openMSX 0.15.0 only)</a></h2>
+
+<p><strong>Warning:</strong> the build instructions here are <em>only</em> valid for openMSX 0.15.0!</p>
 
 <p>
 This chapter describes how to build an Android APK package of openMSX for Android and install it
@@ -1004,8 +1019,8 @@ If you encounter problems, you have several options:
 
 <ol>
 <li>
-Go to our IRC channel: <code>#openMSX</code> on <code>irc.freenode.net</code>
-and ask your question there. Also reachable via <a class="external" href="http://webchat.freenode.net/?channels=openMSX">webchat</a>! If you don't get a reply immediately, please stick around for a while, or use one of the other contact options. The majority of the developers lives in time zone GMT+1. You may get no response if you contact them in the middle of the night...
+Go to our IRC channel: <a class="external" href="ircs://irc.libera.chat:6697/#openMSX"><code>#openMSX</code> on <code>libera.chat</code></a>
+and ask your question there. Also reachable via <a class="external" href="https://web.libera.chat/#openMSX">webchat</a>! If you don't get a reply immediately, please stick around for a while, or use one of the other contact options. The majority of the developers lives in time zone GMT+1. You may get no response if you contact them in the middle of the night...
 </li>
 <li>
 Post a message on <a class="external" href="http://www.msx.org/forum/semi-msx-talk/openmsx">the openMSX forum on MRC</a>.

@@ -4,8 +4,13 @@
 #include "CPUClock.hh"
 #include "CPURegs.hh"
 #include "Clock.hh"
-#include "likely.hh"
+
 #include "inline.hh"
+#include "narrow.hh"
+#include "one_of.hh"
+#include "xrange.hh"
+
+#include <array>
 
 namespace openmsx {
 
@@ -28,12 +33,11 @@ public:
 	}
 
 protected:
-	template<bool B> struct Normalize { static const bool value = B; };
+	template<bool B> struct Normalize { static constexpr bool value = B; };
 
-	static const int CLOCK_FREQ = 7159090;
-
-	ALWAYS_INLINE unsigned haltStates() const { return 1; } // TODO check this
-	ALWAYS_INLINE bool isR800() const { return true; }
+	static constexpr int CLOCK_FREQ = 7159090;
+	static constexpr unsigned HALT_STATES = 1; // TODO check this
+	static constexpr bool IS_R800 = true;
 
 	R800TYPE(EmuTime::param time, Scheduler& scheduler_)
 		: CPUClock(time, scheduler_)
@@ -42,25 +46,25 @@ protected:
 		R800ForcePageBreak();
 
 		// TODO currently hardcoded, move to config file?
-		for (int page = 0; page < 4; ++page) {
-			for (int prim = 0; prim < 4; ++prim) {
-				for (int sec = 0; sec < 4; ++sec) {
-					unsigned val;
-					if ((prim == 1) || (prim == 2)) {
-						// external slot
-						val = 2;
-					} else if ((prim == 3) && (sec == 0)) {
-						// internal RAM
-						val = 0;
-					} else {
-						// internal ROM
-						val = 1;
-					}
-					extraMemoryDelays[page][prim][sec] = val;
+		for (auto page : xrange(4)) {
+			for (auto prim : xrange(4)) {
+				for (auto sec : xrange(4)) {
+					extraMemoryDelays[page][prim][sec] = [&] {
+						if (prim == one_of(1, 2)) {
+							// external slot
+							return 2;
+						} else if ((prim == 3) && (sec == 0)) {
+							// internal RAM
+							return 0;
+						} else {
+							// internal ROM
+							return 1;
+						}
+					}();
 				}
 			}
 		}
-		for (int page = 0; page < 4; ++page) {
+		for (auto page : xrange(4)) {
 			extraMemoryDelay[page] = extraMemoryDelays[page][0][0];
 		}
 	}
@@ -70,57 +74,57 @@ protected:
 		lastPage = -1;
 	}
 
-	template <bool PRE_PB, bool POST_PB>
+	template<bool PRE_PB, bool POST_PB>
 	ALWAYS_INLINE void PRE_MEM(unsigned address)
 	{
-		int newPage = address >> 8;
-		if (PRE_PB) {
+		int newPage = narrow<int>(address >> 8);
+		if constexpr (PRE_PB) {
 			// there is a statically predictable page break at this
 			// point -> 'add(1)' moved to static cost table
 		} else {
-			if (unlikely(newPage != lastPage) ||
-			    unlikely(extraMemoryDelay[address >> 14])) {
+			if ((newPage != lastPage) ||
+			    (extraMemoryDelay[address >> 14])) [[unlikely]] {
 				add(1);
 			}
 		}
-		if (!POST_PB) {
+		if constexpr (!POST_PB) {
 			lastPage = newPage;
 		}
 	}
-	template <bool POST_PB>
+	template<bool POST_PB>
 	ALWAYS_INLINE void POST_MEM(unsigned address)
 	{
 		add(extraMemoryDelay[address >> 14]);
-		if (POST_PB) {
+		if constexpr (POST_PB) {
 			R800ForcePageBreak();
 		}
 	}
-	template <bool PRE_PB, bool POST_PB>
+	template<bool PRE_PB, bool POST_PB>
 	ALWAYS_INLINE void PRE_WORD(unsigned address)
 	{
-		int newPage = address >> 8;
-		if (PRE_PB) {
+		int newPage = narrow<int>(address >> 8);
+		if constexpr (PRE_PB) {
 			// there is a statically predictable page break at this
 			// point -> 'add(1)' moved to static cost table
-			if (unlikely(extraMemoryDelay[address >> 14])) {
+			if (extraMemoryDelay[address >> 14]) [[unlikely]] {
 				add(1);
 			}
 		} else {
-			if (unlikely(extraMemoryDelay[address >> 14])) {
+			if (extraMemoryDelay[address >> 14]) [[unlikely]] {
 				add(2);
-			} else if (unlikely(newPage != lastPage)) {
+			} else if (newPage != lastPage) [[unlikely]] {
 				add(1);
 			}
 		}
-		if (!POST_PB) {
+		if constexpr (!POST_PB) {
 			lastPage = newPage;
 		}
 	}
-	template <bool POST_PB>
+	template<bool POST_PB>
 	ALWAYS_INLINE void POST_WORD(unsigned address)
 	{
 		add(2 * extraMemoryDelay[address >> 14]);
-		if (POST_PB) {
+		if constexpr (POST_PB) {
 			R800ForcePageBreak();
 		}
 	}
@@ -131,9 +135,9 @@ protected:
 		//  duration:  256/1024KB  13.5 clocks
 		//             512KB       21.5 clocks
 		// But 26/210 matches measurements much better
-		//   (loosly based on old measurements by Jon on his analogue scope)
+		//   (loosely based on old measurements by Jon on his analogue scope)
 		EmuTime time = getTimeFast();
-		if (unlikely(lastRefreshTime.getTicksTill_fast(time) >= 210)) {
+		if (lastRefreshTime.getTicksTill_fast(time) >= 210) [[unlikely]] {
 			R800RefreshSlow(time, R); // slow-path not inline
 		}
 	}
@@ -141,7 +145,7 @@ protected:
 	{
 		do {
 			lastRefreshTime += 210;
-		} while (unlikely(lastRefreshTime.getTicksTill_fast(time) >= 210));
+		} while (lastRefreshTime.getTicksTill_fast(time) >= 210); [[unlikely]]
 		waitForEvenCycle(0);
 		add(25);
 		R800ForcePageBreak(); // TODO check this
@@ -158,17 +162,17 @@ protected:
 		lastRefreshTime.reset(time);
 	}
 
-	ALWAYS_INLINE void setMemPtr(unsigned) { /* nothing*/ }
-	ALWAYS_INLINE unsigned getMemPtr() const { return 0; } // dummy value
+	ALWAYS_INLINE void setMemPtr(unsigned /*x*/) const { /* nothing*/ }
+	[[nodiscard]] ALWAYS_INLINE unsigned getMemPtr() const { return 0; } // dummy value
 
-	static const int I  = 6; // cycles for an I/O operation
-	static const int O  = 1; // wait for one cycle and wait for next even
-	                         // clock cycle (to sync with slower IO bus)
-	                         // the latter part must be implemented
-	                         // dynamically (not here in static tables)
-	static const int P  = 1; // cycles for a (statically known) page-break
+	static constexpr int I  = 6; // cycles for an I/O operation
+	static constexpr int O  = 1; // wait for one cycle and wait for next even
+	                             // clock cycle (to sync with slower IO bus)
+	                             // the latter part must be implemented
+	                             // dynamically (not here in static tables)
+	static constexpr int P  = 1; // cycles for a (statically known) page-break
 
-	static const int
+	static constexpr int
 		CC_LD_A_SS   = 1+P+1, CC_LD_A_SS_1  = 1+P,
 		CC_LD_A_NN   = 3+P+1, CC_LD_A_NN_1  = 1, CC_LD_A_NN_2  = 3+P,
 		CC_LD_A_I    = 2,
@@ -268,9 +272,9 @@ protected:
 	void serialize(Archive& ar, unsigned version)
 	{
 		CPUClock::serialize(ar, version);
-		ar.serialize("lastRefreshTime", lastRefreshTime);
-		ar.serialize("lastPage", lastPage);
-		ar.serialize("extraMemoryDelay", extraMemoryDelay);
+		ar.serialize("lastRefreshTime",  lastRefreshTime,
+		             "lastPage",         lastPage,
+		             "extraMemoryDelay", extraMemoryDelay);
 
 		// don't serialize 'extraMemoryDelays', is initialized in
 		// constructor and setDRAMmode()
@@ -280,8 +284,8 @@ private:
 	Clock<CLOCK_FREQ> lastRefreshTime;
 	int lastPage;
 
-	unsigned extraMemoryDelays[4][4][4];
-	unsigned extraMemoryDelay[4];
+	std::array<std::array<std::array<unsigned, 4>, 4>, 4> extraMemoryDelays;
+	std::array<unsigned, 4> extraMemoryDelay;
 };
 
 } // namespace openmsx

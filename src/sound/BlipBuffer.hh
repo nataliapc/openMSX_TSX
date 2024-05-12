@@ -8,6 +8,7 @@
 #define BLIPBUFFER_HH
 
 #include "FixedPoint.hh"
+#include <array>
 
 namespace openmsx {
 
@@ -24,22 +25,23 @@ public:
 
 	// Update amplitude of waveform at given time. Time is in output sample
 	// units and since the last time readSamples() was called.
-	void addDelta(TimeIndex time, int delta);
+	void addDelta(TimeIndex time, float delta);
 
 	// Read the given amount of samples into destination buffer.
-	template <unsigned PITCH>
-	bool readSamples(int* out, unsigned samples);
+	template<size_t PITCH>
+	bool readSamples(float* out, size_t samples);
 
 private:
-	template <unsigned PITCH>
-	void readSamplesHelper(int* out, unsigned samples) __restrict;
+	template<size_t PITCH>
+	void readSamplesHelper(float* out, size_t samples);
 
-	static constexpr unsigned BUFFER_SIZE = 1 << 14;
-	static constexpr unsigned BUFFER_MASK = BUFFER_SIZE - 1;
-	int buffer[BUFFER_SIZE];
-	unsigned offset;
-	int accum;
-	int availSamp;
+private:
+	static constexpr size_t BUFFER_SIZE = 1 << 14;
+	static constexpr size_t BUFFER_MASK = BUFFER_SIZE - 1;
+	std::array<float, BUFFER_SIZE> buffer;
+	size_t offset = 0;
+	ptrdiff_t availSamp = 0;
+	float accum = 0.0f;
 };
 
 } // namespace openmsx

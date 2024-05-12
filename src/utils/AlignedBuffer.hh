@@ -1,10 +1,13 @@
 #ifndef ALIGNEDBUFFER_HH
 #define ALIGNEDBUFFER_HH
 
-#include <type_traits>
+#include <array>
+#include <bit>
 #include <cassert>
+#include <concepts>
 #include <cstdint>
 #include <cstddef>
+#include <type_traits>
 
 namespace openmsx {
 
@@ -26,27 +29,27 @@ namespace openmsx {
 //   }
 class alignas(std::max_align_t) AlignedBuffer
 {
-public:
-	static const size_t ALIGNMENT = alignof(std::max_align_t);
-
-	operator       uint8_t*()       { return p(); }
-	operator const uint8_t*() const { return p(); }
-
-	      uint8_t* operator+(ptrdiff_t i)       { return p() + i; }
-	const uint8_t* operator+(ptrdiff_t i) const { return p() + i; }
-
-	      uint8_t& operator[](int           i)       { return *(p() + i); }
-	const uint8_t& operator[](int           i) const { return *(p() + i); }
-	      uint8_t& operator[](unsigned int  i)       { return *(p() + i); }
-	const uint8_t& operator[](unsigned int  i) const { return *(p() + i); }
-	      uint8_t& operator[](long          i)       { return *(p() + i); }
-	const uint8_t& operator[](long          i) const { return *(p() + i); }
-	      uint8_t& operator[](unsigned long i)       { return *(p() + i); }
-	const uint8_t& operator[](unsigned long i) const { return *(p() + i); }
-
 private:
-	      uint8_t* p()       { return reinterpret_cast<      uint8_t*>(this); }
-	const uint8_t* p() const { return reinterpret_cast<const uint8_t*>(this); }
+	[[nodiscard]] auto* p()       { return std::bit_cast<      uint8_t*>(this); }
+	[[nodiscard]] auto* p() const { return std::bit_cast<const uint8_t*>(this); }
+
+public:
+	static constexpr auto ALIGNMENT = alignof(std::max_align_t);
+
+	[[nodiscard]] operator       uint8_t*()       { return p(); }
+	[[nodiscard]] operator const uint8_t*() const { return p(); }
+	[[nodiscard]]       auto* data()       { return p(); }
+	[[nodiscard]] const auto* data() const { return p(); }
+
+	template<std::integral I>
+	[[nodiscard]]       auto* operator+(I i)       { return p() + i; }
+	template<std::integral I>
+	[[nodiscard]] const auto* operator+(I i) const { return p() + i; }
+
+	template<std::integral I>
+	[[nodiscard]]       auto& operator[](I i)       { return *(p() + i); }
+	template<std::integral I>
+	[[nodiscard]] const auto& operator[](I i) const { return *(p() + i); }
 };
 static_assert(alignof(AlignedBuffer) == AlignedBuffer::ALIGNMENT, "must be aligned");
 
@@ -56,12 +59,16 @@ static_assert(alignof(AlignedBuffer) == AlignedBuffer::ALIGNMENT, "must be align
 template<size_t N> class AlignedByteArray : public AlignedBuffer
 {
 public:
-	size_t size() const { return N; }
-	      uint8_t* data()       { return dat; }
-	const uint8_t* data() const { return dat; }
+	[[nodiscard]] auto  size()  const { return dat.size(); }
+	[[nodiscard]] auto* data()        { return dat.data(); }
+	[[nodiscard]] auto* data()  const { return dat.data(); }
+	[[nodiscard]] auto  begin()       { return dat.begin(); }
+	[[nodiscard]] auto  begin() const { return dat.begin(); }
+	[[nodiscard]] auto  end()         { return dat.end(); }
+	[[nodiscard]] auto  end()   const { return dat.end(); }
 
 private:
-	uint8_t dat[N];
+	std::array<uint8_t, N> dat;
 
 };
 static_assert(alignof(AlignedByteArray<13>) == AlignedBuffer::ALIGNMENT,
@@ -74,13 +81,13 @@ static_assert(sizeof(AlignedByteArray<32>) == 32,
   * When asserts are enabled this checks whether the original pointer is
   * properly aligned to point to the destination type.
   */
-template<typename T> static inline T aligned_cast(void* p)
+template<typename T> [[nodiscard]] static inline T aligned_cast(void* p)
 {
-	static_assert(std::is_pointer<T>::value,
+	static_assert(std::is_pointer_v<T>,
 	              "can only perform aligned_cast on pointers");
-	assert((reinterpret_cast<uintptr_t>(p) %
+	assert((std::bit_cast<uintptr_t>(p) %
 	        alignof(std::remove_pointer_t<T>)) == 0);
-	return reinterpret_cast<T>(p);
+	return std::bit_cast<T>(p);
 }
 
 } //namespace openmsx

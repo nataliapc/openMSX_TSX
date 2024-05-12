@@ -4,10 +4,15 @@
 /** Assign new value to some variable and restore the original value
   * when this object goes out of scope.
   */
-template <typename T> class ScopedAssign
+template<typename T> class ScopedAssign
 {
 public:
-	ScopedAssign(T& var_, T newValue)
+	ScopedAssign(const ScopedAssign&) = delete;
+	ScopedAssign(ScopedAssign&&) = delete;
+	ScopedAssign& operator=(const ScopedAssign&) = delete;
+	ScopedAssign& operator=(ScopedAssign&&) = delete;
+
+	[[nodiscard]] ScopedAssign(T& var_, T newValue)
 		: var(var_)
 	{
 		oldValue = var;

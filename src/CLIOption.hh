@@ -1,35 +1,48 @@
 #ifndef CLIOPTION_HH
 #define CLIOPTION_HH
 
-#include "array_ref.hh"
-#include "string_view.hh"
+#include <span>
+#include <string_view>
 
 namespace openmsx {
 
 class CLIOption
 {
 public:
+	CLIOption(const CLIOption&) = delete;
+	CLIOption(CLIOption&&) = delete;
+	CLIOption& operator=(const CLIOption&) = delete;
+	CLIOption& operator=(CLIOption&&) = delete;
+
 	virtual void parseOption(const std::string& option,
-	                         array_ref<std::string>& cmdLine) = 0;
+	                         std::span<std::string>& cmdLine) = 0;
 	virtual void parseDone() {}
-	virtual string_view optionHelp() const = 0;
+	[[nodiscard]] virtual std::string_view optionHelp() const = 0;
 
 protected:
-	~CLIOption() {}
-	std::string getArgument(const std::string& option,
-	                        array_ref<std::string>& cmdLine) const;
-	std::string peekArgument(const array_ref<std::string>& cmdLine) const;
+	CLIOption() = default;
+	~CLIOption() = default;
+	[[nodiscard]] static std::string getArgument(
+		const std::string& option, std::span<std::string>& cmdLine);
+	[[nodiscard]] static std::string peekArgument(const std::span<std::string>& cmdLine);
 };
 
 class CLIFileType
 {
 public:
+	CLIFileType(const CLIFileType&) = delete;
+	CLIFileType(CLIFileType&&) = delete;
+	CLIFileType& operator=(const CLIFileType&) = delete;
+	CLIFileType& operator=(CLIFileType&&) = delete;
+
 	virtual void parseFileType(const std::string& filename,
-	                           array_ref<std::string>& cmdLine) = 0;
-	virtual string_view fileTypeHelp() const = 0;
+	                           std::span<std::string>& cmdLine) = 0;
+	[[nodiscard]] virtual std::string_view fileTypeCategoryName() const = 0;
+	[[nodiscard]] virtual std::string_view fileTypeHelp() const = 0;
 
 protected:
-	~CLIFileType() {}
+	CLIFileType() = default;
+	~CLIFileType() = default;
 };
 
 } // namespace openmsx

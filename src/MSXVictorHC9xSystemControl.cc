@@ -21,7 +21,6 @@ namespace openmsx {
 MSXVictorHC9xSystemControl::MSXVictorHC9xSystemControl(const DeviceConfig& config)
 	: MSXDevice(config)
 {
-	systemControlRegister = 0x80;
 }
 
 byte MSXVictorHC9xSystemControl::readMem(word address, EmuTime::param time)
@@ -39,7 +38,13 @@ byte MSXVictorHC9xSystemControl::peekMem(word address, EmuTime::param /*time*/) 
 void MSXVictorHC9xSystemControl::writeMem(word address, byte value, EmuTime::param /*time*/) {
 	(void)address; // avoid warning for non-assert compiles
 	assert (address == 0x7FFD);
-	systemControlRegister = (value & 0x3F) | (0x80);
+	systemControlRegister = (value & 0x3F) | 0x80;
+}
+
+bool MSXVictorHC9xSystemControl::allowUnaligned() const
+{
+	// OK, because this device doesn't call any 'fillDeviceXXXCache()'functions.
+	return true;
 }
 
 template<typename Archive>

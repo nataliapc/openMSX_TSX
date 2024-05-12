@@ -7,17 +7,17 @@
  * This is a 1024kB mapper, it's divided in 128 pages of 8kB. The last 512kB
  * can also be mapped as 256 pages of 2kB. There is 16kB SRAM.
  *
- * Main bankswitch registers:
+ * Main bank-switch registers:
  *   bank 0,  region: [0x4000-0x5FFF],  switch addr: 0x4FFF
  *   bank 1,  region: [0x6000-0x7FFF],  switch addr: 0x6FFF
  *   bank 2,  region: [0x8000-0x9FFF],  switch addr: 0x8FFF
  *   bank 3,  region: [0xA000-0xBFFF],  switch addr: 0xAFFF
- * Sub-bankswitch registers:
+ * Sub-bank-switch registers:
  *   bank 0,  region: [0x7000-0x77FF],  switch addr: 0x77FF
  *   bank 1,  region: [0x7800-0x7FFF],  switch addr: 0x7FFF
  * Note that the two sub-banks overlap with main bank 1!
  *
- * The upper bit (0x80) of the first two main bankswitch registers are special:
+ * The upper bit (0x80) of the first two main bank-switch registers are special:
  *   bank 0, bit7   SRAM      enabled in [0x0000-0x3FFF]  (1=enabled)
  *   bank 1, bit7   submapper enabled in [0x7000-0x7FFF]  (1=enabled)
  * If enabled, the submapper shadows (part of) main bank 1.
@@ -27,7 +27,9 @@
 #include "CacheLine.hh"
 #include "SRAM.hh"
 #include "MSXException.hh"
+#include "one_of.hh"
 #include "serialize.hh"
+#include "xrange.hh"
 #include <memory>
 
 namespace openmsx {
@@ -35,7 +37,7 @@ namespace openmsx {
 RomHalnote::RomHalnote(const DeviceConfig& config, Rom&& rom_)
 	: Rom8kBBlocks(config, std::move(rom_))
 {
-	if (rom.getSize() != 0x100000) {
+	if (rom.size() != 0x100000) {
 		throw MSXException(
 			"Rom for HALNOTE mapper must be exactly 1MB in size.");
 	}
@@ -51,7 +53,7 @@ void RomHalnote::reset(EmuTime::param /*time*/)
 
 	setUnmapped(0);
 	setUnmapped(1);
-	for (int i = 2; i < 6; i++) {
+	for (auto i : xrange(2, 6)) {
 		setRom(i, 0);
 	}
 	setUnmapped(6);
@@ -83,19 +85,19 @@ void RomHalnote::writeMem(word address, byte value, EmuTime::param /*time*/)
 			sram->write(address, value);
 		}
 	} else if (address < 0xC000) {
-		if ((address == 0x77FF) || (address == 0x7FFF)) {
+		if (address == one_of(0x77FF, 0x7FFF)) {
 			// sub-mapper bank switch region
 			int subBank = address < 0x7800 ? 0 : 1;
 			if (subBanks[subBank] != value) {
 				subBanks[subBank] = value;
 				if (subMapperEnabled) {
-					invalidateMemCache(
+					invalidateDeviceRCache(
 						0x7000 + subBank * 0x800, 0x800);
 				}
 			}
 		} else if ((address & 0x1FFF) == 0x0FFF) {
 			// normal bank switch region
-			int bank = address >> 13; // 2-5
+			auto bank = address >> 13; // 2-5
 			setRom(bank, value);
 			if (bank == 2) {
 				// sram enable/disable
@@ -109,13 +111,14 @@ void RomHalnote::writeMem(word address, byte value, EmuTime::param /*time*/)
 						setUnmapped(0);
 						setUnmapped(1);
 					}
+					// 'R' is already handled
+					invalidateDeviceWCache(0x0000, 0x4000);
 				}
 			} else if (bank == 3) {
 				// sub-mapper enable/disable
-				bool newSubMapperEnabled = (value & 0x80) != 0;
-				if (newSubMapperEnabled != subMapperEnabled) {
-					subMapperEnabled = newSubMapperEnabled;
-					invalidateMemCache(0x7000, 0x1000);
+				subMapperEnabled = (value & 0x80) != 0;
+				if (subMapperEnabled) {
+					invalidateDeviceRCache(0x7000, 0x1000);
 				}
 			}
 		}
@@ -130,8 +133,8 @@ byte* RomHalnote::getWriteCacheLine(word address) const
 			return nullptr;
 		}
 	} else if (address < 0xC000) {
-		if (((address & CacheLine::HIGH) == (0x77FF & CacheLine::HIGH)) ||
-		    ((address & CacheLine::HIGH) == (0x7FFF & CacheLine::HIGH))) {
+		if ((address & CacheLine::HIGH) == one_of(0x77FF & CacheLine::HIGH,
+		                                          0x7FFF & CacheLine::HIGH)) {
 			// sub-mapper bank switch region
 			return nullptr;
 		} else if ((address & 0x1FFF & CacheLine::HIGH) ==
@@ -140,16 +143,16 @@ byte* RomHalnote::getWriteCacheLine(word address) const
 			return nullptr;
 		}
 	}
-	return unmappedWrite;
+	return unmappedWrite.data();
 }
 
 template<typename Archive>
 void RomHalnote::serialize(Archive& ar, unsigned /*version*/)
 {
 	ar.template serializeBase<Rom8kBBlocks>(*this);
-	ar.serialize("subBanks", subBanks);
-	ar.serialize("sramEnabled", sramEnabled);
-	ar.serialize("subMapperEnabled", subMapperEnabled);
+	ar.serialize("subBanks",         subBanks,
+	             "sramEnabled",      sramEnabled,
+	             "subMapperEnabled", subMapperEnabled);
 
 }
 INSTANTIATE_SERIALIZE_METHODS(RomHalnote);

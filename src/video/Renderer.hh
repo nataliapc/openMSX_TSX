@@ -3,6 +3,7 @@
 
 #include "VRAMObserver.hh"
 #include "openmsx.hh"
+#include <array>
 #include <cstdint>
 
 namespace openmsx {
@@ -25,9 +26,9 @@ public:
 	virtual ~Renderer() = default;
 
 	/** See VDP::getPostProcessor. */
-	virtual PostProcessor* getPostProcessor() const = 0;
+	[[nodiscard]] virtual PostProcessor* getPostProcessor() const = 0;
 
-	/** Reinitialise Renderer state.
+	/** Reinitialize Renderer state.
 	  */
 	virtual void reInit() = 0;
 
@@ -61,25 +62,25 @@ public:
 	  * @param color The new foreground color.
 	  * @param time The moment in emulated time this change occurs.
 	  */
-	virtual void updateForegroundColor(int color, EmuTime::param time) = 0;
+	virtual void updateForegroundColor(byte color, EmuTime::param time) = 0;
 
 	/** Informs the renderer of a VDP background color change.
 	  * @param color The new background color.
 	  * @param time The moment in emulated time this change occurs.
 	  */
-	virtual void updateBackgroundColor(int color, EmuTime::param time) = 0;
+	virtual void updateBackgroundColor(byte color, EmuTime::param time) = 0;
 
 	/** Informs the renderer of a VDP blink foreground color change.
 	  * @param color The new blink foreground color.
 	  * @param time The moment in emulated time this change occurs.
 	  */
-	virtual void updateBlinkForegroundColor(int color, EmuTime::param time) = 0;
+	virtual void updateBlinkForegroundColor(byte color, EmuTime::param time) = 0;
 
 	/** Informs the renderer of a VDP blink background color change.
 	  * @param color The new blink background color.
 	  * @param time The moment in emulated time this change occurs.
 	  */
-	virtual void updateBlinkBackgroundColor(int color, EmuTime::param time) = 0;
+	virtual void updateBlinkBackgroundColor(byte color, EmuTime::param time) = 0;
 
 	/** Informs the renderer of a VDP blinking state change.
 	  * @param enabled The new blink state.
@@ -94,7 +95,7 @@ public:
 	  *   all other bits are zero.
 	  * @param time The moment in emulated time this change occurs.
 	  */
-	virtual void updatePalette(int index, int grb, EmuTime::param time) = 0;
+	virtual void updatePalette(unsigned index, int grb, EmuTime::param time) = 0;
 
 	/** Informs the renderer of a vertical scroll change.
 	  * @param scroll The new scroll value.
@@ -157,19 +158,19 @@ public:
 	  * @param addr The new base address.
 	  * @param time The moment in emulated time this change occurs.
 	  */
-	virtual void updateNameBase(int addr, EmuTime::param time) = 0;
+	virtual void updateNameBase(unsigned addr, EmuTime::param time) = 0;
 
 	/** Informs the renderer of a pattern table base address change.
 	  * @param addr The new base address.
 	  * @param time The moment in emulated time this change occurs.
 	  */
-	virtual void updatePatternBase(int addr, EmuTime::param time) = 0;
+	virtual void updatePatternBase(unsigned addr, EmuTime::param time) = 0;
 
 	/** Informs the renderer of a color table base address change.
 	  * @param addr The new base address.
 	  * @param time The moment in emulated time this change occurs.
 	  */
-	virtual void updateColorBase(int addr, EmuTime::param time) = 0;
+	virtual void updateColorBase(unsigned addr, EmuTime::param time) = 0;
 
 	/** Informs the renderer of a VDP sprites enabled change.
 	  * @param enabled The new sprites enabled state.
@@ -178,10 +179,14 @@ public:
 	virtual void updateSpritesEnabled(bool enabled, EmuTime::param time) = 0;
 
 	/** Sprite palette in Graphic 7 mode.
+          * See page 98 of the V9938 data book.
 	  * Each palette entry is a word in GRB format:
 	  * bit 10..8 is green, bit 6..4 is red and bit 2..0 is blue.
 	  */
-	static const uint16_t GRAPHIC7_SPRITE_PALETTE[16];
+	static constexpr std::array<uint16_t, 16> GRAPHIC7_SPRITE_PALETTE = {
+		0x000, 0x002, 0x030, 0x032, 0x300, 0x302, 0x330, 0x332,
+		0x472, 0x007, 0x070, 0x077, 0x700, 0x707, 0x770, 0x777,
+	};
 
 protected:
 	Renderer() = default;

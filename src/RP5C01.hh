@@ -1,6 +1,6 @@
 // This class implements the RP5C01 chip (RTC)
 //
-// * For techncal details on RP5C01 see
+// * For technical details on RP5C01 see
 //     http://w3.qahwah.net/joost/openMSX/RP5C01.pdf
 
 #ifndef RP5C01_HH
@@ -25,8 +25,8 @@ public:
 	       EmuTime::param time, const std::string& name);
 
 	void reset(EmuTime::param time);
-	nibble readPort(nibble port, EmuTime::param time);
-	nibble peekPort(nibble port) const;
+	[[nodiscard]] nibble readPort(nibble port, EmuTime::param time);
+	[[nodiscard]] nibble peekPort(nibble port) const;
 	void writePort(nibble port, nibble value, EmuTime::param time);
 
 	template<typename Archive>
@@ -39,7 +39,8 @@ private:
 	void time2Regs();
 	void resetAlarm();
 
-	static const unsigned FREQ = 16384;
+private:
+	static constexpr unsigned FREQ = 16384;
 
 	SRAM& regs;
 	EnumSetting<RTCMode> modeSetting;

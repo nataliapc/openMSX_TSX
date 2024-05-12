@@ -6,6 +6,7 @@
 #include "EnumSetting.hh"
 #include "IntegerSetting.hh"
 #include "StringSetting.hh"
+#include "SpeedManager.hh"
 #include "ThrottleManager.hh"
 #include "ResampledSoundDevice.hh"
 #include <memory>
@@ -26,52 +27,49 @@ public:
 	explicit GlobalSettings(GlobalCommandController& commandController);
 	~GlobalSettings();
 
-	IntegerSetting& getSpeedSetting() {
-		return speedSetting;
-	}
-	BooleanSetting& getPauseSetting() {
+	[[nodiscard]] BooleanSetting& getPauseSetting() {
 		return pauseSetting;
 	}
-	BooleanSetting& getPowerSetting() {
+	[[nodiscard]] BooleanSetting& getPowerSetting() {
 		return powerSetting;
 	}
-	BooleanSetting& getAutoSaveSetting() {
+	[[nodiscard]] BooleanSetting& getAutoSaveSetting() {
 		return autoSaveSetting;
 	}
-	BooleanSetting& getPauseOnLostFocusSetting() {
-		return pauseOnLostFocusSetting;
-	}
-	StringSetting& getUMRCallBackSetting() {
+	[[nodiscard]] StringSetting& getUMRCallBackSetting() {
 		return umrCallBackSetting;
 	}
-	StringSetting& getInvalidPsgDirectionsSetting() {
+	[[nodiscard]] StringSetting& getInvalidPsgDirectionsSetting() {
 		return invalidPsgDirectionsSetting;
 	}
-	EnumSetting<ResampledSoundDevice::ResampleType>& getResampleSetting() {
+	[[nodiscard]] StringSetting& getInvalidPpiModeSetting() {
+		return invalidPpiModeSetting;
+	}
+	[[nodiscard]] EnumSetting<ResampledSoundDevice::ResampleType>& getResampleSetting() {
 		return resampleSetting;
 	}
-	IntegerSetting& getJoyDeadzoneSetting(int i) {
-		return *deadzoneSettings[i];
+	[[nodiscard]] SpeedManager& getSpeedManager() {
+		return speedManager;
 	}
-	ThrottleManager& getThrottleManager() {
+	[[nodiscard]] ThrottleManager& getThrottleManager() {
 		return throttleManager;
 	}
 
 private:
 	// Observer<Setting>
-	void update(const Setting& setting) override;
+	void update(const Setting& setting) noexcept override;
 
+private:
 	GlobalCommandController& commandController;
 
-	IntegerSetting speedSetting;
 	BooleanSetting pauseSetting;
 	BooleanSetting powerSetting;
 	BooleanSetting autoSaveSetting;
-	BooleanSetting pauseOnLostFocusSetting;
 	StringSetting  umrCallBackSetting;
 	StringSetting  invalidPsgDirectionsSetting;
+	StringSetting  invalidPpiModeSetting;
 	EnumSetting<ResampledSoundDevice::ResampleType> resampleSetting;
-	std::vector<std::unique_ptr<IntegerSetting>> deadzoneSettings;
+	SpeedManager speedManager;
 	ThrottleManager throttleManager;
 };
 

@@ -1,4 +1,5 @@
 #include "MSXHiResTimer.hh"
+#include "narrow.hh"
 #include "serialize.hh"
 
 namespace openmsx {
@@ -30,21 +31,21 @@ byte MSXHiResTimer::readIO(word port, EmuTime::param time)
 	}
 	// reading port {0, 1, 2, 3} will read bits {0-7, 8-15, 16-23, 24-32}
 	// of the counter
-	return latchedValue >> (8 * (port & 3));
+	return narrow_cast<byte>(latchedValue >> (8 * (port & 3)));
 }
 
 byte MSXHiResTimer::peekIO(word port, EmuTime::param time) const
 {
 	unsigned tmp = (port & 3) ? latchedValue : reference.getTicksTill(time);
-	return tmp >> (8 * (port & 3));
+	return narrow_cast<byte>(tmp >> (8 * (port & 3)));
 }
 
 template<typename Archive>
 void MSXHiResTimer::serialize(Archive& ar, unsigned /*version*/)
 {
 	ar.template serializeBase<MSXDevice>(*this);
-	ar.serialize("reference", reference);
-	ar.serialize("latchedValue", latchedValue);
+	ar.serialize("reference",    reference,
+	             "latchedValue", latchedValue);
 }
 INSTANTIATE_SERIALIZE_METHODS(MSXHiResTimer);
 REGISTER_MSXDEVICE(MSXHiResTimer, "HiResTimer");

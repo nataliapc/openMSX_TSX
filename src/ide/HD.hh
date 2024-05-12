@@ -1,71 +1,79 @@
 #ifndef HD_HH
 #define HD_HH
 
-#include "Filename.hh"
-#include "File.hh"
-#include "SectorAccessibleDisk.hh"
 #include "DiskContainer.hh"
+#include "File.hh"
+#include "Filename.hh"
+#include "HDCommand.hh"
+#include "SectorAccessibleDisk.hh"
+#include "MSXMotherBoard.hh"
 #include "TigerTree.hh"
 #include "serialize_meta.hh"
 #include <bitset>
 #include <string>
-#include <memory>
+#include <optional>
 
 namespace openmsx {
 
-class MSXMotherBoard;
-class HDCommand;
 class DeviceConfig;
 
 class HD : public SectorAccessibleDisk, public DiskContainer
-         , public TTData
+         , public TTData, public MediaInfoProvider
 {
 public:
-	explicit HD(const DeviceConfig& config);
-	virtual ~HD();
+	static constexpr unsigned MAX_HD = 26;
+	using HDInUse = std::bitset<MAX_HD>;
+	static std::shared_ptr<HDInUse> getDrivesInUse(MSXMotherBoard& motherBoard);
 
-	const std::string& getName() const { return name; }
-	const Filename& getImageName() const { return filename; }
+public:
+	explicit HD(const DeviceConfig& config);
+	~HD() override;
+
+	[[nodiscard]] const std::string& getName() const { return name; }
+	[[nodiscard]] const Filename& getImageName() const { return filename; }
 	void switchImage(const Filename& filename);
 
-	std::string getTigerTreeHash();
+	[[nodiscard]] std::string getTigerTreeHash();
+
+	// MediaInfoProvider
+	void getMediaInfo(TclObject& result) override;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
-	MSXMotherBoard& getMotherBoard() const { return motherBoard; }
+	[[nodiscard]] MSXMotherBoard& getMotherBoard() const { return motherBoard; }
 
 private:
 	// SectorAccessibleDisk:
-	void readSectorImpl (size_t sector,       SectorBuffer& buf) override;
+	void readSectorsImpl(
+		std::span<SectorBuffer> buffers, size_t startSector) override;
 	void writeSectorImpl(size_t sector, const SectorBuffer& buf) override;
-	size_t getNbSectorsImpl() const override;
-	bool isWriteProtectedImpl() const override;
-	Sha1Sum getSha1SumImpl(FilePool& filePool) override;
+	[[nodiscard]] size_t getNbSectorsImpl() const override;
+	[[nodiscard]] bool isWriteProtectedImpl() const override;
+	[[nodiscard]] Sha1Sum getSha1SumImpl(FilePool& filePool) override;
 
-	// Diskcontainer:
-	SectorAccessibleDisk* getSectorAccessibleDisk() override;
-	const std::string& getContainerName() const override;
-	bool diskChanged() override;
-	int insertDisk(string_view newFilename) override;
+	// DiskContainer:
+	[[nodiscard]] SectorAccessibleDisk* getSectorAccessibleDisk() override;
+	[[nodiscard]] std::string_view getContainerName() const override;
+	[[nodiscard]] bool diskChanged() override;
+	int insertDisk(const std::string& newFilename) override;
 
 	// TTData
-	uint8_t* getData(size_t offset, size_t size) override;
-	bool isCacheStillValid(time_t& time) override;
+	[[nodiscard]] uint8_t* getData(size_t offset, size_t size) override;
+	[[nodiscard]] bool isCacheStillValid(time_t& time) override;
 
 	void showProgress(size_t position, size_t maxPosition);
 
+private:
 	MSXMotherBoard& motherBoard;
 	std::string name;
-	std::unique_ptr<HDCommand> hdCommand;
-	std::unique_ptr<TigerTree> tigerTree;
+	std::optional<HDCommand> hdCommand; // delayed init
+	std::optional<TigerTree> tigerTree; // delayed init
 
 	File file;
 	Filename filename;
 	size_t filesize;
 
-	static const unsigned MAX_HD = 26;
-	using HDInUse = std::bitset<MAX_HD>;
 	std::shared_ptr<HDInUse> hdInUse;
 
 	uint64_t lastProgressTime;

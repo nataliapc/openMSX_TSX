@@ -5,12 +5,15 @@
 #include "Observer.hh"
 #include "RenderSettings.hh"
 #include "openmsx.hh"
+#include <cstdint>
 #include <memory>
 
 namespace openmsx {
 
 class EventDistributor;
 class RealTime;
+class SpeedManager;
+class ThrottleManager;
 class Display;
 class Rasterizer;
 class VDP;
@@ -27,10 +30,10 @@ class PixelRenderer final : public Renderer, private Observer<Setting>
 {
 public:
 	PixelRenderer(VDP& vdp, Display& display);
-	~PixelRenderer();
+	~PixelRenderer() override;
 
 	// Renderer interface:
-	PostProcessor* getPostProcessor() const override;
+	[[nodiscard]] PostProcessor* getPostProcessor() const override;
 	void reInit() override;
 	void frameStart(EmuTime::param time) override;
 	void frameEnd(EmuTime::param time) override;
@@ -40,19 +43,19 @@ public:
 	void updateMultiPage(bool multiPage, EmuTime::param time) override;
 	void updateTransparency(bool enabled, EmuTime::param time) override;
 	void updateSuperimposing(const RawFrame* videoSource, EmuTime::param time) override;
-	void updateForegroundColor(int color, EmuTime::param time) override;
-	void updateBackgroundColor(int color, EmuTime::param time) override;
-	void updateBlinkForegroundColor(int color, EmuTime::param time) override;
-	void updateBlinkBackgroundColor(int color, EmuTime::param time) override;
+	void updateForegroundColor(byte color, EmuTime::param time) override;
+	void updateBackgroundColor(byte color, EmuTime::param time) override;
+	void updateBlinkForegroundColor(byte color, EmuTime::param time) override;
+	void updateBlinkBackgroundColor(byte color, EmuTime::param time) override;
 	void updateBlinkState(bool enabled, EmuTime::param time) override;
-	void updatePalette(int index, int grb, EmuTime::param time) override;
+	void updatePalette(unsigned index, int grb, EmuTime::param time) override;
 	void updateVerticalScroll(int scroll, EmuTime::param time) override;
 	void updateHorizontalAdjust(int adjust, EmuTime::param time) override;
 	void updateDisplayEnabled(bool enabled, EmuTime::param time) override;
 	void updateDisplayMode(DisplayMode mode, EmuTime::param time) override;
-	void updateNameBase(int addr, EmuTime::param time) override;
-	void updatePatternBase(int addr, EmuTime::param time) override;
-	void updateColorBase(int addr, EmuTime::param time) override;
+	void updateNameBase(unsigned addr, EmuTime::param time) override;
+	void updatePatternBase(unsigned addr, EmuTime::param time) override;
+	void updateColorBase(unsigned addr, EmuTime::param time) override;
 	void updateSpritesEnabled(bool enabled, EmuTime::param time) override;
 	void updateVRAM(unsigned offset, EmuTime::param time) override;
 	void updateWindow(bool enabled, EmuTime::param time) override;
@@ -62,7 +65,7 @@ private:
 	enum DrawType { DRAW_BORDER, DRAW_DISPLAY };
 
 	// Observer<Setting> interface:
-	void update(const Setting& setting) override;
+	void update(const Setting& setting) noexcept override;
 
 	/** Call the right draw method in the subclass,
 	  * depending on passed drawType.
@@ -80,9 +83,9 @@ private:
 	  */
 	void subdivide(
 		int startX, int startY, int endX, int endY,
-		int clipL, int clipR, DrawType drawType );
+		int clipL, int clipR, DrawType drawType);
 
-	inline bool checkSync(int offset, EmuTime::param time);
+	[[nodiscard]] bool checkSync(unsigned offset, EmuTime::param time) const;
 
 	/** Update renderer state to specified moment in time.
 	  * @param time Moment in emulated time to update to.
@@ -99,6 +102,7 @@ private:
 	  */
 	void renderUntil(EmuTime::param time);
 
+private:
 	/** The VDP of which the video output is being rendered.
 	  */
 	VDP& vdp;
@@ -109,6 +113,8 @@ private:
 
 	EventDistributor& eventDistributor;
 	RealTime& realTime;
+	SpeedManager& speedManager;
+	ThrottleManager& throttleManager;
 	RenderSettings& renderSettings;
 	VideoSourceSetting& videoSourceSetting;
 
@@ -118,8 +124,8 @@ private:
 
 	const std::unique_ptr<Rasterizer> rasterizer;
 
-	float finishFrameDuration;
-	int frameSkipCounter;
+	float finishFrameDuration = 0.0f;
+	float frameSkipCounter = 999.0f; // force drawing of frame
 
 	/** Number of the next position within a line to render.
 	  * Expressed in VDP clock ticks since start of line.
@@ -147,7 +153,19 @@ private:
 	/** Should current frame be draw or can it be skipped.
 	  */
 	bool renderFrame;
-	bool prevRenderFrame;
+	bool prevRenderFrame = false;
+
+	/** Should a rendered frame be painted to the window?
+	  * When renderFrame is false, paintFrame must be false as well.
+	  * But when recording, renderFrame will be true for every frame,
+	  * while paintFrame may not.
+	  */
+	bool paintFrame;
+
+	/** Timestamp (us, like Timer::getTime()) at which we last painted a frame.
+	  * Used to force a minimal paint rate when throttle is off.
+	  */
+	uint64_t lastPaintTime = 0;
 };
 
 } // namespace openmsx

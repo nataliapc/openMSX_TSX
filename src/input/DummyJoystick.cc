@@ -2,17 +2,17 @@
 
 namespace openmsx {
 
-byte DummyJoystick::read(EmuTime::param /*time*/)
+uint8_t DummyJoystick::read(EmuTime::param /*time*/)
 {
 	return 0x3F;
 }
 
-void DummyJoystick::write(byte /*value*/, EmuTime::param /*time*/)
+void DummyJoystick::write(uint8_t /*value*/, EmuTime::param /*time*/)
 {
 	// do nothing
 }
 
-string_view DummyJoystick::getDescription() const
+std::string_view DummyJoystick::getDescription() const
 {
 	return {};
 }

@@ -1,12 +1,12 @@
 #include "BooleanSetting.hh"
-#include "CommandController.hh"
 #include "Completer.hh"
+#include <array>
 
 namespace openmsx {
 
 BooleanSetting::BooleanSetting(
-		CommandController& commandController_, string_view name,
-		string_view description_, bool initialValue, SaveSetting save_)
+		CommandController& commandController_, std::string_view name,
+		static_string_view description_, bool initialValue, SaveSetting save_)
 	: Setting(commandController_, name, description_,
 	          TclObject(toString(initialValue)), save_)
 {
@@ -14,21 +14,22 @@ BooleanSetting::BooleanSetting(
 	setChecker([&interp](TclObject& newValue) {
 		// May throw.
 		// Re-set the queried value to get a normalized value.
-		newValue.setString(toString(newValue.getBoolean(interp)));
+		newValue = toString(newValue.getBoolean(interp));
 	});
 	init();
 }
 
-string_view BooleanSetting::getTypeString() const
+std::string_view BooleanSetting::getTypeString() const
 {
 	return "boolean";
 }
 
 void BooleanSetting::tabCompletion(std::vector<std::string>& tokens) const
 {
-	static const char* const values[] = {
-		"true",  "on",  "yes",
-		"false", "off", "no",
+	using namespace std::literals;
+	static constexpr std::array values = {
+		"true"sv,  "on"sv,  "yes"sv,
+		"false"sv, "off"sv, "no"sv,
 	};
 	Completer::completeString(tokens, values, false); // case insensitive
 }

@@ -2,6 +2,7 @@
 #define MSXDEVICESWITCH_HH
 
 #include "MSXDevice.hh"
+#include <array>
 
 namespace openmsx {
 
@@ -56,25 +57,25 @@ class MSXDeviceSwitch final : public MSXDevice
 {
 public:
 	explicit MSXDeviceSwitch(const DeviceConfig& config);
-	~MSXDeviceSwitch();
+	~MSXDeviceSwitch() override;
 
 	// (un)register methods for devices
 	void registerDevice(byte id, MSXSwitchedDevice* device);
 	void unregisterDevice(byte id);
-	bool hasRegisteredDevices() const { return count != 0; }
+	[[nodiscard]] bool hasRegisteredDevices() const { return count != 0; }
 
 	void reset(EmuTime::param time) override;
-	byte readIO(word port, EmuTime::param time) override;
-	byte peekIO(word port, EmuTime::param time) const override;
+	[[nodiscard]] byte readIO(word port, EmuTime::param time) override;
+	[[nodiscard]] byte peekIO(word port, EmuTime::param time) const override;
 	void writeIO(word port, byte value, EmuTime::param time) override;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 private:
-	MSXSwitchedDevice* devices[256];
-	unsigned count;
-	byte selected;
+	std::array<MSXSwitchedDevice*, 256> devices;
+	unsigned count = 0;
+	byte selected = 0;
 };
 
 } // namespace openmsx

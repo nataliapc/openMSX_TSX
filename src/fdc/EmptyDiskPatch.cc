@@ -9,13 +9,13 @@ EmptyDiskPatch::EmptyDiskPatch(SectorAccessibleDisk& disk_)
 {
 }
 
-void EmptyDiskPatch::copyBlock(size_t src, byte* dst, size_t num) const
+void EmptyDiskPatch::copyBlock(size_t src, std::span<uint8_t> dst) const
 {
-	(void)num;
-	assert(num == SectorAccessibleDisk::SECTOR_SIZE);
+	assert((dst.size() % SectorAccessibleDisk::SECTOR_SIZE) == 0);
 	assert((src % SectorAccessibleDisk::SECTOR_SIZE) == 0);
-	auto& buf = *aligned_cast<SectorBuffer*>(dst);
-	disk.readSectorImpl(src / SectorAccessibleDisk::SECTOR_SIZE, buf);
+	disk.readSectorsImpl(std::span{aligned_cast<SectorBuffer*>(dst.data()),
+	                               dst.size() / SectorAccessibleDisk::SECTOR_SIZE},
+	                     src / SectorAccessibleDisk::SECTOR_SIZE);
 }
 
 size_t EmptyDiskPatch::getSize() const
@@ -25,8 +25,7 @@ size_t EmptyDiskPatch::getSize() const
 
 std::vector<Filename> EmptyDiskPatch::getFilenames() const
 {
-	// return {};
-	return std::vector<Filename>();
+	return {};
 }
 
 } // namespace openmsx

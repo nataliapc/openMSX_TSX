@@ -22,8 +22,12 @@
 #include "YM2413Burczynski.hh"
 #include "Math.hh"
 #include "cstd.hh"
+#include "narrow.hh"
+#include "ranges.hh"
 #include "serialize.hh"
-#include <cstring>
+#include "xrange.hh"
+#include <array>
+#include <cstdint>
 #include <iostream>
 
 namespace openmsx {
@@ -36,19 +40,14 @@ static constexpr double ENV_STEP = 128.0 / (1 << ENV_BITS);
 static constexpr int MAX_ATT_INDEX = (1 << (ENV_BITS - 2)) - 1; // 255
 static constexpr int MIN_ATT_INDEX = 0;
 
-// sinwave entries
-static constexpr int SIN_BITS = 10;
-static constexpr int SIN_LEN  = 1 << SIN_BITS;
-static constexpr int SIN_MASK = SIN_LEN - 1;
-
 static constexpr int TL_RES_LEN = 256; // 8 bits addressing (real chip)
 
 // key scale level
 // table is 3dB/octave, DV converts this into 6dB/octave
 // 0.1875 is bit 0 weight of the envelope counter (volume) expressed
 // in the 'decibel' scale
-#define DV(x) int((x) / 0.1875)
-static constexpr int ksl_tab[8 * 16] =
+static constexpr int DV(double x) { return narrow_cast<int>(x / 0.1875); }
+static constexpr std::array<int, 8 * 16> ksl_tab =
 {
 	// OCT 0
 	DV( 0.000),DV( 0.000),DV( 0.000),DV( 0.000),
@@ -91,43 +90,40 @@ static constexpr int ksl_tab[8 * 16] =
 	DV(18.000),DV(18.750),DV(19.125),DV(19.500),
 	DV(19.875),DV(20.250),DV(20.625),DV(21.000)
 };
-#undef DV
 
 // sustain level table (3dB per step)
 // 0 - 15: 0, 3, 6, 9,12,15,18,21,24,27,30,33,36,39,42,45 (dB)
-#define SC(db) int((double(db)) / ENV_STEP)
-static constexpr int sl_tab[16] = {
+static constexpr int SC(int db) { return int(double(db) / ENV_STEP); }
+static constexpr std::array<int, 16> sl_tab = {
 	SC( 0),SC( 1),SC( 2),SC(3 ),SC(4 ),SC(5 ),SC(6 ),SC( 7),
 	SC( 8),SC( 9),SC(10),SC(11),SC(12),SC(13),SC(14),SC(15)
 };
-#undef SC
 
-static constexpr byte eg_inc[15][8] =
+static constexpr std::array eg_inc =
 {
-	// cycle: 0 1  2 3  4 5  6 7
+	//                       cycle: 0 1  2 3  4 5  6 7
+	/* 0 */ std::array<uint8_t, 8>{ 0,1, 0,1, 0,1, 0,1, }, // rates 00..12 0 (increment by 0 or 1)
+	/* 1 */ std::array<uint8_t, 8>{ 0,1, 0,1, 1,1, 0,1, }, // rates 00..12 1
+	/* 2 */ std::array<uint8_t, 8>{ 0,1, 1,1, 0,1, 1,1, }, // rates 00..12 2
+	/* 3 */ std::array<uint8_t, 8>{ 0,1, 1,1, 1,1, 1,1, }, // rates 00..12 3
 
-	/* 0 */ { 0,1, 0,1, 0,1, 0,1, }, // rates 00..12 0 (increment by 0 or 1)
-	/* 1 */ { 0,1, 0,1, 1,1, 0,1, }, // rates 00..12 1
-	/* 2 */ { 0,1, 1,1, 0,1, 1,1, }, // rates 00..12 2
-	/* 3 */ { 0,1, 1,1, 1,1, 1,1, }, // rates 00..12 3
+	/* 4 */ std::array<uint8_t, 8>{ 1,1, 1,1, 1,1, 1,1, }, // rate 13 0 (increment by 1)
+	/* 5 */ std::array<uint8_t, 8>{ 1,1, 1,2, 1,1, 1,2, }, // rate 13 1
+	/* 6 */ std::array<uint8_t, 8>{ 1,2, 1,2, 1,2, 1,2, }, // rate 13 2
+	/* 7 */ std::array<uint8_t, 8>{ 1,2, 2,2, 1,2, 2,2, }, // rate 13 3
 
-	/* 4 */ { 1,1, 1,1, 1,1, 1,1, }, // rate 13 0 (increment by 1)
-	/* 5 */ { 1,1, 1,2, 1,1, 1,2, }, // rate 13 1
-	/* 6 */ { 1,2, 1,2, 1,2, 1,2, }, // rate 13 2
-	/* 7 */ { 1,2, 2,2, 1,2, 2,2, }, // rate 13 3
+	/* 8 */ std::array<uint8_t, 8>{ 2,2, 2,2, 2,2, 2,2, }, // rate 14 0 (increment by 2)
+	/* 9 */ std::array<uint8_t, 8>{ 2,2, 2,4, 2,2, 2,4, }, // rate 14 1
+	/*10 */ std::array<uint8_t, 8>{ 2,4, 2,4, 2,4, 2,4, }, // rate 14 2
+	/*11 */ std::array<uint8_t, 8>{ 2,4, 4,4, 2,4, 4,4, }, // rate 14 3
 
-	/* 8 */ { 2,2, 2,2, 2,2, 2,2, }, // rate 14 0 (increment by 2)
-	/* 9 */ { 2,2, 2,4, 2,2, 2,4, }, // rate 14 1
-	/*10 */ { 2,4, 2,4, 2,4, 2,4, }, // rate 14 2
-	/*11 */ { 2,4, 4,4, 2,4, 4,4, }, // rate 14 3
-
-	/*12 */ { 4,4, 4,4, 4,4, 4,4, }, // rates 15 0, 15 1, 15 2, 15 3 (incr by 4)
-	/*13 */ { 8,8, 8,8, 8,8, 8,8, }, // rates 15 2, 15 3 for attack
-	/*14 */ { 0,0, 0,0, 0,0, 0,0, }, // infinity rates for attack and decay(s)
+	/*12 */ std::array<uint8_t, 8>{ 4,4, 4,4, 4,4, 4,4, }, // rates 15 0, 15 1, 15 2, 15 3 (incr by 4)
+	/*13 */ std::array<uint8_t, 8>{ 8,8, 8,8, 8,8, 8,8, }, // rates 15 2, 15 3 for attack
+	/*14 */ std::array<uint8_t, 8>{ 0,0, 0,0, 0,0, 0,0, }, // infinity rates for attack and decay(s)
 };
 
 // note that there is no value 13 in this table - it's directly in the code
-static constexpr byte eg_rate_select[16 + 64 + 16] =
+static constexpr std::array<uint8_t, 16 + 64 + 16> eg_rate_select =
 {
 	// Envelope Generator rates (16 + 64 rates + 16 RKS)
 	// 16 infinite time rates
@@ -165,7 +161,7 @@ static constexpr byte eg_rate_select[16 + 64 + 16] =
 // shift 13,   12,   11,   10,   9,   8,   7,   6,  5,  4,  3,  2,  1,  0,  0,  0
 // mask  8191, 4095, 2047, 1023, 511, 255, 127, 63, 31, 15, 7,  3,  1,  0,  0,  0
 
-static constexpr byte eg_rate_shift[16 + 64 + 16] =
+static constexpr std::array<uint8_t, 16 + 64 + 16> eg_rate_shift =
 {
 	// Envelope Generator counter shifts (16 + 64 rates + 16 RKS)
 	// 16 infinite time rates
@@ -200,75 +196,64 @@ static constexpr byte eg_rate_shift[16 + 64 + 16] =
 };
 
 // multiple table
-#define ML(x) byte(2 * (x))
-static constexpr byte mul_tab[16] =
+static constexpr uint8_t ML(double x) { return uint8_t(2 * x); }
+static constexpr std::array<uint8_t, 16> mul_tab =
 {
 	ML( 0.50), ML( 1.00), ML( 2.00), ML( 3.00),
 	ML( 4.00), ML( 5.00), ML( 6.00), ML( 7.00),
 	ML( 8.00), ML( 9.00), ML(10.00), ML(10.00),
 	ML(12.00), ML(12.00), ML(15.00), ML(15.00),
 };
-#undef ML
 
 //  TL_TAB_LEN is calculated as:
 //  11 - sinus amplitude bits     (Y axis)
 //  2  - sinus sign bit           (Y axis)
 //  TL_RES_LEN - sinus resolution (X axis)
 static constexpr int TL_TAB_LEN = 11 * 2 * TL_RES_LEN;
-struct TlTab {
-	int tab[TL_TAB_LEN];
-};
-static CONSTEXPR TlTab makeTlTab()
-{
-	TlTab tl = {};
-	for (int x = 0; x < TL_RES_LEN; ++x) {
+static constexpr auto tlTab = [] {
+	std::array<int, TL_TAB_LEN> result = {};
+	for (auto x : xrange(TL_RES_LEN)) {
 		double m = (1 << 16) / cstd::exp2<6>((x + 1) * (ENV_STEP / 4.0) / 8.0);
 
 		// we never reach (1 << 16) here due to the (x + 1)
 		// result fits within 16 bits at maximum
-		int n = int(m); // 16 bits here
+		auto n = int(m); // 16 bits here
 		n >>= 4;        // 12 bits here
 		n = (n >> 1) + (n & 1); // round to nearest
 		// 11 bits here (rounded)
-		for (int i = 0; i < 11; ++i) {
-			tl.tab[x * 2 + 0 + i * 2 * TL_RES_LEN] = n >> i;
-			tl.tab[x * 2 + 1 + i * 2 * TL_RES_LEN] = -(n >> i);
+		for (auto i : xrange(11)) {
+			result[x * 2 + 0 + i * 2 * TL_RES_LEN] = n >> i;
+			result[x * 2 + 1 + i * 2 * TL_RES_LEN] = -(n >> i);
 		}
 	}
-	return tl;
-}
-static CONSTEXPR TlTab tl = makeTlTab();
+	return result;
+}();
 
 // sin waveform table in 'decibel' scale
 // two waveforms on OPLL type chips
-struct SinTab {
-	unsigned tab[SIN_LEN * 2];
-};
-static CONSTEXPR SinTab makeSinTab()
-{
-	SinTab sin = {};
-	for (int i = 0; i < SIN_LEN / 4; ++i) {
+static constexpr auto sinTab = [] {
+	std::array<std::array<unsigned, SIN_LEN>, 2> result = {};
+	for (auto i : xrange(SIN_LEN / 4)) {
 		// checked on real hardware, see also
 		//   http://docs.google.com/Doc?id=dd8kqn9f_13cqjkf4gp
-		double m = cstd::sin<2>(((i * 2) + 1) * M_PI / SIN_LEN);
-		int n = int(cstd::round(cstd::log2<8, 3>(m) * -256.0));
-		sin.tab[i] = 2 * n;
+		double m = cstd::sin<2>(narrow_cast<double>((i * 2) + 1) * Math::pi / SIN_LEN);
+		auto n = int(cstd::round(cstd::log2<8, 3>(m) * -256.0));
+		result[0][i] = 2 * n;
 	}
-	for (int i = 0; i < SIN_LEN / 4; ++i) {
-		sin.tab[SIN_LEN / 4 + i] = sin.tab[SIN_LEN / 4 - 1 - i];
+	for (auto i : xrange(SIN_LEN / 4)) {
+		result[0][SIN_LEN / 4 + i] = result[0][SIN_LEN / 4 - 1 - i];
 	}
-	for (int i = 0; i < SIN_LEN / 2; ++i) {
-		sin.tab[SIN_LEN / 2 + i] = sin.tab[i] | 1;
+	for (auto i : xrange(SIN_LEN / 2)) {
+		result[0][SIN_LEN / 2 + i] = result[0][i] | 1;
 	}
-	for (int i = 0; i < SIN_LEN / 2; ++i) {
-		sin.tab[i + SIN_LEN] = sin.tab[i];
+	for (auto i : xrange(SIN_LEN / 2)) {
+		result[1][i] = result[0][i];
 	}
-	for (int i = 0; i < SIN_LEN / 2; ++i) {
-		sin.tab[i + SIN_LEN + SIN_LEN / 2] = TL_TAB_LEN;
+	for (auto i : xrange(SIN_LEN / 2)) {
+		result[1][i + SIN_LEN / 2] = TL_TAB_LEN;
 	}
-	return sin;
-}
-static CONSTEXPR SinTab sin = makeSinTab();
+	return result;
+}();
 
 // LFO Amplitude Modulation table (verified on real YM3812)
 // 27 output levels (triangle waveform);
@@ -283,7 +268,7 @@ static CONSTEXPR SinTab sin = makeSinTab();
 // We use data>>1, until we find what it really is on real chip...
 
 static constexpr int LFO_AM_TAB_ELEMENTS = 210;
-static constexpr byte lfo_am_table[LFO_AM_TAB_ELEMENTS] =
+static constexpr std::array<uint8_t, LFO_AM_TAB_ELEMENTS> lfo_am_table =
 {
 	0,0,0,0,0,0,0,
 	1,1,1,1,
@@ -340,31 +325,31 @@ static constexpr byte lfo_am_table[LFO_AM_TAB_ELEMENTS] =
 };
 
 // LFO Phase Modulation table (verified on real YM2413)
-static constexpr signed char lfo_pm_table[8][8] =
+static constexpr std::array lfo_pm_table =
 {
 	// FNUM2/FNUM = 0 00xxxxxx (0x0000)
-	{ 0, 0, 0, 0, 0, 0, 0, 0, },
+	std::array<int8_t, 8>{ 0, 0, 0, 0, 0, 0, 0, 0, },
 
 	// FNUM2/FNUM = 0 01xxxxxx (0x0040)
-	{ 1, 0, 0, 0,-1, 0, 0, 0, },
+	std::array<int8_t, 8>{ 1, 0, 0, 0,-1, 0, 0, 0, },
 
 	// FNUM2/FNUM = 0 10xxxxxx (0x0080)
-	{ 2, 1, 0,-1,-2,-1, 0, 1, },
+	std::array<int8_t, 8>{ 2, 1, 0,-1,-2,-1, 0, 1, },
 
 	// FNUM2/FNUM = 0 11xxxxxx (0x00C0)
-	{ 3, 1, 0,-1,-3,-1, 0, 1, },
+	std::array<int8_t, 8>{ 3, 1, 0,-1,-3,-1, 0, 1, },
 
 	// FNUM2/FNUM = 1 00xxxxxx (0x0100)
-	{ 4, 2, 0,-2,-4,-2, 0, 2, },
+	std::array<int8_t, 8>{ 4, 2, 0,-2,-4,-2, 0, 2, },
 
 	// FNUM2/FNUM = 1 01xxxxxx (0x0140)
-	{ 5, 2, 0,-2,-5,-2, 0, 2, },
+	std::array<int8_t, 8>{ 5, 2, 0,-2,-5,-2, 0, 2, },
 
 	// FNUM2/FNUM = 1 10xxxxxx (0x0180)
-	{ 6, 3, 0,-3,-6,-3, 0, 3, },
+	std::array<int8_t, 8>{ 6, 3, 0,-3,-6,-3, 0, 3, },
 
 	// FNUM2/FNUM = 1 11xxxxxx (0x01C0)
-	{ 7, 3, 0,-3,-7,-3, 0, 3, },
+	std::array<int8_t, 8>{ 7, 3, 0,-3,-7,-3, 0, 3, },
 };
 
 // This is not 100% perfect yet but very close
@@ -372,37 +357,37 @@ static constexpr signed char lfo_pm_table[8][8] =
 // - multi parameters are 100% correct (instruments and drums)
 // - LFO PM and AM enable are 100% correct
 // - waveform DC and DM select are 100% correct
-static constexpr byte table[16 + 3][8] = {
-	// MULT  MULT modTL DcDmFb AR/DR AR/DR SL/RR SL/RR
-	//   0     1     2     3     4     5     6     7
-	{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }, // user instrument
-	{ 0x61, 0x61, 0x1e, 0x17, 0xf0, 0x7f, 0x00, 0x17 }, // violin
-	{ 0x13, 0x41, 0x16, 0x0e, 0xfd, 0xf4, 0x23, 0x23 }, // guitar
-	{ 0x03, 0x01, 0x9a, 0x04, 0xf3, 0xf3, 0x13, 0xf3 }, // piano
-	{ 0x11, 0x61, 0x0e, 0x07, 0xfa, 0x64, 0x70, 0x17 }, // flute
-	{ 0x22, 0x21, 0x1e, 0x06, 0xf0, 0x76, 0x00, 0x28 }, // clarinet
-	{ 0x21, 0x22, 0x16, 0x05, 0xf0, 0x71, 0x00, 0x18 }, // oboe
-	{ 0x21, 0x61, 0x1d, 0x07, 0x82, 0x80, 0x17, 0x17 }, // trumpet
-	{ 0x23, 0x21, 0x2d, 0x16, 0x90, 0x90, 0x00, 0x07 }, // organ
-	{ 0x21, 0x21, 0x1b, 0x06, 0x64, 0x65, 0x10, 0x17 }, // horn
-	{ 0x21, 0x21, 0x0b, 0x1a, 0x85, 0xa0, 0x70, 0x07 }, // synthesizer
-	{ 0x23, 0x01, 0x83, 0x10, 0xff, 0xb4, 0x10, 0xf4 }, // harpsichord
-	{ 0x97, 0xc1, 0x20, 0x07, 0xff, 0xf4, 0x22, 0x22 }, // vibraphone
-	{ 0x61, 0x00, 0x0c, 0x05, 0xc2, 0xf6, 0x40, 0x44 }, // synthesizer bass
-	{ 0x01, 0x01, 0x56, 0x03, 0x94, 0xc2, 0x03, 0x12 }, // acoustic bass
-	{ 0x21, 0x01, 0x89, 0x03, 0xf1, 0xe4, 0xf0, 0x23 }, // electric guitar
-	// drum instruments definitions
-	// MULTI MULTI modTL  xxx  AR/DR AR/DR SL/RR SL/RR
-	//   0     1     2     3     4     5     6     7
-	//{ 0x07, 0x21, 0x14, 0x00, 0xee, 0xf8, 0xff, 0xf8 },
-	//{ 0x01, 0x31, 0x00, 0x00, 0xf8, 0xf7, 0xf8, 0xf7 },
-	//{ 0x25, 0x11, 0x00, 0x00, 0xf8, 0xfa, 0xf8, 0x55 }
-	{ 0x01, 0x01, 0x16, 0x00, 0xfd, 0xf8, 0x2f, 0x6d },// BD(multi verified, modTL verified, mod env - verified(close), carr. env verifed)
-	{ 0x01, 0x01, 0x00, 0x00, 0xd8, 0xd8, 0xf9, 0xf8 },// HH(multi verified), SD(multi not used)
-	{ 0x05, 0x01, 0x00, 0x00, 0xf8, 0xba, 0x49, 0x55 },// TOM(multi,env verified), TOP CYM(multi verified, env verified)
+static constexpr std::array table = {
+	//                     MULT  MULT modTL DcDmFb AR/DR AR/DR SL/RR SL/RR
+	//                       0     1     2     3     4     5     6     7
+	std::array<uint8_t, 8>{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }, // user instrument
+	std::array<uint8_t, 8>{ 0x61, 0x61, 0x1e, 0x17, 0xf0, 0x7f, 0x00, 0x17 }, // violin
+	std::array<uint8_t, 8>{ 0x13, 0x41, 0x16, 0x0e, 0xfd, 0xf4, 0x23, 0x23 }, // guitar
+	std::array<uint8_t, 8>{ 0x03, 0x01, 0x9a, 0x04, 0xf3, 0xf3, 0x13, 0xf3 }, // piano
+	std::array<uint8_t, 8>{ 0x11, 0x61, 0x0e, 0x07, 0xfa, 0x64, 0x70, 0x17 }, // flute
+	std::array<uint8_t, 8>{ 0x22, 0x21, 0x1e, 0x06, 0xf0, 0x76, 0x00, 0x28 }, // clarinet
+	std::array<uint8_t, 8>{ 0x21, 0x22, 0x16, 0x05, 0xf0, 0x71, 0x00, 0x18 }, // oboe
+	std::array<uint8_t, 8>{ 0x21, 0x61, 0x1d, 0x07, 0x82, 0x80, 0x17, 0x17 }, // trumpet
+	std::array<uint8_t, 8>{ 0x23, 0x21, 0x2d, 0x16, 0x90, 0x90, 0x00, 0x07 }, // organ
+	std::array<uint8_t, 8>{ 0x21, 0x21, 0x1b, 0x06, 0x64, 0x65, 0x10, 0x17 }, // horn
+	std::array<uint8_t, 8>{ 0x21, 0x21, 0x0b, 0x1a, 0x85, 0xa0, 0x70, 0x07 }, // synthesizer
+	std::array<uint8_t, 8>{ 0x23, 0x01, 0x83, 0x10, 0xff, 0xb4, 0x10, 0xf4 }, // harpsichord
+	std::array<uint8_t, 8>{ 0x97, 0xc1, 0x20, 0x07, 0xff, 0xf4, 0x22, 0x22 }, // vibraphone
+	std::array<uint8_t, 8>{ 0x61, 0x00, 0x0c, 0x05, 0xc2, 0xf6, 0x40, 0x44 }, // synthesizer bass
+	std::array<uint8_t, 8>{ 0x01, 0x01, 0x56, 0x03, 0x94, 0xc2, 0x03, 0x12 }, // acoustic bass
+	std::array<uint8_t, 8>{ 0x21, 0x01, 0x89, 0x03, 0xf1, 0xe4, 0xf0, 0x23 }, // electric guitar
+	//                     drum instruments definitions
+	//                     MULTI MULTI modTL  xxx  AR/DR AR/DR SL/RR SL/RR
+	//                       0     1     2     3     4     5     6     7
+	//                    { 0x07, 0x21, 0x14, 0x00, 0xee, 0xf8, 0xff, 0xf8 },
+	//                    { 0x01, 0x31, 0x00, 0x00, 0xf8, 0xf7, 0xf8, 0xf7 },
+	//                    { 0x25, 0x11, 0x00, 0x00, 0xf8, 0xfa, 0xf8, 0x55 }
+	std::array<uint8_t, 8>{ 0x01, 0x01, 0x16, 0x00, 0xfd, 0xf8, 0x2f, 0x6d },// BD(multi verified, modTL verified, mod env - verified(close), carr. env verified)
+	std::array<uint8_t, 8>{ 0x01, 0x01, 0x00, 0x00, 0xd8, 0xd8, 0xf9, 0xf8 },// HH(multi verified), SD(multi not used)
+	std::array<uint8_t, 8>{ 0x05, 0x01, 0x00, 0x00, 0xf8, 0xba, 0x49, 0x55 },// TOM(multi,env verified), TOP CYM(multi verified, env verified)
 };
 
-static inline FreqIndex fnumToIncrement(int block_fnum)
+static constexpr FreqIndex fnumToIncrement(int block_fnum)
 {
 	// OPLL (YM2413) phase increment counter = 18bit
 	// Chip works with 10.10 fixed point, while we use 16.16.
@@ -410,7 +395,7 @@ static inline FreqIndex fnumToIncrement(int block_fnum)
 	return FreqIndex(block_fnum & 0x03FF) >> (11 - block);
 }
 
-inline int Slot::calc_envelope(Channel& channel, unsigned eg_cnt, bool carrier)
+inline int Slot::calc_envelope(const Channel& channel, unsigned eg_cnt, bool carrier)
 {
 	switch (state) {
 	case EG_DUMP:
@@ -419,9 +404,9 @@ inline int Slot::calc_envelope(Channel& channel, unsigned eg_cnt, bool carrier)
 		// operators are reset (at the same time?).
 		// TODO: That sounds logical, but it does not match the implementation.
 		if (!(eg_cnt & eg_mask_dp)) {
-			egout += eg_sel_dp[(eg_cnt >> eg_sh_dp) & 7];
-			if (egout >= MAX_ATT_INDEX) {
-				egout = MAX_ATT_INDEX;
+			egOut += eg_sel_dp[(eg_cnt >> eg_sh_dp) & 7];
+			if (egOut >= MAX_ATT_INDEX) {
+				egOut = MAX_ATT_INDEX;
 				setEnvelopeState(EG_ATTACK);
 				phase = FreqIndex(0); // restart Phase Generator
 			}
@@ -430,10 +415,10 @@ inline int Slot::calc_envelope(Channel& channel, unsigned eg_cnt, bool carrier)
 
 	case EG_ATTACK:
 		if (!(eg_cnt & eg_mask_ar)) {
-			egout +=
-				(~egout * eg_sel_ar[(eg_cnt >> eg_sh_ar) & 7]) >> 2;
-			if (egout <= MIN_ATT_INDEX) {
-				egout = MIN_ATT_INDEX;
+			egOut +=
+				(~egOut * eg_sel_ar[(eg_cnt >> eg_sh_ar) & 7]) >> 2;
+			if (egOut <= MIN_ATT_INDEX) {
+				egOut = MIN_ATT_INDEX;
 				setEnvelopeState(EG_DECAY);
 			}
 		}
@@ -441,8 +426,8 @@ inline int Slot::calc_envelope(Channel& channel, unsigned eg_cnt, bool carrier)
 
 	case EG_DECAY:
 		if (!(eg_cnt & eg_mask_dr)) {
-			egout += eg_sel_dr[(eg_cnt >> eg_sh_dr) & 7];
-			if (egout >= sl) {
+			egOut += eg_sel_dr[(eg_cnt >> eg_sh_dr) & 7];
+			if (egOut >= sl) {
 				setEnvelopeState(EG_SUSTAIN);
 			}
 		}
@@ -450,7 +435,7 @@ inline int Slot::calc_envelope(Channel& channel, unsigned eg_cnt, bool carrier)
 
 	case EG_SUSTAIN:
 		// this is important behaviour:
-		// one can change percusive/non-percussive modes on the fly and
+		// one can change percussive/non-percussive modes on the fly and
 		// the chip will remain in sustain phase
 		// - verified on real YM3812
 		if (eg_sustain) {
@@ -461,9 +446,9 @@ inline int Slot::calc_envelope(Channel& channel, unsigned eg_cnt, bool carrier)
 			// during sustain phase chip adds Release Rate (in
 			// percussive mode)
 			if (!(eg_cnt & eg_mask_rr)) {
-				egout += eg_sel_rr[(eg_cnt >> eg_sh_rr) & 7];
-				if (egout >= MAX_ATT_INDEX) {
-					egout = MAX_ATT_INDEX;
+				egOut += eg_sel_rr[(eg_cnt >> eg_sh_rr) & 7];
+				if (egOut >= MAX_ATT_INDEX) {
+					egOut = MAX_ATT_INDEX;
 				}
 			}
 			// else do nothing in sustain phase
@@ -477,11 +462,11 @@ inline int Slot::calc_envelope(Channel& channel, unsigned eg_cnt, bool carrier)
 			const bool sustain = !eg_sustain || channel.isSustained();
 			const unsigned mask = sustain ? eg_mask_rs : eg_mask_rr;
 			if (!(eg_cnt & mask)) {
-				const byte shift = sustain ? eg_sh_rs : eg_sh_rr;
-				const byte* sel = sustain ? eg_sel_rs : eg_sel_rr;
-				egout += sel[(eg_cnt >> shift) & 7];
-				if (egout >= MAX_ATT_INDEX) {
-					egout = MAX_ATT_INDEX;
+				const uint8_t shift = sustain ? eg_sh_rs : eg_sh_rr;
+				std::span<const uint8_t, 8> sel = sustain ? eg_sel_rs : eg_sel_rr;
+				egOut += sel[(eg_cnt >> shift) & 7];
+				if (egOut >= MAX_ATT_INDEX) {
+					egOut = MAX_ATT_INDEX;
 					setEnvelopeState(EG_OFF);
 				}
 			}
@@ -491,14 +476,14 @@ inline int Slot::calc_envelope(Channel& channel, unsigned eg_cnt, bool carrier)
 	case EG_OFF:
 		break;
 	}
-	return egout;
+	return egOut;
 }
 
-inline int Slot::calc_phase(Channel& channel, unsigned lfo_pm)
+inline int Slot::calc_phase(const Channel& channel, unsigned lfo_pm)
 {
 	if (vib) {
-		const int lfo_fn_table_index_offset = lfo_pm_table
-			[(channel.getBlockFNum() & 0x01FF) >> 6][lfo_pm];
+		auto lfo_fn_table_index_offset = narrow<int>(lfo_pm_table
+			[(channel.getBlockFNum() & 0x01FF) >> 6][lfo_pm]);
 		phase += fnumToIncrement(
 			channel.getBlockFNum() * 2 + lfo_fn_table_index_offset
 			) * mul;
@@ -509,7 +494,7 @@ inline int Slot::calc_phase(Channel& channel, unsigned lfo_pm)
 	return phase.toInt();
 }
 
-inline void Slot::updateTotalLevel(Channel& channel)
+inline void Slot::updateTotalLevel(const Channel& channel)
 {
 	TLL = TL + (channel.getKeyScaleLevelBase() >> ksl);
 }
@@ -540,16 +525,16 @@ inline void Slot::updateReleaseRate(int kcodeScaled)
 	eg_mask_rr = (1 << eg_sh_rr) - 1;
 }
 
-inline int Slot::calcOutput(Channel& channel, unsigned eg_cnt, bool carrier,
+inline int Slot::calcOutput(const Channel& channel, unsigned eg_cnt, bool carrier,
                             unsigned lfo_am, int phase2)
 {
-	int egout2 = calc_envelope(channel, eg_cnt, carrier);
-	int env = (TLL + egout2 + (lfo_am & AMmask)) << 5;
-	int p = env + wavetable[phase2 & SIN_MASK];
-	return p < TL_TAB_LEN ? tl.tab[p] : 0;
+	int egOut2 = calc_envelope(channel, eg_cnt, carrier);
+	auto env = narrow<unsigned>((TLL + egOut2 + (lfo_am & AMmask)) << 5);
+	unsigned p = env + waveTable[phase2 & SIN_MASK];
+	return p < TL_TAB_LEN ? tlTab[p] : 0;
 }
 
-inline int Slot::calc_slot_mod(Channel& channel, unsigned eg_cnt, bool carrier,
+inline int Slot::calc_slot_mod(const Channel& channel, unsigned eg_cnt, bool carrier,
                                unsigned lfo_pm, unsigned lfo_am)
 {
 	// Compute phase.
@@ -609,21 +594,22 @@ inline int Channel::calcOutput(unsigned eg_cnt, unsigned lfo_pm, unsigned lfo_am
 //   TOP (17) channel 7->slot 1 combined with channel 8->slot 2
 //            (same combination as HIGH HAT but different output phases)
 
-static inline int genPhaseHighHat(int phaseM7, int phaseC8, int noise_rng)
+static constexpr int genPhaseHighHat(int phaseM7, int phaseC8, int noise_rng)
 {
 	// hi == phase >= 0x200
-	bool hi;
 	// enable gate based on frequency of operator 2 in channel 8
-	if (phaseC8 & 0x28) {
-		hi = true;
-	} else {
-		// base frequency derived from operator 1 in channel 7
-		// VC++ requires explicit conversion to bool. Compiler bug??
-		const bool bit7 = (phaseM7 & 0x80) != 0;
-		const bool bit3 = (phaseM7 & 0x08) != 0;
-		const bool bit2 = (phaseM7 & 0x04) != 0;
-		hi = (bit2 ^ bit7) | bit3;
-	}
+	bool hi = [&] {
+		if (phaseC8 & 0x28) {
+			return true;
+		} else {
+			// base frequency derived from operator 1 in channel 7
+			// VC++ requires explicit conversion to bool. Compiler bug??
+			const bool bit7 = (phaseM7 & 0x80) != 0;
+			const bool bit3 = (phaseM7 & 0x08) != 0;
+			const bool bit2 = (phaseM7 & 0x04) != 0;
+			return bool((bit2 ^ bit7) | bit3);
+		}
+	}();
 	if (noise_rng & 1) {
 		return hi ? (0x200 | 0xD0) : (0xD0 >> 2);
 	} else {
@@ -631,7 +617,7 @@ static inline int genPhaseHighHat(int phaseM7, int phaseC8, int noise_rng)
 	}
 }
 
-static inline int genPhaseSnare(int phaseM7, int noise_rng)
+static constexpr int genPhaseSnare(int phaseM7, int noise_rng)
 {
 	// base frequency derived from operator 1 in channel 7
 	// noise bit XOR'es phase by 0x100
@@ -639,7 +625,7 @@ static inline int genPhaseSnare(int phaseM7, int noise_rng)
 	     ^ ((noise_rng & 1) << 8);
 }
 
-static inline int genPhaseCymbal(int phaseM7, int phaseC8)
+static constexpr int genPhaseCymbal(int phaseM7, int phaseC8)
 {
 	// enable gate based on frequency of operator 2 in channel 8
 	if (phaseC8 & 0x28) {
@@ -656,18 +642,11 @@ static inline int genPhaseCymbal(int phaseM7, int phaseC8)
 
 
 Slot::Slot()
-	: phase(0), freq(0)
+	: waveTable(sinTab[0])
+	, eg_sel_dp(eg_inc[0]), eg_sel_ar(eg_inc[0]), eg_sel_dr(eg_inc[0])
+	, eg_sel_rr(eg_inc[0]), eg_sel_rs(eg_inc[0])
 {
-	ar = dr = rr = KSR = ksl = mul = 0;
-	fb_shift = op1_out[0] = op1_out[1] = 0;
-	TL = TLL = egout = sl = 0;
-	eg_sh_dp   = eg_sh_ar   = eg_sh_dr   = eg_sh_rr   = eg_sh_rs   = 0;
-	eg_sel_dp  = eg_sel_ar  = eg_sel_dr  = eg_sel_rr  = eg_sel_rs  = eg_inc[0];
-	eg_mask_dp = eg_mask_ar = eg_mask_dr = eg_mask_rr = eg_mask_rs = 0;
-	eg_sustain = false;
 	setEnvelopeState(EG_OFF);
-	key = AMmask = vib = 0;
-	wavetable = &sin.tab[0 * SIN_LEN];
 }
 
 void Slot::setKeyOn(KeyPart part)
@@ -683,10 +662,8 @@ void Slot::setKeyOff(KeyPart part)
 {
 	if (key) {
 		key &= ~part;
-		if (!key) {
-			if (isActive()) {
-				setEnvelopeState(EG_RELEASE);
-			}
+		if (!key && isActive()) {
+			setEnvelopeState(EG_RELEASE);
 		}
 	}
 }
@@ -710,7 +687,7 @@ void Slot::setEnvelopeState(EnvelopeState state_)
 	state = state_;
 }
 
-void Slot::setFrequencyMultiplier(byte value)
+void Slot::setFrequencyMultiplier(uint8_t value)
 {
 	mul = mul_tab[value];
 }
@@ -735,55 +712,55 @@ void Slot::setAmplitudeModulation(bool value)
 	AMmask = value ? ~0 : 0;
 }
 
-void Slot::setTotalLevel(Channel& channel, byte value)
+void Slot::setTotalLevel(const Channel& channel, uint8_t value)
 {
 	TL = value << (ENV_BITS - 2 - 7); // 7 bits TL (bit 6 = always 0)
 	updateTotalLevel(channel);
 }
 
-void Slot::setKeyScaleLevel(Channel& channel, byte value)
+void Slot::setKeyScaleLevel(const Channel& channel, uint8_t value)
 {
 	ksl = value ? (3 - value) : 31;
 	updateTotalLevel(channel);
 }
 
-void Slot::setWaveform(byte value)
+void Slot::setWaveform(uint8_t value)
 {
-	wavetable = &sin.tab[value * SIN_LEN];
+	waveTable = sinTab[value];
 }
 
-void Slot::setFeedbackShift(byte value)
+void Slot::setFeedbackShift(uint8_t value)
 {
 	fb_shift = value ? 8 - value : 0;
 }
 
-void Slot::setAttackRate(const Channel& channel, byte value)
+void Slot::setAttackRate(const Channel& channel, uint8_t value)
 {
 	int kcodeScaled = channel.getKeyCode() >> KSR;
-	ar = value ? 16 + (value << 2) : 0;
+	ar = value ? narrow<uint8_t>(16 + (value << 2)) : 0;
 	updateAttackRate(kcodeScaled);
 }
 
-void Slot::setDecayRate(const Channel& channel, byte value)
+void Slot::setDecayRate(const Channel& channel, uint8_t value)
 {
 	int kcodeScaled = channel.getKeyCode() >> KSR;
-	dr = value ? 16 + (value << 2) : 0;
+	dr = value ? narrow<uint8_t>(16 + (value << 2)) : 0;
 	updateDecayRate(kcodeScaled);
 }
 
-void Slot::setReleaseRate(const Channel& channel, byte value)
+void Slot::setReleaseRate(const Channel& channel, uint8_t value)
 {
 	int kcodeScaled = channel.getKeyCode() >> KSR;
-	rr = value ? 16 + (value << 2) : 0;
+	rr = value ? narrow<uint8_t>(16 + (value << 2)) : 0;
 	updateReleaseRate(kcodeScaled);
 }
 
-void Slot::setSustainLevel(byte value)
+void Slot::setSustainLevel(uint8_t value)
 {
 	sl = sl_tab[value];
 }
 
-void Slot::updateFrequency(Channel& channel)
+void Slot::updateFrequency(const Channel& channel)
 {
 	updateTotalLevel(channel);
 	updateGenerators(channel);
@@ -791,12 +768,12 @@ void Slot::updateFrequency(Channel& channel)
 
 void Slot::resetOperators()
 {
-	wavetable = &sin.tab[0 * SIN_LEN];
+	waveTable = sinTab[0];
 	setEnvelopeState(EG_OFF);
-	egout = MAX_ATT_INDEX;
+	egOut = MAX_ATT_INDEX;
 }
 
-void Slot::updateGenerators(Channel& channel)
+void Slot::updateGenerators(const Channel& channel)
 {
 	// (frequency) phase increment counter
 	freq = channel.getFrequencyIncrement() * mul;
@@ -819,13 +796,6 @@ void Slot::updateGenerators(Channel& channel)
 	eg_mask_dp = (1 << eg_sh_dp) - 1;
 }
 
-Channel::Channel()
-	: fc(0)
-{
-	block_fnum = ksl_base = 0;
-	sus = false;
-}
-
 void Channel::setFrequency(int block_fnum_)
 {
 	if (block_fnum == block_fnum_) return;
@@ -839,12 +809,12 @@ void Channel::setFrequency(int block_fnum_)
 	car.updateFrequency(*this);
 }
 
-void Channel::setFrequencyLow(byte value)
+void Channel::setFrequencyLow(uint8_t value)
 {
 	setFrequency((block_fnum & 0x0F00) | value);
 }
 
-void Channel::setFrequencyHigh(byte value)
+void Channel::setFrequencyHigh(uint8_t value)
 {
 	setFrequency((value << 8) | (block_fnum & 0x00FF));
 }
@@ -864,7 +834,7 @@ int Channel::getKeyScaleLevelBase() const
 	return ksl_base;
 }
 
-byte Channel::getKeyCode() const
+uint8_t Channel::getKeyCode() const
 {
 	// BLK 2,1,0 bits -> bits 3,2,1 of kcode, FNUM MSB -> kcode LSB
 	return (block_fnum & 0x0F00) >> 8;
@@ -880,7 +850,7 @@ void Channel::setSustain(bool sustained)
 	sus = sustained;
 }
 
-void Channel::updateInstrumentPart(int part, byte value)
+void Channel::updateInstrumentPart(int part, uint8_t value)
 {
 	switch (part) {
 	case 0:
@@ -928,9 +898,9 @@ void Channel::updateInstrumentPart(int part, byte value)
 	}
 }
 
-void Channel::updateInstrument(const byte* inst)
+void Channel::updateInstrument(std::span<const uint8_t, 8> inst)
 {
-	for (int part = 0; part < 8; ++part) {
+	for (auto part : xrange(8)) {
 		updateInstrumentPart(part, inst[part]);
 	}
 }
@@ -938,27 +908,28 @@ void Channel::updateInstrument(const byte* inst)
 YM2413::YM2413()
 	: lfo_am_cnt(0), lfo_pm_cnt(0)
 {
-	if (0) {
-		for (auto& e : tl.tab) std::cout << e << '\n';
+	if (false) {
+		for (const auto& e : tlTab) std::cout << e << '\n';
 		std::cout << '\n';
-		for (auto& e : sin.tab) std::cout << e << '\n';
+		for (const auto& s : sinTab) {
+			for (const auto& e : s) std::cout << e << '\n';
+		}
 	}
 
-	memset(reg, 0, sizeof(reg)); // avoid UMR
+	ranges::fill(reg, 0); // avoid UMR
 	eg_cnt = 0;
 	noise_rng = 0;
 
 	reset();
 }
 
-void YM2413::updateCustomInstrument(int part, byte value)
+void YM2413::updateCustomInstrument(int part, uint8_t value)
 {
 	// Update instrument definition.
 	inst_tab[0][part] = value;
 
 	// Update every channel that has instrument 0 selected.
-	const int numMelodicChannels = isRhythm() ? 6 : 9;
-	for (int ch = 0; ch < numMelodicChannels; ++ch) {
+	for (auto ch : xrange(isRhythm() ? 6 : 9)) {
 		Channel& channel = channels[ch];
 		if ((reg[0x30 + ch] & 0xF0) == 0) {
 			channel.updateInstrumentPart(part, value);
@@ -966,24 +937,24 @@ void YM2413::updateCustomInstrument(int part, byte value)
 	}
 }
 
-void YM2413::setRhythmFlags(byte old)
+void YM2413::setRhythmFlags(uint8_t old)
 {
 	Channel& ch6 = channels[6];
 	Channel& ch7 = channels[7];
 	Channel& ch8 = channels[8];
 
 	// flags = X | X | mode | BD | SD | TOM | TC | HH
-	byte flags = reg[0x0E];
+	uint8_t flags = reg[0x0E];
 	if ((flags ^ old) & 0x20) {
 		if (flags & 0x20) { // OFF -> ON
 			// Bass drum.
 			ch6.updateInstrument(inst_tab[16]);
 			// High hat and snare drum.
 			ch7.updateInstrument(inst_tab[17]);
-			ch7.mod.setTotalLevel(ch7, (reg[0x37] >> 4) << 2); // High hat
+			ch7.mod.setTotalLevel(ch7, uint8_t((reg[0x37] >> 4) << 2)); // High hat
 			// Tom-tom and top cymbal.
 			ch8.updateInstrument(inst_tab[18]);
-			ch8.mod.setTotalLevel(ch8, (reg[0x38] >> 4) << 2); // Tom-tom
+			ch8.mod.setTotalLevel(ch8, uint8_t((reg[0x38] >> 4) << 2)); // Tom-tom
 		} else { // ON -> OFF
 			ch6.updateInstrument(inst_tab[reg[0x36] >> 4]);
 			ch7.updateInstrument(inst_tab[reg[0x37] >> 4]);
@@ -1023,17 +994,14 @@ void YM2413::reset()
 	idleSamples = 0;
 
 	// setup instruments table
-	for (int instrument = 0; instrument < 19; ++instrument) {
-		for (int part = 0; part < 8; ++part) {
-			inst_tab[instrument][part] = table[instrument][part];
-		}
-	}
+	inst_tab = table;
 
 	// reset with register write
 	writeReg(0x0F, 0); // test reg
-	for (int i = 0x3F; i >= 0x10; --i) {
+	for (uint8_t i = 0x3F; i >= 0x10; --i) {
 		writeReg(i, 0);
 	}
+	registerLatch = 0;
 
 	resetOperators();
 }
@@ -1051,18 +1019,18 @@ bool YM2413::isRhythm() const
 	return (reg[0x0E] & 0x20) != 0;
 }
 
-Channel& YM2413::getChannelForReg(byte r)
+Channel& YM2413::getChannelForReg(uint8_t r)
 {
-	byte chan = (r & 0x0F) % 9; // verified on real YM2413
+	uint8_t chan = (r & 0x0F) % 9; // verified on real YM2413
 	return channels[chan];
 }
 
-int YM2413::getAmplificationFactor() const
+float YM2413::getAmplificationFactor() const
 {
-	return 1 << 4;
+	return 1.0f / 2048.0f;
 }
 
-void YM2413::generateChannels(int* bufs[9 + 5], unsigned num)
+void YM2413::generateChannels(std::span<float*, 9 + 5> bufs, unsigned num)
 {
 	// TODO make channelActiveBits a member and
 	//      keep it up-to-date all the time
@@ -1071,8 +1039,7 @@ void YM2413::generateChannels(int* bufs[9 + 5], unsigned num)
 	// bits 9-17 -> ch[0-8].mod (only ch7 and ch8 used)
 	unsigned channelActiveBits = 0;
 
-	const int numMelodicChannels = isRhythm() ? 6 : 9;
-	for (int ch = 0; ch < numMelodicChannels; ++ch) {
+	for (auto ch : xrange(isRhythm() ? 6 : 9)) {
 		if (channels[ch].car.isActive()) {
 			channelActiveBits |= 1 << ch;
 		} else {
@@ -1080,10 +1047,8 @@ void YM2413::generateChannels(int* bufs[9 + 5], unsigned num)
 		}
 	}
 	if (isRhythm()) {
-		bufs[6] = nullptr;
-		bufs[7] = nullptr;
-		bufs[8] = nullptr;
-		for (int ch = 6; ch < 9; ++ch) {
+		ranges::fill(subspan<3>(bufs, 6), nullptr);
+		for (auto ch : xrange(6, 9)) {
 			if (channels[ch].car.isActive()) {
 				channelActiveBits |= 1 << ch;
 			} else {
@@ -1101,11 +1066,7 @@ void YM2413::generateChannels(int* bufs[9 + 5], unsigned num)
 			bufs[13] = nullptr;
 		}
 	} else {
-		bufs[ 9] = nullptr;
-		bufs[10] = nullptr;
-		bufs[11] = nullptr;
-		bufs[12] = nullptr;
-		bufs[13] = nullptr;
+		ranges::fill(subspan<5>(bufs, 9), nullptr);
 	}
 
 	if (channelActiveBits) {
@@ -1123,7 +1084,7 @@ void YM2413::generateChannels(int* bufs[9 + 5], unsigned num)
 		idleSamples += num;
 	}
 
-	for (unsigned i = 0; i < num; ++i) {
+	for (auto i : xrange(num)) {
 		// Amplitude modulation: 27 output levels (triangle waveform)
 		// 1 level takes one of: 192, 256 or 448 samples
 		// One entry from LFO_AM_TABLE lasts for 64 samples
@@ -1135,11 +1096,11 @@ void YM2413::generateChannels(int* bufs[9 + 5], unsigned num)
 		unsigned lfo_am = lfo_am_table[lfo_am_cnt.toInt()] >> 1;
 		unsigned lfo_pm = lfo_pm_cnt.toInt() & 7;
 
-		for (int ch = 0; ch < numMelodicChannels; ++ch) {
+		for (auto ch : xrange(isRhythm() ? 6 : 9)) {
 			Channel& channel = channels[ch];
 			int fm = channel.mod.calc_slot_mod(channel, eg_cnt, false, lfo_pm, lfo_am);
 			if ((channelActiveBits >> ch) & 1) {
-				bufs[ch][i] += channel.calcOutput(eg_cnt, lfo_pm, lfo_am, fm);
+				bufs[ch][i] += narrow_cast<float>(channel.calcOutput(eg_cnt, lfo_pm, lfo_am, fm));
 			}
 		}
 		if (isRhythm()) {
@@ -1153,14 +1114,14 @@ void YM2413::generateChannels(int* bufs[9 + 5], unsigned num)
 			Channel& channel6 = channels[6];
 			int fm = channel6.mod.calc_slot_mod(channels[6], eg_cnt, true, lfo_pm, lfo_am);
 			if (channelActiveBits & (1 << 6)) {
-				bufs[ 9][i] += 2 * channel6.calcOutput(eg_cnt, lfo_pm, lfo_am, fm);
+				bufs[ 9][i] += narrow_cast<float>(2 * channel6.calcOutput(eg_cnt, lfo_pm, lfo_am, fm));
 			}
 
 			// TODO: Skip phase generation if output will 0 anyway.
 			//       Possible by passing phase generator as a template parameter to
 			//       calcOutput.
 
-			/*  phaseC7 */channels[7].car.calc_phase(channels[7], lfo_pm);
+			/*C7*/  (void)channels[7].car.calc_phase(channels[7], lfo_pm);
 			int phaseM7 = channels[7].mod.calc_phase(channels[7], lfo_pm);
 			int phaseC8 = channels[8].car.calc_phase(channels[8], lfo_pm);
 			int phaseM8 = channels[8].mod.calc_phase(channels[8], lfo_pm);
@@ -1168,25 +1129,25 @@ void YM2413::generateChannels(int* bufs[9 + 5], unsigned num)
 			// Snare Drum (verified on real YM3812)
 			if (channelActiveBits & (1 << 7)) {
 				Slot& SLOT7_2 = channels[7].car;
-				bufs[10][i] += 2 * SLOT7_2.calcOutput(channels[7], eg_cnt, true, lfo_am, genPhaseSnare(phaseM7, noise_rng));
+				bufs[10][i] += narrow_cast<float>(2 * SLOT7_2.calcOutput(channels[7], eg_cnt, true, lfo_am, genPhaseSnare(phaseM7, noise_rng)));
 			}
 
 			// Top Cymbal (verified on real YM2413)
 			if (channelActiveBits & (1 << 8)) {
 				Slot& SLOT8_2 = channels[8].car;
-				bufs[11][i] += 2 * SLOT8_2.calcOutput(channels[8], eg_cnt, true, lfo_am, genPhaseCymbal(phaseM7, phaseC8));
+				bufs[11][i] += narrow_cast<float>(2 * SLOT8_2.calcOutput(channels[8], eg_cnt, true, lfo_am, genPhaseCymbal(phaseM7, phaseC8)));
 			}
 
 			// High Hat (verified on real YM3812)
 			if (channelActiveBits & (1 << (7 + 9))) {
 				Slot& SLOT7_1 = channels[7].mod;
-				bufs[12][i] += 2 * SLOT7_1.calcOutput(channels[7], eg_cnt, true, lfo_am, genPhaseHighHat(phaseM7, phaseC8, noise_rng));
+				bufs[12][i] += narrow_cast<float>(2 * SLOT7_1.calcOutput(channels[7], eg_cnt, true, lfo_am, genPhaseHighHat(phaseM7, phaseC8, noise_rng)));
 			}
 
 			// Tom Tom (verified on real YM3812)
 			if (channelActiveBits & (1 << (8 + 9))) {
 				Slot& SLOT8_1 = channels[8].mod;
-				bufs[13][i] += 2 * SLOT8_1.calcOutput(channels[8], eg_cnt, true, lfo_am, phaseM8);
+				bufs[13][i] += narrow_cast<float>(2 * SLOT8_1.calcOutput(channels[8], eg_cnt, true, lfo_am, phaseM8));
 			}
 		}
 
@@ -1222,9 +1183,23 @@ void YM2413::generateChannels(int* bufs[9 + 5], unsigned num)
 	}
 }
 
-void YM2413::writeReg(byte r, byte v)
+void YM2413::writePort(bool port, uint8_t value, int /*offset*/)
 {
-	byte old = reg[r];
+	if (port == 0) {
+		registerLatch = value;
+	} else {
+		writeReg(registerLatch & 0x3f, value);
+	}
+}
+
+void YM2413::pokeReg(uint8_t r, uint8_t v)
+{
+	writeReg(r, v);
+}
+
+void YM2413::writeReg(uint8_t r, uint8_t v)
+{
+	uint8_t old = reg[r];
 	reg[r] = v;
 
 	switch (r & 0xF0) {
@@ -1254,7 +1229,7 @@ void YM2413::writeReg(byte r, byte v)
 		break;
 	}
 	case 0x20: {
-		// 20-28: suson, keyon, block, FNUM 8
+		// 20-28: susOn, keyOn, block, FNUM 8
 		Channel& ch = getChannelForReg(r);
 		ch.mod.setKeyOnOff(Slot::KEY_MAIN, (v & 0x10) != 0);
 		ch.car.setKeyOnOff(Slot::KEY_MAIN, (v & 0x10) != 0);
@@ -1267,17 +1242,17 @@ void YM2413::writeReg(byte r, byte v)
 	}
 	case 0x30: { // inst 4 MSBs, VOL 4 LSBs
 		Channel& ch = getChannelForReg(r);
-		ch.car.setTotalLevel(ch, (v & 0x0F) << 2);
+		ch.car.setTotalLevel(ch, uint8_t((v & 0x0F) << 2));
 
 		// Check wether we are in rhythm mode and handle instrument/volume
 		// register accordingly.
 
-		byte chan = (r & 0x0F) % 9; // verified on real YM2413
+		uint8_t chan = (r & 0x0F) % 9; // verified on real YM2413
 		if (isRhythm() && (chan >= 6)) {
 			if (chan > 6) {
-				// channel 7 or 8 in ryhthm mode
+				// channel 7 or 8 in rythm mode
 				// modulator envelope is HH(chan=7) or TOM(chan=8).
-				ch.mod.setTotalLevel(ch, (v >> 4) << 2);
+				ch.mod.setTotalLevel(ch, uint8_t((v >> 4) << 2));
 			}
 		} else {
 			if ((old & 0xF0) != (v & 0xF0)) {
@@ -1291,14 +1266,14 @@ void YM2413::writeReg(byte r, byte v)
 	}
 }
 
-byte YM2413::peekReg(byte r) const
+uint8_t YM2413::peekReg(uint8_t r) const
 {
 	return reg[r];
 }
 
-} // namespace Burczynsk
+} // namespace YM2413Burczynski
 
-static std::initializer_list<enum_string<YM2413Burczynski::Slot::EnvelopeState>> envelopeStateInfo = {
+static constexpr std::initializer_list<enum_string<YM2413Burczynski::Slot::EnvelopeState>> envelopeStateInfo = {
 	{ "DUMP",    YM2413Burczynski::Slot::EG_DUMP    },
 	{ "ATTACK",  YM2413Burczynski::Slot::EG_ATTACK  },
 	{ "DECAY",   YM2413Burczynski::Slot::EG_DECAY   },
@@ -1319,29 +1294,29 @@ void Slot::serialize(Archive& a, unsigned /*version*/)
 {
 	// TODO some of the serialized members here could be calculated from
 	//      other members
-	int waveform = (wavetable == &sin.tab[0]) ? 0 : 1;
+	uint8_t waveform = (waveTable.data() == sinTab[0].data()) ? 0 : 1;
 	a.serialize("waveform", waveform);
-	if (a.isLoader()) {
+	if constexpr (Archive::IS_LOADER) {
 		setWaveform(waveform);
 	}
 
-	a.serialize("phase", phase);
-	a.serialize("TL", TL);
-	a.serialize("volume", egout);
-	a.serialize("sl", sl);
-	a.serialize("state", state);
-	a.serialize("op1_out", op1_out);
-	a.serialize("eg_sustain", eg_sustain);
-	a.serialize("fb_shift", fb_shift);
-	a.serialize("key", key);
-	a.serialize("ar", ar);
-	a.serialize("dr", dr);
-	a.serialize("rr", rr);
-	a.serialize("KSR", KSR);
-	a.serialize("ksl", ksl);
-	a.serialize("mul", mul);
-	a.serialize("AMmask", AMmask);
-	a.serialize("vib", vib);
+	a.serialize("phase",      phase,
+	            "TL",         TL,
+	            "volume",     egOut,
+	            "sl",         sl,
+	            "state",      state,
+	            "op1_out",    op1_out,
+	            "eg_sustain", eg_sustain,
+	            "fb_shift",   fb_shift,
+	            "key",        key,
+	            "ar",         ar,
+	            "dr",         dr,
+	            "rr",         rr,
+	            "KSR",        KSR,
+	            "ksl",        ksl,
+	            "mul",        mul,
+	            "AMmask",     AMmask,
+	            "vib",        vib);
 
 	// These are calculated by updateTotalLevel()
 	//   TLL
@@ -1357,19 +1332,19 @@ template<typename Archive>
 void Channel::serialize(Archive& a, unsigned /*version*/)
 {
 	// mod/car were originally an array, keep serializing as such for bwc
-	Slot slots[2] = { mod, car };
+	std::array<Slot, 2> slots = {mod, car};
 	a.serialize("slots", slots);
-	if (a.isLoader()) {
+	if constexpr (Archive::IS_LOADER) {
 		mod = slots[0];
 		car = slots[1];
 	}
 
-	a.serialize("block_fnum", block_fnum);
-	a.serialize("fc", fc);
-	a.serialize("ksl_base", ksl_base);
-	a.serialize("sus", sus);
+	a.serialize("block_fnum", block_fnum,
+	            "fc",         fc,
+	            "ksl_base",   ksl_base,
+	            "sus",        sus);
 
-	if (a.isLoader()) {
+	if constexpr (Archive::IS_LOADER) {
 		mod.updateFrequency(*this);
 		car.updateFrequency(*this);
 	}
@@ -1378,6 +1353,7 @@ void Channel::serialize(Archive& a, unsigned /*version*/)
 // version 1: initial version
 // version 2: 'registers' are moved here (no longer serialized in base class)
 // version 3: removed 'rhythm' variable
+// version 4: added 'registerLatch'
 template<typename Archive>
 void YM2413::serialize(Archive& a, unsigned version)
 {
@@ -1386,16 +1362,21 @@ void YM2413::serialize(Archive& a, unsigned version)
 	if (a.versionBelow(version, 2)) a.endTag("YM2413Core");
 
 	// only serialize user instrument
-	a.serialize_blob("user_instrument", inst_tab[0], 8);
-	a.serialize("channels", channels);
-	a.serialize("eg_cnt", eg_cnt);
-	a.serialize("noise_rng", noise_rng);
-	a.serialize("lfo_am_cnt", lfo_am_cnt);
-	a.serialize("lfo_pm_cnt", lfo_pm_cnt);
+	a.serialize_blob("user_instrument", inst_tab[0]);
+	a.serialize("channels",   channels,
+	            "eg_cnt",     eg_cnt,
+	            "noise_rng",  noise_rng,
+	            "lfo_am_cnt", lfo_am_cnt,
+	            "lfo_pm_cnt", lfo_pm_cnt);
+	if (a.versionAtLeast(version, 4)) {
+		a.serialize("registerLatch", registerLatch);
+	} else {
+		// could be restored from MSXMusicBase, worth the effort?
+	}
 	// don't serialize idleSamples, it's only an optimization
 }
 
-} // namespace Burczynsk
+} // namespace YM2413Burczynski
 
 using YM2413Burczynski::YM2413;
 INSTANTIATE_SERIALIZE_METHODS(YM2413);

@@ -14,6 +14,7 @@
 #include "SCSI.hh"
 #include "SCSIDevice.hh"
 #include "AlignedBuffer.hh"
+#include <array>
 #include <memory>
 
 namespace openmsx {
@@ -25,13 +26,13 @@ class MB89352
 public:
 	explicit MB89352(const DeviceConfig& config);
 
-	void reset(bool scsireset);
-	byte readRegister(byte reg);
-	byte peekRegister(byte reg) const;
-	byte readDREG();
-	byte peekDREG() const;
-	void writeRegister(byte reg, byte value);
-	void writeDREG(byte value);
+	void reset(bool scsiReset);
+	[[nodiscard]] uint8_t readRegister(uint8_t reg);
+	[[nodiscard]] uint8_t peekRegister(uint8_t reg) const;
+	[[nodiscard]] uint8_t readDREG();
+	[[nodiscard]] uint8_t peekDREG() const;
+	void writeRegister(uint8_t reg, uint8_t value);
+	void writeDREG(uint8_t value);
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
@@ -39,32 +40,35 @@ public:
 private:
 	void disconnect();
 	void softReset();
-	void setACKREQ(byte& value);
+	void setACKREQ(uint8_t& value);
 	void resetACKREQ();
-	byte getSSTS() const;
+	[[nodiscard]] uint8_t getSSTS() const;
 
-	std::unique_ptr<SCSIDevice> dev[8];
+private:
+	static constexpr unsigned MAX_DEV = 8;
+
+	std::array<std::unique_ptr<SCSIDevice>, MAX_DEV> dev;
 	AlignedByteArray<SCSIDevice::BUFFER_SIZE> buffer; // buffer for transfer
 	unsigned cdbIdx;                // cdb index
 	unsigned bufIdx;                // buffer index
-	int msgin;                      // Message In flag
+	int msgin = 0;                  // Message In flag
 	int counter;                    // read and written number of bytes
 	                                // within the range in the buffer
-	unsigned blockCounter;          // Number of blocks outside buffer
+	unsigned blockCounter = 0;      // Number of blocks outside buffer
 	                                // (512bytes / block)
 	int tc;                         // counter for hardware transfer
 	SCSI::Phase phase;              //
-	SCSI::Phase nextPhase;          // for message system
-	byte myId;                      // SPC SCSI ID 0..7
-	byte targetId;                  // SCSI Device target ID 0..7
-	byte regs[16];                  // SPC register
+	SCSI::Phase nextPhase = SCSI::UNDEFINED; // for message system
+	uint8_t myId;                   // SPC SCSI ID 0..7
+	uint8_t targetId = 0;           // SCSI Device target ID 0..7
+	std::array<uint8_t, 16> regs;   // SPC register
 	bool rst;                       // SCSI bus reset signal
-	byte atn;                       // SCSI bus attention signal
+	uint8_t atn;                    // SCSI bus attention signal
 	bool isEnabled;                 // spc enable flag
 	bool isBusy;                    // spc now working
 	bool isTransfer;                // hardware transfer mode
-	//TODO: bool devBusy;           // CDROM busy (buffer conflict prevention)
-	byte cdb[12];                   // Command Descripter Block
+	//TODO: bool devBusy;           // CD-ROM busy (buffer conflict prevention)
+	std::array<uint8_t, 12> cdb;    // Command Descriptor Block
 };
 
 } // namespace openmsx

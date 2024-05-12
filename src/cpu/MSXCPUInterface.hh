@@ -1,49 +1,66 @@
 #ifndef MSXCPUINTERFACE_HH
 #define MSXCPUINTERFACE_HH
 
+#include "BreakPoint.hh"
+#include "CacheLine.hh"
+#include "DebugCondition.hh"
+#include "WatchPoint.hh"
+
 #include "SimpleDebuggable.hh"
 #include "InfoTopic.hh"
-#include "CacheLine.hh"
 #include "MSXDevice.hh"
-#include "BreakPoint.hh"
-#include "WatchPoint.hh"
+#include "ProfileCounters.hh"
 #include "openmsx.hh"
-#include "likely.hh"
-#include <algorithm>
+
+#include "narrow.hh"
+#include "ranges.hh"
+
+#include <array>
 #include <bitset>
-#include <vector>
+#include <concepts>
 #include <memory>
+#include <vector>
 
 namespace openmsx {
 
-class VDPIODelay;
-class DummyDevice;
-class MSXMotherBoard;
-class MSXCPU;
-class CliComm;
+class BooleanSetting;
 class BreakPoint;
-class DebugCondition;
-class CartridgeSlotManager;
+class CliComm;
+class DummyDevice;
+class MSXCPU;
+class MSXMotherBoard;
+class VDPIODelay;
 
-struct CompareBreakpoints {
-	bool operator()(const BreakPoint& x, const BreakPoint& y) const {
-		return x.getAddress() < y.getAddress();
-	}
-	bool operator()(const BreakPoint& x, word y) const {
-		return x.getAddress() < y;
-	}
-	bool operator()(word x, const BreakPoint& y) const {
-		return x < y.getAddress();
-	}
+inline constexpr bool PROFILE_CACHELINES = false;
+enum CacheLineCounters {
+	NonCachedRead,
+	NonCachedWrite,
+	GetReadCacheLine,
+	GetWriteCacheLine,
+	SlowRead,
+	SlowWrite,
+	DisallowCacheRead,
+	DisallowCacheWrite,
+	InvalidateAllSlots,
+	InvalidateReadWrite,
+	InvalidateRead,
+	InvalidateWrite,
+	FillReadWrite,
+	FillRead,
+	FillWrite,
+	NUM // must be last
 };
+std::ostream& operator<<(std::ostream& os, EnumTypeName<CacheLineCounters>);
+std::ostream& operator<<(std::ostream& os, EnumValueName<CacheLineCounters> evn);
 
-class MSXCPUInterface
+class MSXCPUInterface : public ProfileCounters<PROFILE_CACHELINES, CacheLineCounters>
 {
 public:
-	MSXCPUInterface(const MSXCPUInterface&) = delete;
-	MSXCPUInterface& operator=(const MSXCPUInterface&) = delete;
-
 	explicit MSXCPUInterface(MSXMotherBoard& motherBoard);
+	MSXCPUInterface(const MSXCPUInterface&) = delete;
+	MSXCPUInterface(MSXCPUInterface&&) = delete;
+	MSXCPUInterface& operator=(const MSXCPUInterface&) = delete;
+	MSXCPUInterface& operator=(MSXCPUInterface&&) = delete;
 	~MSXCPUInterface();
 
 	/**
@@ -81,15 +98,15 @@ public:
 	bool replace_IO_Out(byte port, MSXDevice* oldDevice, MSXDevice* newDevice);
 
 	/**
-	 * Devices can register themself in the MSX slotstructure.
+	 * Devices can register themself in the MSX slot structure.
 	 * This is normally done in their constructor. Once devices
 	 * are registered their readMem() / writeMem() methods can
 	 * get called.
 	 */
 	void registerMemDevice(MSXDevice& device,
-	                       int ps, int ss, int base, int size);
+	                       int ps, int ss, unsigned base, unsigned size);
 	void unregisterMemDevice(MSXDevice& device,
-	                         int ps, int ss, int base, int size);
+	                         int ps, int ss, unsigned base, unsigned size);
 
 	/** (Un)register global writes.
 	  * @see MSXDevice::globalWrite()
@@ -111,8 +128,9 @@ public:
 	/**
 	 * This reads a byte from the currently selected device
 	 */
-	inline byte readMem(word address, EmuTime::param time) {
-		if (unlikely(disallowReadCache[address >> CacheLine::BITS])) {
+	byte readMem(word address, EmuTime::param time) {
+		tick(CacheLineCounters::SlowRead);
+		if (disallowReadCache[address >> CacheLine::BITS]) [[unlikely]] {
 			return readMemSlow(address, time);
 		}
 		return visibleDevices[address >> 14]->readMem(address, time);
@@ -121,8 +139,9 @@ public:
 	/**
 	 * This writes a byte to the currently selected device
 	 */
-	inline void writeMem(word address, byte value, EmuTime::param time) {
-		if (unlikely(disallowWriteCache[address >> CacheLine::BITS])) {
+	void writeMem(word address, byte value, EmuTime::param time) {
+		tick(CacheLineCounters::SlowWrite);
+		if (disallowWriteCache[address >> CacheLine::BITS]) [[unlikely]] {
 			writeMemSlow(address, value, time);
 			return;
 		}
@@ -133,7 +152,7 @@ public:
 	 * This read a byte from the given IO-port
 	 * @see MSXDevice::readIO()
 	 */
-	inline byte readIO(word port, EmuTime::param time) {
+	byte readIO(word port, EmuTime::param time) {
 		return IO_In[port & 0xFF]->readIO(port, time);
 	}
 
@@ -141,7 +160,7 @@ public:
 	 * This writes a byte to the given IO-port
 	 * @see MSXDevice::writeIO()
 	 */
-	inline void writeIO(word port, byte value, EmuTime::param time) {
+	void writeIO(word port, byte value, EmuTime::param time) {
 		IO_Out[port & 0xFF]->writeIO(port, value, time);
 	}
 
@@ -157,8 +176,9 @@ public:
 	 * An interval will never cross a 16KB border.
 	 * An interval will never contain the address 0xffff.
 	 */
-	inline const byte* getReadCacheLine(word start) const {
-		if (unlikely(disallowReadCache[start >> CacheLine::BITS])) {
+	[[nodiscard]] const byte* getReadCacheLine(word start) const {
+		tick(CacheLineCounters::GetReadCacheLine);
+		if (disallowReadCache[start >> CacheLine::BITS]) [[unlikely]] {
 			return nullptr;
 		}
 		return visibleDevices[start >> 14]->getReadCacheLine(start);
@@ -176,18 +196,19 @@ public:
 	 * An interval will never cross a 16KB border.
 	 * An interval will never contain the address 0xffff.
 	 */
-	inline byte* getWriteCacheLine(word start) const {
-		if (unlikely(disallowWriteCache[start >> CacheLine::BITS])) {
+	[[nodiscard]] byte* getWriteCacheLine(word start) const {
+		tick(CacheLineCounters::GetWriteCacheLine);
+		if (disallowWriteCache[start >> CacheLine::BITS]) [[unlikely]] {
 			return nullptr;
 		}
 		return visibleDevices[start >> 14]->getWriteCacheLine(start);
 	}
 
 	/**
-	 * CPU uses this method to read 'extra' data from the databus
+	 * CPU uses this method to read 'extra' data from the data bus
 	 * used in interrupt routines. In MSX this returns always 255.
 	 */
-	byte readIRQVector();
+	[[nodiscard]] byte readIRQVector() const;
 
 	/*
 	 * Should only be used by PPI
@@ -195,66 +216,76 @@ public:
 	 */
 	void setPrimarySlots(byte value);
 
+	/** @see MSXCPU::invalidateRWCache() */
+	void invalidateRWCache(word start, unsigned size, int ps, int ss);
+	void invalidateRCache (word start, unsigned size, int ps, int ss);
+	void invalidateWCache (word start, unsigned size, int ps, int ss);
+
+	/** @see MSXCPU::fillRWCache() */
+	void fillRWCache(unsigned start, unsigned size, const byte* rData, byte* wData, int ps, int ss);
+	void fillRCache (unsigned start, unsigned size, const byte* rData,              int ps, int ss);
+	void fillWCache (unsigned start, unsigned size,                    byte* wData, int ps, int ss);
+
 	/**
 	 * Peek memory location
 	 * @see MSXDevice::peekMem()
 	 */
-	byte peekMem(word address, EmuTime::param time) const;
-	byte peekSlottedMem(unsigned address, EmuTime::param time) const;
+	[[nodiscard]] byte peekMem(word address, EmuTime::param time) const;
+	[[nodiscard]] byte peekSlottedMem(unsigned address, EmuTime::param time) const;
 	byte readSlottedMem(unsigned address, EmuTime::param time);
 	void writeSlottedMem(unsigned address, byte value,
 	                     EmuTime::param time);
 
 	void setExpanded(int ps);
 	void unsetExpanded(int ps);
-	void testUnsetExpanded(int ps, std::vector<MSXDevice*> allowed) const;
-	inline bool isExpanded(int ps) const { return expanded[ps] != 0; }
+	void testUnsetExpanded(int ps,
+		               std::span<const std::unique_ptr<MSXDevice>> allowed) const;
+	[[nodiscard]] bool isExpanded(int ps) const { return expanded[ps] != 0; }
 	void changeExpanded(bool newExpanded);
 
-	DummyDevice& getDummyDevice() { return *dummyDevice; }
+	[[nodiscard]] auto getPrimarySlot  (int page) const { return primarySlotState[page]; }
+	[[nodiscard]] auto getSecondarySlot(int page) const { return secondarySlotState[page]; }
 
-	static void insertBreakPoint(const BreakPoint& bp);
-	static void removeBreakPoint(const BreakPoint& bp);
+	[[nodiscard]] DummyDevice& getDummyDevice() { return *dummyDevice; }
+
+	void insertBreakPoint(BreakPoint bp);
+	void removeBreakPoint(const BreakPoint& bp);
+	void removeBreakPoint(unsigned id);
 	using BreakPoints = std::vector<BreakPoint>;
-	static const BreakPoints& getBreakPoints() { return breakPoints; }
+	[[nodiscard]] static const BreakPoints& getBreakPoints() { return breakPoints; }
 
 	void setWatchPoint(const std::shared_ptr<WatchPoint>& watchPoint);
 	void removeWatchPoint(std::shared_ptr<WatchPoint> watchPoint);
+	void removeWatchPoint(unsigned id);
 	// note: must be shared_ptr (not unique_ptr), see WatchIO::doReadCallback()
 	using WatchPoints = std::vector<std::shared_ptr<WatchPoint>>;
-	const WatchPoints& getWatchPoints() const { return watchPoints; }
+	[[nodiscard]] const WatchPoints& getWatchPoints() const { return watchPoints; }
 
-	static void setCondition(const DebugCondition& cond);
-	static void removeCondition(const DebugCondition& cond);
+	void setCondition(DebugCondition cond);
+	void removeCondition(const DebugCondition& cond);
+	void removeCondition(unsigned id);
 	using Conditions = std::vector<DebugCondition>;
-	static const Conditions& getConditions() { return conditions; }
+	[[nodiscard]] static const Conditions& getConditions() { return conditions; }
 
-	static bool isBreaked() { return breaked; }
+	[[nodiscard]] static bool isBreaked() { return breaked; }
 	void doBreak();
 	void doStep();
 	void doContinue();
 
-	// should only be used by CPUCore
-	static bool isStep()            { return step; }
-	static void setStep    (bool x) { step = x; }
-	static bool isContinue()        { return continued; }
-	static void setContinue(bool x) { continued = x; }
-
 	// breakpoint methods used by CPUCore
-	static bool anyBreakPoints()
+	[[nodiscard]] static bool anyBreakPoints()
 	{
 		return !breakPoints.empty() || !conditions.empty();
 	}
-	static bool checkBreakPoints(unsigned pc, MSXMotherBoard& motherBoard)
+	[[nodiscard]] bool checkBreakPoints(unsigned pc)
 	{
-		auto range = equal_range(begin(breakPoints), end(breakPoints),
-		                         pc, CompareBreakpoints());
+		auto range = ranges::equal_range(breakPoints, pc, {}, &BreakPoint::getAddress);
 		if (conditions.empty() && (range.first == range.second)) {
 			return false;
 		}
 
 		// slow path non-inlined
-		checkBreakPoints(range, motherBoard);
+		checkBreakPoints(range);
 		return isBreaked();
 	}
 
@@ -264,7 +295,10 @@ public:
 	// In fast-forward mode, breakpoints, watchpoints and conditions should
 	// not trigger.
 	void setFastForward(bool fastForward_) { fastForward = fastForward_; }
-	bool isFastForward() const { return fastForward; }
+	[[nodiscard]] bool isFastForward() const { return fastForward; }
+
+	[[nodiscard]] MSXDevice* getMSXDevice(int ps, int ss, int page);
+	[[nodiscard]] MSXDevice* getVisibleMSXDevice(int page) { return visibleDevices[page]; }
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
@@ -278,82 +312,79 @@ private:
 	void register_IO  (int port, bool isIn,
 	                   MSXDevice*& devicePtr, MSXDevice* device);
 	void unregister_IO(MSXDevice*& devicePtr, MSXDevice* device);
-	void testRegisterSlot(MSXDevice& device,
-	                      int ps, int ss, int base, int size);
+	void testRegisterSlot(const MSXDevice& device,
+	                      int ps, int ss, unsigned base, unsigned size);
 	void registerSlot(MSXDevice& device,
-	                  int ps, int ss, int base, int size);
+	                  int ps, int ss, unsigned base, unsigned size);
 	void unregisterSlot(MSXDevice& device,
-	                    int ps, int ss, int base, int size);
+	                    int ps, int ss, unsigned base, unsigned size);
 
 
-	static void checkBreakPoints(std::pair<BreakPoints::const_iterator,
-	                                       BreakPoints::const_iterator> range,
-	                             MSXMotherBoard& motherBoard);
+	void checkBreakPoints(std::pair<BreakPoints::const_iterator,
+	                                BreakPoints::const_iterator> range);
 
 	void removeAllWatchPoints();
-	void registerIOWatch  (WatchPoint& watchPoint, MSXDevice** devices);
-	void unregisterIOWatch(WatchPoint& watchPoint, MSXDevice** devices);
 	void updateMemWatch(WatchPoint::Type type);
 	void executeMemWatch(WatchPoint::Type type, unsigned address,
 	                     unsigned value = ~0u);
 
-	void doContinue2();
-
 	struct MemoryDebug final : SimpleDebuggable {
 		explicit MemoryDebug(MSXMotherBoard& motherBoard);
-		byte read(unsigned address, EmuTime::param time) override;
+		[[nodiscard]] byte read(unsigned address, EmuTime::param time) override;
 		void write(unsigned address, byte value, EmuTime::param time) override;
 	} memoryDebug;
 
 	struct SlottedMemoryDebug final : SimpleDebuggable {
 		explicit SlottedMemoryDebug(MSXMotherBoard& motherBoard);
-		byte read(unsigned address, EmuTime::param time) override;
+		[[nodiscard]] byte read(unsigned address, EmuTime::param time) override;
 		void write(unsigned address, byte value, EmuTime::param time) override;
 	} slottedMemoryDebug;
 
 	struct IODebug final : SimpleDebuggable {
 		explicit IODebug(MSXMotherBoard& motherBoard);
-		byte read(unsigned address, EmuTime::param time) override;
+		[[nodiscard]] byte read(unsigned address, EmuTime::param time) override;
 		void write(unsigned address, byte value, EmuTime::param time) override;
 	} ioDebug;
 
 	struct SlotInfo final : InfoTopic {
 		explicit SlotInfo(InfoCommand& machineInfoCommand);
-		void execute(array_ref<TclObject> tokens,
+		void execute(std::span<const TclObject> tokens,
 			     TclObject& result) const override;
-		std::string help(const std::vector<std::string>& tokens) const override;
+		[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override;
 	} slotInfo;
 
 	struct SubSlottedInfo final : InfoTopic {
 		explicit SubSlottedInfo(InfoCommand& machineInfoCommand);
-		void execute(array_ref<TclObject> tokens,
+		void execute(std::span<const TclObject> tokens,
 			     TclObject& result) const override;
-		std::string help(const std::vector<std::string>& tokens) const override;
+		[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override;
 	} subSlottedInfo;
 
 	struct ExternalSlotInfo final : InfoTopic {
 		explicit ExternalSlotInfo(InfoCommand& machineInfoCommand);
-		void execute(array_ref<TclObject> tokens,
+		void execute(std::span<const TclObject> tokens,
 			     TclObject& result) const override;
-		std::string help(const std::vector<std::string>& tokens) const override;
+		[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override;
 	} externalSlotInfo;
 
 	struct IOInfo : InfoTopic {
 		IOInfo(InfoCommand& machineInfoCommand, const char* name);
-		void helper(array_ref<TclObject> tokens,
-		            TclObject& result, MSXDevice** devices) const;
-		std::string help(const std::vector<std::string>& tokens) const override;
+		void helper(std::span<const TclObject> tokens,
+		            TclObject& result, std::span<MSXDevice*, 256> devices) const;
+		[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override;
+	protected:
+		~IOInfo() = default;
 	};
 	struct IInfo final : IOInfo {
 		explicit IInfo(InfoCommand& machineInfoCommand)
 			: IOInfo(machineInfoCommand, "input_port") {}
-		void execute(array_ref<TclObject> tokens,
+		void execute(std::span<const TclObject> tokens,
 		             TclObject& result) const override;
 	} inputPortInfo;
 	struct OInfo final : IOInfo {
 		explicit OInfo(InfoCommand& machineInfoCommand)
 			: IOInfo(machineInfoCommand, "output_port") {}
-		void execute(array_ref<TclObject> tokens,
+		void execute(std::span<const TclObject> tokens,
 		             TclObject& result) const override;
 	} outputPortInfo;
 
@@ -363,52 +394,48 @@ private:
 	  * was modified.
 	  * @param page page [0..3] to update visibleDevices for.
 	  */
-	void updateVisible(int page);
-	inline void updateVisible(int page, int ps, int ss);
+	void updateVisible(byte page);
+	inline void updateVisible(byte page, byte ps, byte ss);
 	void setSubSlot(byte primSlot, byte value);
 
 	std::unique_ptr<DummyDevice> dummyDevice;
 	MSXCPU& msxcpu;
 	CliComm& cliComm;
 	MSXMotherBoard& motherBoard;
+	BooleanSetting& pauseSetting;
 
 	std::unique_ptr<VDPIODelay> delayDevice; // can be nullptr
 
-	byte disallowReadCache [CacheLine::NUM];
-	byte disallowWriteCache[CacheLine::NUM];
-	std::bitset<CacheLine::SIZE> readWatchSet [CacheLine::NUM];
-	std::bitset<CacheLine::SIZE> writeWatchSet[CacheLine::NUM];
+	std::array<byte, CacheLine::NUM> disallowReadCache;
+	std::array<byte, CacheLine::NUM> disallowWriteCache;
+	std::array<std::bitset<CacheLine::SIZE>, CacheLine::NUM> readWatchSet;
+	std::array<std::bitset<CacheLine::SIZE>, CacheLine::NUM> writeWatchSet;
 
 	struct GlobalRwInfo {
 		MSXDevice* device;
 		word addr;
-		bool operator==(const GlobalRwInfo& rhs) const {
-			return (device == rhs.device) &&
-			       (addr   == rhs.addr);
-		}
+		[[nodiscard]] constexpr bool operator==(const GlobalRwInfo&) const = default;
 	};
 	std::vector<GlobalRwInfo> globalReads;
 	std::vector<GlobalRwInfo> globalWrites;
 
-	MSXDevice* IO_In [256];
-	MSXDevice* IO_Out[256];
-	MSXDevice* slotLayout[4][4][4];
-	MSXDevice* visibleDevices[4];
-	byte subSlotRegister[4];
-	byte primarySlotState[4];
-	byte secondarySlotState[4];
+	std::array<MSXDevice*, 256> IO_In;
+	std::array<MSXDevice*, 256> IO_Out;
+	std::array<std::array<std::array<MSXDevice*, 4>, 4>, 4> slotLayout;
+	std::array<MSXDevice*, 4> visibleDevices;
+	std::array<byte, 4> subSlotRegister;
+	std::array<byte, 4> primarySlotState;
+	std::array<byte, 4> secondarySlotState;
 	byte initialPrimarySlots;
-	unsigned expanded[4];
+	std::array<unsigned, 4> expanded;
 
-	bool fastForward; // no need to serialize
+	bool fastForward = false; // no need to serialize
 
 	//  All CPUs (Z80 and R800) of all MSX machines share this state.
-	static BreakPoints breakPoints; // sorted on address
+	static inline BreakPoints breakPoints; // sorted on address
 	WatchPoints watchPoints; // ordered in creation order,  TODO must also be static
-	static Conditions conditions; // ordered in creation order
-	static bool breaked;
-	static bool continued;
-	static bool step;
+	static inline Conditions conditions; // ordered in creation order
+	static inline bool breaked = false;
 };
 
 
@@ -417,31 +444,29 @@ private:
 template<unsigned BEGIN, unsigned END = BEGIN + 1>
 struct CT_Interval
 {
-	unsigned begin() const { return BEGIN; } // inclusive
-	unsigned end()   const { return END; }   // exclusive
+	[[nodiscard]] unsigned begin() const { return BEGIN; } // inclusive
+	[[nodiscard]] unsigned end()   const { return END; }   // exclusive
 };
 
 // Execute an 'action' for every element in the given interval(s).
-template<typename ACTION, typename CT_INTERVAL>
-inline void foreach_ct_interval(ACTION action, CT_INTERVAL interval)
+inline void foreach_ct_interval(std::invocable<unsigned> auto action, auto ct_interval)
 {
-	for (auto i = interval.begin(); i != interval.end(); ++i) {
+	for (auto i = ct_interval.begin(); i != ct_interval.end(); ++i) {
 		action(i);
 	}
 }
-template<typename ACTION, typename CT_INTERVAL, typename... CT_INTERVALS>
-inline void foreach_ct_interval(ACTION action, CT_INTERVAL front, CT_INTERVALS... tail)
+inline void foreach_ct_interval(std::invocable<unsigned> auto action,
+                                auto front_interval, auto... tail_intervals)
 {
-	foreach_ct_interval(action, front);
-	foreach_ct_interval(action, tail...);
+	foreach_ct_interval(action, front_interval);
+	foreach_ct_interval(action, tail_intervals...);
 }
 
 
 template<typename MSXDEVICE, typename... CT_INTERVALS>
 struct GlobalRWHelper
 {
-	template<typename ACTION>
-	void execute(ACTION action)
+	void execute(std::invocable<MSXCPUInterface&, MSXDevice&, unsigned> auto action)
 	{
 		auto& dev = static_cast<MSXDEVICE&>(*this);
 		auto& cpu = dev.getCPUInterface();
@@ -454,17 +479,22 @@ struct GlobalRWHelper
 template<typename MSXDEVICE, typename... CT_INTERVALS>
 struct GlobalWriteClient : GlobalRWHelper<MSXDEVICE, CT_INTERVALS...>
 {
+	GlobalWriteClient(const GlobalWriteClient&) = delete;
+	GlobalWriteClient(GlobalWriteClient&&) = delete;
+	GlobalWriteClient& operator=(const GlobalWriteClient&) = delete;
+	GlobalWriteClient& operator=(GlobalWriteClient&&) = delete;
+
 	GlobalWriteClient()
 	{
 		this->execute([](MSXCPUInterface& cpu, MSXDevice& dev, unsigned addr) {
-			cpu.registerGlobalWrite(dev, addr);
+			cpu.registerGlobalWrite(dev, narrow<word>(addr));
 		});
 	}
 
 	~GlobalWriteClient()
 	{
 		this->execute([](MSXCPUInterface& cpu, MSXDevice& dev, unsigned addr) {
-			cpu.unregisterGlobalWrite(dev, addr);
+			cpu.unregisterGlobalWrite(dev, narrow<word>(addr));
 		});
 	}
 };
@@ -472,17 +502,22 @@ struct GlobalWriteClient : GlobalRWHelper<MSXDEVICE, CT_INTERVALS...>
 template<typename MSXDEVICE, typename... CT_INTERVALS>
 struct GlobalReadClient : GlobalRWHelper<MSXDEVICE, CT_INTERVALS...>
 {
+	GlobalReadClient(const GlobalReadClient&) = delete;
+	GlobalReadClient(GlobalReadClient&&) = delete;
+	GlobalReadClient& operator=(const GlobalReadClient&) = delete;
+	GlobalReadClient& operator=(GlobalReadClient&&) = delete;
+
 	GlobalReadClient()
 	{
 		this->execute([](MSXCPUInterface& cpu, MSXDevice& dev, unsigned addr) {
-			cpu.registerGlobalRead(dev, addr);
+			cpu.registerGlobalRead(dev, narrow<word>(addr));
 		});
 	}
 
 	~GlobalReadClient()
 	{
 		this->execute([](MSXCPUInterface& cpu, MSXDevice& dev, unsigned addr) {
-			cpu.unregisterGlobalRead(dev, addr);
+			cpu.unregisterGlobalRead(dev, narrow<word>(addr));
 		});
 	}
 };

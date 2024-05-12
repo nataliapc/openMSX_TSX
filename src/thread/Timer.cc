@@ -2,16 +2,14 @@
 #include <chrono>
 #include <thread>
 
-namespace openmsx {
-namespace Timer {
+namespace openmsx::Timer {
 
 uint64_t getTime()
 {
 	static uint64_t lastTime = 0;
-	uint64_t now;
 
 	using namespace std::chrono;
-	now = duration_cast<microseconds>(
+	uint64_t now = duration_cast<microseconds>(
 		steady_clock::now().time_since_epoch()).count();
 
 	// Other parts of openMSX may crash if this function ever returns a
@@ -31,5 +29,4 @@ void sleep(uint64_t us)
 	std::this_thread::sleep_for(std::chrono::microseconds(us));
 }
 
-} // namespace Timer
-} // namespace openmsx
+} // namespace openmsx::Timer

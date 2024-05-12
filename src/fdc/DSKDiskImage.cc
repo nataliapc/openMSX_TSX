@@ -5,7 +5,7 @@
 namespace openmsx {
 
 DSKDiskImage::DSKDiskImage(const Filename& fileName)
-	: SectorBasedDisk(fileName)
+	: SectorBasedDisk(DiskName(fileName))
 	, file(std::make_shared<File>(fileName, File::PRE_CACHE))
 {
 	setNbSectors(file->getSize() / sizeof(SectorBuffer));
@@ -13,22 +13,23 @@ DSKDiskImage::DSKDiskImage(const Filename& fileName)
 
 DSKDiskImage::DSKDiskImage(const Filename& fileName,
                            std::shared_ptr<File> file_)
-	: SectorBasedDisk(fileName)
+	: SectorBasedDisk(DiskName(fileName))
 	, file(std::move(file_))
 {
 	setNbSectors(file->getSize() / sizeof(SectorBuffer));
 }
 
-void DSKDiskImage::readSectorImpl(size_t sector, SectorBuffer& buf)
+void DSKDiskImage::readSectorsImpl(
+	std::span<SectorBuffer> buffers, size_t startSector)
 {
-	file->seek(sector * sizeof(buf));
-	file->read(&buf, sizeof(buf));
+	file->seek(startSector * sizeof(SectorBuffer));
+	file->read(buffers);
 }
 
 void DSKDiskImage::writeSectorImpl(size_t sector, const SectorBuffer& buf)
 {
 	file->seek(sector * sizeof(buf));
-	file->write(&buf, sizeof(buf));
+	file->write(buf.raw);
 }
 
 bool DSKDiskImage::isWriteProtectedImpl() const

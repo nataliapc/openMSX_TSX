@@ -6,8 +6,9 @@
     <manufacturer>Sanyo</manufacturer>
     <code>PHC-28S</code>
     <release_year>1984?</release_year>
-    <description>French MSX with only 16kB of RAM: Ordinateur Personnel</description>
+    <description>Basic French MSX1 with 16kB of RAM: Ordinateur Personnel.</description>
     <type>MSX</type>
+    <region>fr</region>
   </info>
 
   <CassettePort/>
@@ -29,18 +30,18 @@
     </PPI>
 
     <VDP id="VDP">
-      <type>AY8910</type>
       <version>TMS9929A</version> <!-- HAS 4k/16k effect, no address latch, HAS sprite clones, has screen 2 mirrored mode, has mode 3 mixed mode -->
       <io base="0x98" num="2"/>
       <saturation>100</saturation> <!-- TMS9x2x and RGB output -->
     </VDP>
 
     <PSG id="PSG">
+      <type>AY8910</type>
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <PrinterPort id="Printer Port">

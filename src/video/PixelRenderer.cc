@@ -15,14 +15,20 @@ TODO:
 #include "VDPVRAM.hh"
 #include "SpriteChecker.hh"
 #include "EventDistributor.hh"
-#include "FinishFrameEvent.hh"
+#include "Event.hh"
 #include "RealTime.hh"
+#include "SpeedManager.hh"
+#include "ThrottleManager.hh"
+#include "GlobalSettings.hh"
 #include "MSXMotherBoard.hh"
 #include "Reactor.hh"
 #include "Timer.hh"
+#include "narrow.hh"
+#include "one_of.hh"
 #include "unreachable.hh"
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 
 namespace openmsx {
 
@@ -74,7 +80,7 @@ void PixelRenderer::draw(
 
 void PixelRenderer::subdivide(
 	int startX, int startY, int endX, int endY, int clipL, int clipR,
-	DrawType drawType )
+	DrawType drawType)
 {
 	// Partial first line.
 	if (startX > clipL) {
@@ -108,6 +114,10 @@ PixelRenderer::PixelRenderer(VDP& vdp_, Display& display)
 	: vdp(vdp_), vram(vdp.getVRAM())
 	, eventDistributor(vdp.getReactor().getEventDistributor())
 	, realTime(vdp.getMotherBoard().getRealTime())
+	, speedManager(
+		vdp.getReactor().getGlobalSettings().getSpeedManager())
+	, throttleManager(
+		vdp.getReactor().getGlobalSettings().getThrottleManager())
 	, renderSettings(display.getRenderSettings())
 	, videoSourceSetting(vdp.getMotherBoard().getVideoSource())
 	, spriteChecker(vdp.getSpriteChecker())
@@ -118,10 +128,6 @@ PixelRenderer::PixelRenderer(VDP& vdp_, Display& display)
 	// VDP::serialize() will call Renderer::reInit() again when it is
 	// safe to query.
 	reInit();
-
-	finishFrameDuration = 0;
-	frameSkipCounter = 999; // force drawing of frame
-	prevRenderFrame = false;
 
 	renderSettings.getMaxFrameSkipSetting().attach(*this);
 	renderSettings.getMinFrameSkipSetting().attach(*this);
@@ -144,6 +150,7 @@ void PixelRenderer::reInit()
 	// This for example can happen after a loadstate or after switching
 	// renderer in the middle of a frame.
 	renderFrame = false;
+	paintFrame = false;
 
 	rasterizer->reset();
 	displayEnabled = vdp.isDisplayEnabled();
@@ -158,36 +165,45 @@ void PixelRenderer::updateDisplayEnabled(bool enabled, EmuTime::param time)
 void PixelRenderer::frameStart(EmuTime::param time)
 {
 	if (!rasterizer->isActive()) {
-		frameSkipCounter = 999;
+		frameSkipCounter = 999.0f;
 		renderFrame = false;
 		prevRenderFrame = false;
+		paintFrame = false;
 		return;
 	}
+
 	prevRenderFrame = renderFrame;
-	if (vdp.isInterlaced() && renderSettings.getDeinterlace() &&
-	    vdp.getEvenOdd() && vdp.isEvenOddEnabled()) {
-		// deinterlaced odd frame, do same as even frame
-	} else {
-		if (frameSkipCounter < renderSettings.getMinFrameSkip()) {
-			++frameSkipCounter;
-			renderFrame = false;
-		} else if (frameSkipCounter >= renderSettings.getMaxFrameSkip()) {
-			frameSkipCounter = 0;
-			renderFrame = true;
+	if (vdp.isInterlaced() && renderSettings.getDeinterlace()
+			&& vdp.getEvenOdd() && vdp.isEvenOddEnabled()) {
+		// Deinterlaced odd frame: do same as even frame.
+		paintFrame = prevRenderFrame;
+	} else if (throttleManager.isThrottled()) {
+		// Note: min/maxFrameSkip control the number of skipped frames, but
+		//       for every series of skipped frames there is also one painted
+		//       frame, so our boundary checks are offset by one.
+		auto counter = narrow_cast<int>(frameSkipCounter);
+		if (counter < renderSettings.getMinFrameSkip()) {
+			paintFrame = false;
+		} else if (counter > renderSettings.getMaxFrameSkip()) {
+			paintFrame = true;
 		} else {
-			++frameSkipCounter;
-			if (rasterizer->isRecording()) {
-				renderFrame = true;
-			} else {
-				renderFrame = realTime.timeLeft(
-					unsigned(finishFrameDuration), time);
-			}
-			if (renderFrame) {
-				frameSkipCounter = 0;
-			}
+			paintFrame = realTime.timeLeft(
+				unsigned(finishFrameDuration), time);
 		}
+		frameSkipCounter += 1.0f / float(speedManager.getSpeed());
+	} else  {
+		// We need to render a frame every now and then,
+		// to show the user what is happening.
+		paintFrame = (Timer::getTime() - lastPaintTime) >= 100000; // 10 fps
 	}
-	if (!renderFrame) return;
+
+	if (paintFrame) {
+		frameSkipCounter = std::remainder(frameSkipCounter, 1.0f);
+	} else if (!rasterizer->isRecording()) {
+		renderFrame = false;
+		return;
+	}
+	renderFrame = true;
 
 	rasterizer->frameStart(time);
 
@@ -202,7 +218,6 @@ void PixelRenderer::frameStart(EmuTime::param time)
 
 void PixelRenderer::frameEnd(EmuTime::param time)
 {
-	bool skipEvent = !renderFrame;
 	if (renderFrame) {
 		// Render changes from this last frame.
 		sync(time, true);
@@ -211,26 +226,27 @@ void PixelRenderer::frameEnd(EmuTime::param time)
 		auto time1 = Timer::getTime();
 		rasterizer->frameEnd();
 		auto time2 = Timer::getTime();
-		auto current = time2 - time1;
+		auto current = narrow_cast<float>(time2 - time1);
 		const float ALPHA = 0.2f;
 		finishFrameDuration = finishFrameDuration * (1 - ALPHA) +
 		                      current * ALPHA;
 
-		if (vdp.isInterlaced() && vdp.isEvenOddEnabled() &&
-		    renderSettings.getDeinterlace() &&
-		    !prevRenderFrame) {
-			// dont send event in deinterlace mode when
-			// previous frame was not rendered
-			skipEvent = true;
+		if (vdp.isInterlaced() && vdp.isEvenOddEnabled()
+				&& renderSettings.getDeinterlace() && !prevRenderFrame) {
+			// Don't paint in deinterlace mode when previous frame
+			// was not rendered.
+			paintFrame = false;
+		}
+		if (paintFrame) {
+			lastPaintTime = time2;
 		}
 	}
 	if (vdp.getMotherBoard().isActive() &&
 	    !vdp.getMotherBoard().isFastForwarding()) {
-		eventDistributor.distributeEvent(
-			std::make_shared<FinishFrameEvent>(
-				rasterizer->getPostProcessor()->getVideoSource(),
-				videoSourceSetting.getSource(),
-				skipEvent));
+		eventDistributor.distributeEvent(FinishFrameEvent(
+			rasterizer->getPostProcessor()->getVideoSource(),
+			videoSourceSetting.getSource(),
+			!paintFrame));
 	}
 }
 
@@ -275,26 +291,26 @@ void PixelRenderer::updateSuperimposing(
 }
 
 void PixelRenderer::updateForegroundColor(
-	int /*color*/, EmuTime::param time)
+	byte /*color*/, EmuTime::param time)
 {
 	if (displayEnabled) sync(time);
 }
 
 void PixelRenderer::updateBackgroundColor(
-	int color, EmuTime::param time)
+	byte color, EmuTime::param time)
 {
 	sync(time);
 	rasterizer->setBackgroundColor(color);
 }
 
 void PixelRenderer::updateBlinkForegroundColor(
-	int /*color*/, EmuTime::param time)
+	byte /*color*/, EmuTime::param time)
 {
 	if (displayEnabled) sync(time);
 }
 
 void PixelRenderer::updateBlinkBackgroundColor(
-	int /*color*/, EmuTime::param time)
+	byte /*color*/, EmuTime::param time)
 {
 	if (displayEnabled) sync(time);
 }
@@ -310,7 +326,7 @@ void PixelRenderer::updateBlinkState(
 }
 
 void PixelRenderer::updatePalette(
-	int index, int grb, EmuTime::param time)
+	unsigned index, int grb, EmuTime::param time)
 {
 	if (displayEnabled) {
 		sync(time);
@@ -318,8 +334,8 @@ void PixelRenderer::updatePalette(
 		// Only sync if border color changed.
 		DisplayMode mode = vdp.getDisplayMode();
 		if (mode.getBase() == DisplayMode::GRAPHIC5) {
-			int bgColor = vdp.getBackgroundColor();
-			if (index == (bgColor & 3) || (index == (bgColor >> 2))) {
+			auto bgColor = vdp.getBackgroundColor();
+			if (index == one_of(uint8_t(bgColor & 3), uint8_t(bgColor >> 2))) {
 				sync(time);
 			}
 		} else if (mode.getByte() != DisplayMode::GRAPHIC7) {
@@ -360,19 +376,19 @@ void PixelRenderer::updateDisplayMode(
 }
 
 void PixelRenderer::updateNameBase(
-	int /*addr*/, EmuTime::param time)
+	unsigned /*addr*/, EmuTime::param time)
 {
 	if (displayEnabled) sync(time);
 }
 
 void PixelRenderer::updatePatternBase(
-	int /*addr*/, EmuTime::param time)
+	unsigned /*addr*/, EmuTime::param time)
 {
 	if (displayEnabled) sync(time);
 }
 
 void PixelRenderer::updateColorBase(
-	int /*addr*/, EmuTime::param time)
+	unsigned /*addr*/, EmuTime::param time)
 {
 	if (displayEnabled) sync(time);
 }
@@ -383,7 +399,7 @@ void PixelRenderer::updateSpritesEnabled(
 	if (displayEnabled) sync(time);
 }
 
-static inline bool overlap(
+static constexpr bool overlap(
 	int displayY0, // start of display region, inclusive
 	int displayY1, // end of display region, exclusive
 	int vramLine0, // start of VRAM region, inclusive
@@ -392,8 +408,8 @@ static inline bool overlap(
 	//       VRAM region cannot wrap around.
 ) {
 	if (displayY0 <= displayY1) {
-		if (vramLine1 > displayY0) {
-			if (vramLine0 <= displayY1) return true;
+		if ((vramLine1 > displayY0) && (vramLine0 <= displayY1)) {
+			return true;
 		}
 	} else {
 		if (vramLine1 > displayY0) return true;
@@ -402,7 +418,7 @@ static inline bool overlap(
 	return false;
 }
 
-inline bool PixelRenderer::checkSync(int offset, EmuTime::param time)
+bool PixelRenderer::checkSync(unsigned offset, EmuTime::param time) const
 {
 	// TODO: Because range is entire VRAM, offset == address.
 
@@ -425,11 +441,11 @@ inline bool PixelRenderer::checkSync(int offset, EmuTime::param time)
 	case DisplayMode::GRAPHIC2:
 	case DisplayMode::GRAPHIC3:
 		if (vram.colorTable.isInside(offset)) {
-			int vramQuarter = (offset & 0x1800) >> 11;
-			int mask = (vram.colorTable.getMask() & 0x1800) >> 11;
-			for (int i = 0; i < 4; i++) {
-				if ( (i & mask) == vramQuarter
-				&& overlap(displayY0, displayY1, i * 64, (i + 1) * 64) ) {
+			unsigned vramQuarter = (offset & 0x1800) >> 11;
+			unsigned mask = (vram.colorTable.getMask() & 0x1800) >> 11;
+			for (auto i : xrange(4)) {
+				if ((i & mask) == vramQuarter
+				&& overlap(displayY0, displayY1, i * 64, (i + 1) * 64)) {
 					/*fprintf(stderr,
 						"color table: %05X %04X - quarter %d\n",
 						offset, offset & 0x1FFF, i
@@ -439,11 +455,11 @@ inline bool PixelRenderer::checkSync(int offset, EmuTime::param time)
 			}
 		}
 		if (vram.patternTable.isInside(offset)) {
-			int vramQuarter = (offset & 0x1800) >> 11;
-			int mask = (vram.patternTable.getMask() & 0x1800) >> 11;
-			for (int i = 0; i < 4; i++) {
-				if ( (i & mask) == vramQuarter
-				&& overlap(displayY0, displayY1, i * 64, (i + 1) * 64) ) {
+			unsigned vramQuarter = (offset & 0x1800) >> 11;
+			unsigned mask = (vram.patternTable.getMask() & 0x1800) >> 11;
+			for (auto i : xrange(4)) {
+				if ((i & mask) == vramQuarter
+				&& overlap(displayY0, displayY1, i * 64, (i + 1) * 64)) {
 					/*fprintf(stderr,
 						"pattern table: %05X %04X - quarter %d\n",
 						offset, offset & 0x1FFF, i
@@ -453,7 +469,7 @@ inline bool PixelRenderer::checkSync(int offset, EmuTime::param time)
 			}
 		}
 		if (vram.nameTable.isInside(offset)) {
-			int vramLine = ((offset & 0x3FF) / 32) * 8;
+			int vramLine = narrow<int>(((offset & 0x3FF) / 32) * 8);
 			if (overlap(displayY0, displayY1, vramLine, vramLine + 8)) {
 				/*fprintf(stderr,
 					"name table: %05X %03X - line %d\n",
@@ -465,9 +481,13 @@ inline bool PixelRenderer::checkSync(int offset, EmuTime::param time)
 		return false;
 	case DisplayMode::GRAPHIC4:
 	case DisplayMode::GRAPHIC5: {
+		if (vdp.isFastBlinkEnabled()) {
+			// TODO could be improved
+			return true;
+		}
 		// Is the address inside the visual page(s)?
 		// TODO: Also look at which lines are touched inside pages.
-		int visiblePage = vram.nameTable.getMask()
+		unsigned visiblePage = vram.nameTable.getMask()
 			& (0x10000 | (vdp.getEvenOddMask() << 7));
 		if (vdp.isMultiPageScrolling()) {
 			return (offset & 0x18000) == visiblePage
@@ -492,8 +512,6 @@ void PixelRenderer::updateVRAM(unsigned offset, EmuTime::param time)
 	// Note: No need to sync if display is disabled, because then the
 	//       output does not depend on VRAM (only on background color).
 	if (renderFrame && displayEnabled && checkSync(offset, time)) {
-		//fprintf(stderr, "vram sync @ line %d\n",
-		//	vdp.getTicksThisFrame(time) / VDP::TICKS_PER_LINE);
 		renderUntil(time);
 	}
 }
@@ -533,28 +551,24 @@ void PixelRenderer::renderUntil(EmuTime::param time)
 	// Translate from time to pixel position.
 	int limitTicks = vdp.getTicksThisFrame(time);
 	assert(limitTicks <= vdp.getTicksPerFrame());
-	int limitX, limitY;
-	switch (accuracy) {
-	case RenderSettings::ACC_PIXEL: {
-		limitX = limitTicks % VDP::TICKS_PER_LINE;
-		limitY = limitTicks / VDP::TICKS_PER_LINE;
-		break;
-	}
-	case RenderSettings::ACC_LINE:
-	case RenderSettings::ACC_SCREEN: {
-		// Note: I'm not sure the rounding point is optimal.
-		//       It used to be based on the left margin, but that doesn't work
-		//       because the margin can change which leads to a line being
-		//       rendered even though the time doesn't advance.
-		limitX = 0;
-		limitY =
-			(limitTicks + VDP::TICKS_PER_LINE - 400) / VDP::TICKS_PER_LINE;
-		break;
-	}
-	default:
-		UNREACHABLE;
-		limitX = limitY = 0; // avoid warning
-	}
+	auto [limitX, limitY] = [&]() -> std::pair<int, int> {
+		switch (accuracy) {
+		case RenderSettings::ACC_PIXEL: {
+			return {limitTicks % VDP::TICKS_PER_LINE,
+			        limitTicks / VDP::TICKS_PER_LINE};
+		}
+		case RenderSettings::ACC_LINE:
+		case RenderSettings::ACC_SCREEN:
+			// Note: I'm not sure the rounding point is optimal.
+			//       It used to be based on the left margin, but that doesn't work
+			//       because the margin can change which leads to a line being
+			//       rendered even though the time doesn't advance.
+			return {0,
+				(limitTicks + VDP::TICKS_PER_LINE - 400) / VDP::TICKS_PER_LINE};
+		default:
+			UNREACHABLE;
+		}
+	}();
 
 	// Stop here if there is nothing to render.
 	// This ensures that no pixels are rendered in a series of updates that
@@ -600,15 +614,13 @@ void PixelRenderer::renderUntil(EmuTime::param time)
 	nextY = limitY;
 }
 
-void PixelRenderer::update(const Setting& setting)
+void PixelRenderer::update(const Setting& setting) noexcept
 {
-	if (&setting == &renderSettings.getMinFrameSkipSetting() ||
-	    &setting == &renderSettings.getMaxFrameSkipSetting()) {
-		// Force drawing of frame.
-		frameSkipCounter = 999;
-	} else {
-		UNREACHABLE;
-	}
+	assert(&setting == one_of(&renderSettings.getMinFrameSkipSetting(),
+	                          &renderSettings.getMaxFrameSkipSetting()));
+	(void)setting;
+	// Force drawing of frame.
+	frameSkipCounter = 999;
 }
 
 } // namespace openmsx

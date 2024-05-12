@@ -6,8 +6,9 @@
     <manufacturer>Spectravideo</manufacturer>
     <code>SVI-738 X'PRESS</code>
     <release_year>1986</release_year>
-    <description>A very complete MSX1 machine.</description>
+    <description>A very complete MSX1 machine, with 64kB RAM, RS-232 interface and single sided disk drive built in.</description>
     <type>MSX</type>
+    <region>eu</region>
   </info>
 
   <CassettePort/>
@@ -38,8 +39,8 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <PrinterPort id="Printer Port">
@@ -69,6 +70,8 @@
 
       <secondary slot="0">
         <MSX-RS232 id="MSX RS-232">
+          <has_ri_pin>false</has_ri_pin>
+          <rs232_pullup>true</rs232_pullup>
           <rom>
             <filename>svi-738_rs232.rom</filename>
             <sha1>4e9384c9d137f0ab65ffc5a78f04cd8c9df6c8b7</sha1>
@@ -85,8 +88,9 @@
           <drives>1</drives>
           <rom>
             <filename>svi-738_disk.rom</filename>
-            <sha1>17b2810545e55d3fa5821d74d8b5ab5475165fba</sha1>
-            <sha1>e3130d89a422db291142f366ab24cd0dbc921467</sha1>
+            <sha1>99a40266bc296cef1d432cb0caa8df1a7e570be4</sha1>
+            <sha1>55d5d1fd57d35384b821af62083f2a23d85580e6</sha1>
+            <sha1>465fab904a22b3e29f0c00daaf326dc4a6862088</sha1>
           </rom>
           <mem base="0x4000" size="0x8000"/>
         </WD2793>

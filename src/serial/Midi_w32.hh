@@ -30,7 +30,7 @@
 
 #ifdef _WIN32
 #include <string>
-#include <windows.h>
+#include <Windows.h>
 #include <mmsystem.h>
 #define MAXPATHLEN MAX_PATH
 
@@ -43,7 +43,7 @@ std::string w32_midiOutGetVFN(unsigned nmb);
 std::string w32_midiOutGetRDN(unsigned nmb);
 unsigned w32_midiOutOpen(const char* vfn);
 int w32_midiOutClose(unsigned idx);
-int w32_midiOutPut(unsigned char value, unsigned idx);
+int w32_midiOutMsg(size_t size, const uint8_t* data, unsigned idx);
 
 int w32_midiInInit();
 void w32_midiInClean();

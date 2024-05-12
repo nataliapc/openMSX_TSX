@@ -9,8 +9,9 @@
     <manufacturer>Toshiba</manufacturer>
     <code>HX-22I</code>
     <release_year>1985</release_year>
-    <description/>
+    <description>MSX1 with 64kB RAM for the Italian market, with built in word processing software.</description>
     <type>MSX</type>
+    <region>eu</region>
   </info>
 
   <CassettePort/>
@@ -40,8 +41,8 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <PrinterPort id="Printer Port">
@@ -51,6 +52,7 @@
     <MSX-RS232 id="RS-232">
       <io base="0x80" num="8"/>
       <toshiba_rs232c_switch>true</toshiba_rs232c_switch>
+      <has_ri_pin>false</has_ri_pin>
     </MSX-RS232>
 
     <primary slot="0">

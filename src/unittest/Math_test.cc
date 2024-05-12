@@ -1,113 +1,27 @@
 #include "catch.hpp"
 #include "Math.hh"
 
-TEST_CASE("Math::isPowerOfTwo")
+TEST_CASE("Math::clipToInt16")
 {
-	// don't check 0
-	CHECK( Math::isPowerOfTwo(1));
-	CHECK( Math::isPowerOfTwo(2));
-	CHECK(!Math::isPowerOfTwo(3));
-	CHECK( Math::isPowerOfTwo(4));
-	CHECK(!Math::isPowerOfTwo(5));
-	CHECK(!Math::isPowerOfTwo(6));
-	CHECK(!Math::isPowerOfTwo(7));
-	CHECK( Math::isPowerOfTwo(8));
-	CHECK(!Math::isPowerOfTwo(9));
-	CHECK(!Math::isPowerOfTwo(15));
-	CHECK( Math::isPowerOfTwo(16));
-	CHECK(!Math::isPowerOfTwo(17));
-	CHECK( Math::isPowerOfTwo(32));
-	CHECK( Math::isPowerOfTwo(64));
-	CHECK(!Math::isPowerOfTwo(255));
-	CHECK( Math::isPowerOfTwo(256));
-	CHECK( Math::isPowerOfTwo(512));
-	CHECK( Math::isPowerOfTwo(1024));
-	CHECK( Math::isPowerOfTwo(2048));
-	CHECK( Math::isPowerOfTwo(4096));
-	CHECK( Math::isPowerOfTwo(8192));
-	CHECK(!Math::isPowerOfTwo(0xffff));
-	CHECK( Math::isPowerOfTwo(0x10000));
-	CHECK( Math::isPowerOfTwo(0x80000000));
-	CHECK(!Math::isPowerOfTwo(0xffffffff));
-}
+	CHECK(Math::clipToInt16(-100000) == -32768);
+	CHECK(Math::clipToInt16( -32769) == -32768);
+	CHECK(Math::clipToInt16( -32768) == -32768);
+	CHECK(Math::clipToInt16( -32767) == -32767);
+	CHECK(Math::clipToInt16( -10000) == -10000);
+	CHECK(Math::clipToInt16(    -10) ==    -10);
+	CHECK(Math::clipToInt16(     -1) ==     -1);
+	CHECK(Math::clipToInt16(      0) ==      0);
+	CHECK(Math::clipToInt16(      1) ==      1);
+	CHECK(Math::clipToInt16(     10) ==     10);
+	CHECK(Math::clipToInt16(   9876) ==   9876);
+	CHECK(Math::clipToInt16(  32766) ==  32766);
+	CHECK(Math::clipToInt16(  32767) ==  32767);
+	CHECK(Math::clipToInt16(  32768) ==  32767);
+	CHECK(Math::clipToInt16( 100000) ==  32767);
 
-TEST_CASE("Math::powerOfTwo")
-{
-	CHECK(Math::powerOfTwo(0) == 1);
-	CHECK(Math::powerOfTwo(1) == 1);
-	CHECK(Math::powerOfTwo(2) == 2);
-	CHECK(Math::powerOfTwo(3) == 4);
-	CHECK(Math::powerOfTwo(4) == 4);
-	CHECK(Math::powerOfTwo(5) == 8);
-	CHECK(Math::powerOfTwo(6) == 8);
-	CHECK(Math::powerOfTwo(7) == 8);
-	CHECK(Math::powerOfTwo(8) == 8);
-	CHECK(Math::powerOfTwo(9) == 16);
-	CHECK(Math::powerOfTwo(15) == 16);
-	CHECK(Math::powerOfTwo(16) == 16);
-	CHECK(Math::powerOfTwo(17) == 32);
-	CHECK(Math::powerOfTwo(32) == 32);
-	CHECK(Math::powerOfTwo(64) == 64);
-	CHECK(Math::powerOfTwo(255) == 256);
-	CHECK(Math::powerOfTwo(256) == 256);
-	CHECK(Math::powerOfTwo(512) == 512);
-	CHECK(Math::powerOfTwo(1024) == 1024);
-	CHECK(Math::powerOfTwo(2048) == 2048);
-	CHECK(Math::powerOfTwo(4096) == 4096);
-	CHECK(Math::powerOfTwo(8192) == 8192);
-	CHECK(Math::powerOfTwo(0xffff) == 0x10000);
-	CHECK(Math::powerOfTwo(0x10000) == 0x10000);
-	CHECK(Math::powerOfTwo(0x80000000) == 0x80000000);
-	// values > 0x80000000 don't work,
-	//   result can't be represented in 32bit
-}
-
-TEST_CASE("Math::clip")
-{
-	CHECK((Math::clip<10, 20>(-6)) == 10);
-	CHECK((Math::clip<10, 20>( 0)) == 10);
-	CHECK((Math::clip<10, 20>( 9)) == 10);
-	CHECK((Math::clip<10, 20>(10)) == 10);
-	CHECK((Math::clip<10, 20>(11)) == 11);
-	CHECK((Math::clip<10, 20>(14)) == 14);
-	CHECK((Math::clip<10, 20>(19)) == 19);
-	CHECK((Math::clip<10, 20>(20)) == 20);
-	CHECK((Math::clip<10, 20>(21)) == 20);
-	CHECK((Math::clip<10, 20>(99)) == 20);
-
-	CHECK((Math::clip<10, 10>( 9)) == 10);
-	CHECK((Math::clip<10, 10>(10)) == 10);
-	CHECK((Math::clip<10, 10>(11)) == 10);
-
-	CHECK((Math::clip<-10, 10>(-20)) == -10);
-	CHECK((Math::clip<-10, 10>( -3)) ==  -3);
-	CHECK((Math::clip<-10, 10>( 20)) ==  10);
-
-	CHECK((Math::clip<-100, -10>(-200)) == -100);
-	CHECK((Math::clip<-100, -10>( -53)) ==  -53);
-	CHECK((Math::clip<-100, -10>( 200)) ==  -10);
-
-	// ok, compiler error (invalid range)
-	//CHECK((Math::clip<6, 3>(1)) == 1);
-}
-
-TEST_CASE("Math::clipIntToShort")
-{
-	CHECK(Math::clipIntToShort(-100000) == -32768);
-	CHECK(Math::clipIntToShort( -32769) == -32768);
-	CHECK(Math::clipIntToShort( -32768) == -32768);
-	CHECK(Math::clipIntToShort( -32767) == -32767);
-	CHECK(Math::clipIntToShort( -10000) == -10000);
-	CHECK(Math::clipIntToShort(    -10) ==    -10);
-	CHECK(Math::clipIntToShort(     -1) ==     -1);
-	CHECK(Math::clipIntToShort(      0) ==      0);
-	CHECK(Math::clipIntToShort(      1) ==      1);
-	CHECK(Math::clipIntToShort(     10) ==     10);
-	CHECK(Math::clipIntToShort(   9876) ==   9876);
-	CHECK(Math::clipIntToShort(  32766) ==  32766);
-	CHECK(Math::clipIntToShort(  32767) ==  32767);
-	CHECK(Math::clipIntToShort(  32768) ==  32767);
-	CHECK(Math::clipIntToShort( 100000) ==  32767);
+	CHECK(Math::clipToInt16(-10'000'000'000LL) == -32768);
+	CHECK(Math::clipToInt16(             17LL) ==     17);
+	CHECK(Math::clipToInt16( 10'000'000'000LL) ==  32767);
 }
 
 TEST_CASE("Math::clipIntToByte")
@@ -125,34 +39,6 @@ TEST_CASE("Math::clipIntToByte")
 	CHECK(Math::clipIntToByte( 256) == 255);
 	CHECK(Math::clipIntToByte( 257) == 255);
 	CHECK(Math::clipIntToByte( 327) == 255);
-}
-
-static unsigned classic_gcd(unsigned a, unsigned b)
-{
-	while (unsigned t = b % a) { b = a; a = t; }
-	return a;
-}
-static void testGcd(unsigned a, unsigned b)
-{
-	unsigned expected = classic_gcd(a, b);
-	CHECK(Math::gcd(a, b) == expected);
-	CHECK(Math::gcd(b, a) == expected);
-}
-TEST_CASE("Math::gcd")
-{
-	testGcd(1, 1);
-	testGcd(1, 2);
-	testGcd(1, 1234500);
-	testGcd(14, 1);
-	testGcd(14, 2);
-	testGcd(14, 7);
-	testGcd(14, 21);
-	testGcd(14, 291);
-	testGcd(14, 6398);
-	testGcd(1464, 6398);
-	testGcd(1464, 6398);
-	CHECK(Math::gcd(320, 1280) == 320);
-	CHECK(Math::gcd(123 * 121972, 123 * 9710797) == 123);
 }
 
 static void testReverseNBits(unsigned x, unsigned n, unsigned expected)
@@ -200,50 +86,44 @@ TEST_CASE("Math::reverseByte")
 
 TEST_CASE("Math::floodRight")
 {
-	CHECK(Math::floodRight(0) == 0);
-	CHECK(Math::floodRight(1) == 1);
-	CHECK(Math::floodRight(2) == 3);
-	CHECK(Math::floodRight(3) == 3);
-	CHECK(Math::floodRight(4) == 7);
-	CHECK(Math::floodRight(5) == 7);
-	CHECK(Math::floodRight(6) == 7);
-	CHECK(Math::floodRight(7) == 7);
-	CHECK(Math::floodRight(8) == 15);
-	CHECK(Math::floodRight(9) == 15);
-	CHECK(Math::floodRight(15) == 15);
-	CHECK(Math::floodRight(16) == 31);
-	CHECK(Math::floodRight(32) == 63);
-	CHECK(Math::floodRight(64) == 127);
-	CHECK(Math::floodRight(12345) == 16383);
-	CHECK(Math::floodRight(0x7F001234) == 0x7FFFFFFF);
-	CHECK(Math::floodRight(0x80000000) == 0xFFFFFFFF);
-	CHECK(Math::floodRight(0xF0FEDCBA) == 0xFFFFFFFF);
+	CHECK(Math::floodRight(0u) == 0);
+	CHECK(Math::floodRight(1u) == 1);
+	CHECK(Math::floodRight(2u) == 3);
+	CHECK(Math::floodRight(3u) == 3);
+	CHECK(Math::floodRight(4u) == 7);
+	CHECK(Math::floodRight(5u) == 7);
+	CHECK(Math::floodRight(6u) == 7);
+	CHECK(Math::floodRight(7u) == 7);
+	CHECK(Math::floodRight(8u) == 15);
+	CHECK(Math::floodRight(9u) == 15);
+	CHECK(Math::floodRight(15u) == 15);
+	CHECK(Math::floodRight(16u) == 31);
+	CHECK(Math::floodRight(32u) == 63);
+	CHECK(Math::floodRight(64u) == 127);
+	CHECK(Math::floodRight(12345u) == 16383);
+	CHECK(Math::floodRight(0x7F001234u) == 0x7FFFFFFF);
+	CHECK(Math::floodRight(0x80000000u) == 0xFFFFFFFF);
+	CHECK(Math::floodRight(0xF0FEDCBAu) == 0xFFFFFFFF);
 	CHECK(Math::floodRight(0x1234F0FEDCBAULL) == 0x1FFFFFFFFFFFULL);
 	CHECK(Math::floodRight(uint8_t(0x12)) == uint8_t(0x1F));
 	CHECK(Math::floodRight(uint16_t(0x2512)) == uint16_t(0x3FFF));
 }
 
-TEST_CASE("Math::countLeadingZeros")
+TEST_CASE("Math::div_mod_floor")
 {
-	// undefined for 0
-	CHECK(Math::countLeadingZeros(0x00000001) == 31);
-	CHECK(Math::countLeadingZeros(0x00000002) == 30);
-	CHECK(Math::countLeadingZeros(0x00000003) == 30);
-	CHECK(Math::countLeadingZeros(0x00000004) == 29);
-	CHECK(Math::countLeadingZeros(0x00000005) == 29);
-	CHECK(Math::countLeadingZeros(0x00000007) == 29);
-	CHECK(Math::countLeadingZeros(0x00000008) == 28);
-	CHECK(Math::countLeadingZeros(0x00000081) == 24);
-	CHECK(Math::countLeadingZeros(0x00000134) == 23);
-	CHECK(Math::countLeadingZeros(0x00000234) == 22);
-	CHECK(Math::countLeadingZeros(0x00008234) == 16);
-	CHECK(Math::countLeadingZeros(0x00021234) == 14);
-	CHECK(Math::countLeadingZeros(0x00421234) ==  9);
-	CHECK(Math::countLeadingZeros(0x01421234) ==  7);
-	CHECK(Math::countLeadingZeros(0x01421234) ==  7);
-	CHECK(Math::countLeadingZeros(0x11421234) ==  3);
-	CHECK(Math::countLeadingZeros(0x31421234) ==  2);
-	CHECK(Math::countLeadingZeros(0x61421234) ==  1);
-	CHECK(Math::countLeadingZeros(0x91421234) ==  0);
-	CHECK(Math::countLeadingZeros(0xF1421234) ==  0);
+	auto test = [](int D, int d, int q, int r) {
+		REQUIRE(d * q + r == D);
+		auto qr = Math::div_mod_floor(D, d);
+		CHECK(qr.quotient  == q);
+		CHECK(qr.remainder == r);
+	};
+	test( 10,  3,  3,  1);
+	test(-10,  3, -4,  2);
+	test( 10, -3, -4, -2);
+	test(-10, -3,  3, -1);
+
+	test( 10,  2,  5,  0);
+	test(-10,  2, -5,  0);
+	test( 10, -2, -5,  0);
+	test(-10, -2,  5,  0);
 }

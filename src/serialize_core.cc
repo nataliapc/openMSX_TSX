@@ -1,11 +1,10 @@
 #include "serialize_core.hh"
 #include "serialize.hh"
 #include "MSXException.hh"
-#include "likely.hh"
 
 namespace openmsx {
 
-void enumError(const std::string& str)
+void enumError(std::string_view str)
 {
 	throw MSXException("Invalid enum value: ", str);
 }
@@ -16,7 +15,7 @@ void pointerError(unsigned id)
 }
 
 
-static void versionError(const char* className, unsigned latestVersion, unsigned version)
+[[noreturn]] static void versionError(const char* className, unsigned latestVersion, unsigned version)
 {
 	// note: the result of type_info::name() is implementation defined
 	//       but should be ok to show in an error message
@@ -30,21 +29,19 @@ static void versionError(const char* className, unsigned latestVersion, unsigned
 unsigned loadVersionHelper(MemInputArchive& /*ar*/, const char* /*className*/,
                            unsigned /*latestVersion*/)
 {
-	UNREACHABLE; return 0;
+	UNREACHABLE;
 }
 
 unsigned loadVersionHelper(XmlInputArchive& ar, const char* className,
                            unsigned latestVersion)
 {
-	assert(ar.canHaveOptionalAttributes());
-	unsigned version;
-	if (!ar.findAttribute("version", version)) {
-		return 1;
+	assert(ar.CAN_HAVE_OPTIONAL_ATTRIBUTES);
+	auto version = ar.findAttributeAs<unsigned>("version");
+	if (!version) return 1;
+	if (*version > latestVersion) [[unlikely]] {
+		versionError(className, latestVersion, *version);
 	}
-	if (unlikely(version > latestVersion)) {
-		versionError(className, latestVersion, version);
-	}
-	return version;
+	return *version;
 }
 
 } // namespace openmsx

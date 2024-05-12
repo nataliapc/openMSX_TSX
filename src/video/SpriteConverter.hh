@@ -8,26 +8,32 @@ TODO:
 
 #include "SpriteChecker.hh"
 #include "DisplayMode.hh"
-#include "likely.hh"
-#include "openmsx.hh"
+#include "view.hh"
+#include "narrow.hh"
+#include <cstdint>
+#include <span>
 
 namespace openmsx {
 
 /** Utility class for converting VRAM contents to host pixels.
   */
-template <class Pixel>
 class SpriteConverter
 {
 public:
+	using Pixel = uint32_t;
+
 	// TODO: Move some methods to .cc?
 
 	/** Constructor.
 	  * After construction, also call the various set methods to complete
 	  * initialisation.
 	  * @param spriteChecker_ Delivers the sprite data to be rendered.
+	  * @param pal The initial palette. Can later be changed via setPallette().
 	  */
-	explicit SpriteConverter(SpriteChecker& spriteChecker_)
+	explicit SpriteConverter(SpriteChecker& spriteChecker_,
+	                         std::span<const Pixel, 16> pal)
 		: spriteChecker(spriteChecker_)
+		, palette(pal)
 	{
 	}
 
@@ -52,7 +58,7 @@ public:
 	  * will be used while drawing.
 	  * @param newPalette 16-entry array containing the sprite palette.
 	  */
-	void setPalette(const Pixel* newPalette)
+	void setPalette(std::span<const Pixel, 16> newPalette)
 	{
 		palette = newPalette;
 	}
@@ -60,8 +66,7 @@ public:
 	static bool clipPattern(int& x, SpriteChecker::SpritePattern& pattern,
 	                        int minX, int maxX)
 	{
-		int before = minX - x;
-		if (before > 0) {
+		if (int before = minX - x; before > 0) {
 			if (before >= 32) {
 				// 32 pixels before minX -> not visible
 				return false;
@@ -69,14 +74,13 @@ public:
 			pattern <<= before;
 			x = minX;
 		}
-		int after = maxX - x;
-		if (after < 32) {
+		if (int after = maxX - x; after < 32) {
 			// close to maxX (or past)
 			if (after <= 0) {
 				// past maxX -> not visible
 				return false;
 			}
-			int mask = 0x80000000;
+			auto mask = narrow_cast<int>(0x8000'0000);
 			pattern &= (mask >> (after - 1));
 		}
 		return true; // visible
@@ -89,37 +93,32 @@ public:
 	  * @param maxX Maximum X coordinate to draw (exclusive).
 	  * @param pixelPtr Pointer to memory to draw to.
 	  */
-	void drawMode1(int absLine, int minX, int maxX,
-	               Pixel* __restrict pixelPtr) __restrict
+	void drawMode1(int absLine, int minX, int maxX, std::span<Pixel> pixelPtr) const
 	{
 		// Determine sprites visible on this line.
-		const SpriteChecker::SpriteInfo* visibleSprites;
-		int visibleIndex =
-			spriteChecker.getSprites(absLine, visibleSprites);
+		auto visibleSprites = spriteChecker.getSprites(absLine);
 		// Optimisation: return at once if no sprites on this line.
 		// Lines without any sprites are very common in most programs.
-		if (visibleIndex == 0) return;
+		if (visibleSprites.empty()) return;
 
 		// Render using overdraw.
-		while (visibleIndex--) {
+		for (const auto& si : view::reverse(visibleSprites)) {
 			// Get sprite info.
-			const SpriteChecker::SpriteInfo* sip =
-				&visibleSprites[visibleIndex];
-			Pixel colIndex = sip->colorAttrib & 0x0F;
+			Pixel colIndex = si.colorAttrib & 0x0F;
 			// Don't draw transparent sprites in sprite mode 1.
-			// TODO: Verify on real V9938 that sprite mode 1 indeed
-			//       ignores the transparency bit.
-			if (colIndex == 0) continue;
+			// Verified on real V9958: TP bit also has effect in
+			// sprite mode 1.
+			if (colIndex == 0 && transparency) continue;
 			Pixel color = palette[colIndex];
-			SpriteChecker::SpritePattern pattern = sip->pattern;
-			int x = sip->x;
+			SpriteChecker::SpritePattern pattern = si.pattern;
+			int x = si.x;
 			// Clip sprite pattern to render range.
 			if (!clipPattern(x, pattern, minX, maxX)) continue;
 			// Convert pattern to pixels.
 			Pixel* p = &pixelPtr[x];
 			while (pattern) {
 				// Draw pixel if sprite has a dot.
-				if (pattern & 0x80000000) {
+				if (pattern & 0x8000'0000) {
 					*p = color;
 				}
 				// Advancing behaviour.
@@ -139,57 +138,56 @@ public:
 	  * @param maxX Maximum X coordinate to draw (exclusive).
 	  * @param pixelPtr Pointer to memory to draw to.
 	  */
-	template <unsigned MODE>
-	void drawMode2(int absLine, int minX, int maxX,
-	               Pixel* __restrict pixelPtr) __restrict
+	template<unsigned MODE>
+	void drawMode2(int absLine, int minX, int maxX, std::span<Pixel> pixelPtr) const
 	{
 		// Determine sprites visible on this line.
-		const SpriteChecker::SpriteInfo* visibleSprites;
-		int visibleIndex =
-			spriteChecker.getSprites(absLine, visibleSprites);
+		auto visibleSprites = spriteChecker.getSprites(absLine);
 		// Optimisation: return at once if no sprites on this line.
 		// Lines without any sprites are very common in most programs.
-		if (visibleIndex == 0) return;
+		if (visibleSprites.empty()) return;
+		std::span visibleSpritesWithSentinel{visibleSprites.data(),
+		                                     visibleSprites.size() +1};
 
 		// Sprites with CC=1 are only visible if preceded by a sprite
 		// with CC=0. Therefor search for first sprite with CC=0.
 		int first = 0;
 		do {
-			if (likely((visibleSprites[first].colorAttrib & 0x40) == 0)) {
+			if ((visibleSprites[first].colorAttrib & 0x40) == 0) [[likely]] {
 				break;
 			}
 			++first;
-		} while (first < visibleIndex);
-		for (int i = visibleIndex - 1; i >= first; --i) {
+		} while (first < int(visibleSprites.size()));
+		for (int i = narrow<int>(visibleSprites.size() - 1); i >= first; --i) {
 			const SpriteChecker::SpriteInfo& info = visibleSprites[i];
 			int x = info.x;
 			SpriteChecker::SpritePattern pattern = info.pattern;
 			// Clip sprite pattern to render range.
 			if (!clipPattern(x, pattern, minX, maxX)) continue;
-			byte c = info.colorAttrib & 0x0F;
+			uint8_t c = info.colorAttrib & 0x0F;
 			if (c == 0 && transparency) continue;
 			while (pattern) {
-				if (pattern & 0x80000000) {
-					byte color = c;
+				if (pattern & 0x8000'0000) {
+					uint8_t color = c;
 					// Merge in any following CC=1 sprites.
 					for (int j = i + 1; /*sentinel*/; ++j) {
 						const SpriteChecker::SpriteInfo& info2 =
-							visibleSprites[j];
+							visibleSpritesWithSentinel[j];
 						if (!(info2.colorAttrib & 0x40)) break;
 						unsigned shift2 = x - info2.x;
 						if ((shift2 < 32) &&
-						   ((info2.pattern << shift2) & 0x80000000)) {
+						   ((info2.pattern << shift2) & 0x8000'0000)) {
 							color |= info2.colorAttrib & 0x0F;
 						}
 					}
-					if (MODE == DisplayMode::GRAPHIC5) {
+					if constexpr (MODE == DisplayMode::GRAPHIC5) {
 						Pixel pixL = palette[color >> 2];
 						Pixel pixR = palette[color & 3];
 						pixelPtr[x * 2 + 0] = pixL;
 						pixelPtr[x * 2 + 1] = pixR;
 					} else {
 						Pixel pix = palette[color];
-						if (MODE == DisplayMode::GRAPHIC6) {
+						if constexpr (MODE == DisplayMode::GRAPHIC6) {
 							pixelPtr[x * 2 + 0] = pix;
 							pixelPtr[x * 2 + 1] = pix;
 						} else {
@@ -208,7 +206,7 @@ private:
 
 	/** The current sprite palette.
 	  */
-	const Pixel* palette;
+	std::span<const Pixel, 16> palette;
 
 	/** VDP transparency setting (R#8, bit5).
 	  */

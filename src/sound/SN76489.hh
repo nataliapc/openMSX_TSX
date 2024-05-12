@@ -4,6 +4,8 @@
 #include "ResampledSoundDevice.hh"
 #include "SimpleDebuggable.hh"
 
+#include <array>
+
 namespace openmsx {
 
 /** This class implements the Texas Instruments SN76489 sound chip.
@@ -24,11 +26,11 @@ namespace openmsx {
 class SN76489 final : public ResampledSoundDevice
 {
 public:
-	SN76489(const DeviceConfig& config);
+	explicit SN76489(const DeviceConfig& config);
 	~SN76489();
 
 	// ResampledSoundDevice
-	void generateChannels(int** buffers, unsigned num) override;
+	void generateChannels(std::span<float*> buffers, unsigned num) override;
 
 	void reset(EmuTime::param time);
 	void write(byte value, EmuTime::param time);
@@ -42,20 +44,20 @@ private:
 		/** Sets the feedback pattern and resets the shift register to the
 		  * initial state that matches that pattern.
 		  */
-		inline void initState(unsigned pattern, unsigned period);
+		void initState(unsigned pattern, unsigned period);
 
 		/** Gets the current output of this shifter: 0 or 1.
 		  */
-		inline unsigned getOutput() const;
+		[[nodiscard]] unsigned getOutput() const;
 
 		/** Advances the shift register one step, to the next output.
 		  */
-		inline void advance();
+		void advance();
 
 		/** Records that the shift register should be advanced multiple steps
 		  * before the next output is used.
 		  */
-		inline void queueAdvance(unsigned steps);
+		void queueAdvance(unsigned steps);
 
 		/** Advances the shift register by the number of steps that were queued.
 		  */
@@ -71,10 +73,6 @@ private:
 		unsigned stepsBehind;
 	};
 
-	/** Initialize 'volTable'.
-	  */
-	void initVolumeTable(int volume);
-
 	/** Initialize registers, counters and other chip state.
 	  */
 	void initState();
@@ -84,19 +82,18 @@ private:
 	  */
 	void initNoise();
 
-	word peekRegister(unsigned reg, EmuTime::param time) const;
+	[[nodiscard]] word peekRegister(unsigned reg, EmuTime::param time) const;
 	void writeRegister(unsigned reg, word value, EmuTime::param time);
-	template <bool NOISE> void synthesizeChannel(
-		int*& buffer, unsigned num, unsigned generator);
+	template<bool NOISE> void synthesizeChannel(
+		float*& buffer, unsigned num, unsigned generator);
 
-	unsigned volTable[16];
-
+private:
 	NoiseShifter noiseShifter;
 
 	/** Register bank. The tone period registers (0, 2, 4) are 12 bits wide,
 	  * all other registers are 4 bits wide.
 	  */
-	word regs[8];
+	std::array<word, 8> regs;
 
 	/** The last register written to (0-7).
 	  */
@@ -106,18 +103,17 @@ private:
 	  * These count down and when they reach zero, the output flips and the
 	  * counter is re-loaded with the value of the period register.
 	  */
-	word counters[4];
+	std::array<word, 4> counters;
 
 	/** Output flip-flop state (0 or 1) for each channel.
 	  */
-	byte outputs[4];
+	std::array<byte, 4> outputs;
 
 	struct Debuggable final : SimpleDebuggable {
 		Debuggable(MSXMotherBoard& motherBoard, const std::string& name);
-		byte read(unsigned address, EmuTime::param time) override;
+		[[nodiscard]] byte read(unsigned address, EmuTime::param time) override;
 		void write(unsigned address, byte value, EmuTime::param time) override;
 	} debuggable;
-
 };
 
 } // namespace openmsx

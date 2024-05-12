@@ -12,19 +12,19 @@ class RS232Device;
 class RS232Connector : public Connector, public SerialDataInterface
 {
 public:
-	RS232Device& getPluggedRS232Dev() const;
+	[[nodiscard]] RS232Device& getPluggedRS232Dev() const;
 
 	// Connector
-	const std::string getDescription() const final override;
-	string_view getClass() const final override;
+	[[nodiscard]] std::string_view getDescription() const final;
+	[[nodiscard]] std::string_view getClass() const final;
 
 	// input (SerialDataInterface)
 	void setDataBits(DataBits bits) override = 0;
 	void setStopBits(StopBits bits) override = 0;
 	void setParityBit(bool enable, ParityBit parity) override = 0;
 	void recvByte(byte value, EmuTime::param time) override = 0;
-	virtual bool ready() = 0;
-	virtual bool acceptsData() = 0;
+	[[nodiscard]] virtual bool ready() = 0;
+	[[nodiscard]] virtual bool acceptsData() = 0;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
@@ -32,7 +32,7 @@ public:
 protected:
 	RS232Connector(PluggingController& pluggingController,
 	               std::string name);
-	~RS232Connector() {}
+	~RS232Connector() = default;
 };
 
 REGISTER_BASE_CLASS(RS232Connector, "rs232connector");

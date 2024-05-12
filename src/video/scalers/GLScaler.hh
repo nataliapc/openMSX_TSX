@@ -2,6 +2,8 @@
 #define GLSCALER_HH
 
 #include "GLUtil.hh"
+#include <array>
+#include <string>
 
 namespace openmsx {
 
@@ -13,7 +15,13 @@ class FrameSource;
 class GLScaler
 {
 public:
-	virtual ~GLScaler() {}
+	virtual ~GLScaler() = default;
+
+	/** Setup scaler.
+	  * Must be called once per frame before calling scaleImage() (possibly
+	  * multiple times).
+	  */
+	void setup(bool superImpose);
 
 	/** Scales the image in the given area, which must consist of lines which
 	  * are all equally wide.
@@ -43,12 +51,11 @@ public:
 
 protected:
 	explicit GLScaler(const std::string& progName);
-	void setup(bool superImpose);
 
 	/** Helper method to draw a rectangle with multiple texture coordinates.
 	  * This method is similar to Texture::drawRect() but it calculates a
 	  * seconds set of texture coordinates. The first tex-coords are used
-	  * for the MSX texture (textur unit 0), and are calculated from
+	  * for the MSX texture (texture unit 0), and are calculated from
 	  * src{Start,End}Y and src.getHeight(). The second set of tex-coord are
 	  * used for the superimpose texture (texture unit 1) and are calculated
 	  * from src{Start,End}Y and logSrcHeight.
@@ -67,15 +74,17 @@ protected:
 	  *   subpixels will be centered: for example in 4x zoom the source
 	  *   coordinates will be 0.125, 0.375, 0.625, 0.875.
 	  */
-	void execute(gl::ColorTexture& src, gl::ColorTexture* superImpose,
+	void execute(const gl::ColorTexture& src, const gl::ColorTexture* superImpose,
 	             unsigned srcStartY, unsigned srcEndY, unsigned srcWidth,
 	             unsigned dstStartY, unsigned dstEndY, unsigned dstWidth,
 	             unsigned logSrcHeight,
 	             bool textureFromZero = false);
 
 protected:
-	gl::ShaderProgram program[2];
-	GLint unifTexSize[2];
+	std::array<gl::BufferObject, 2> vbo;
+	std::array<gl::ShaderProgram, 2> program;
+	std::array<GLint, 2> unifTexSize;
+	std::array<GLint, 2> unifMvpMatrix;
 };
 
 } // namespace openmsx

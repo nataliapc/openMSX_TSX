@@ -14,7 +14,7 @@ public:
 	virtual void callback(byte value) = 0;
 
 protected:
-	~EmuTimerCallback() {}
+	~EmuTimerCallback() = default;
 };
 
 
@@ -23,19 +23,21 @@ class EmuTimer final : public Schedulable
 public:
 	EmuTimer(Scheduler& scheduler, EmuTimerCallback& cb,
 	         byte flag, unsigned freq_num, unsigned freq_denom,
-	         unsigned maxval);
+	         int maxVal);
 
-	static std::unique_ptr<EmuTimer> createOPM_1(
+	[[nodiscard]] static std::unique_ptr<EmuTimer> createOPM_1(
 		Scheduler& scheduler, EmuTimerCallback& cb);
-	static std::unique_ptr<EmuTimer> createOPM_2(
+	[[nodiscard]] static std::unique_ptr<EmuTimer> createOPM_2(
 		Scheduler& scheduler, EmuTimerCallback& cb);
-	static std::unique_ptr<EmuTimer> createOPL3_1(
+	[[nodiscard]] static std::unique_ptr<EmuTimer> createOPP_2(
 		Scheduler& scheduler, EmuTimerCallback& cb);
-	static std::unique_ptr<EmuTimer> createOPL3_2(
+	[[nodiscard]] static std::unique_ptr<EmuTimer> createOPL3_1(
 		Scheduler& scheduler, EmuTimerCallback& cb);
-	static std::unique_ptr<EmuTimer> createOPL4_1(
+	[[nodiscard]] static std::unique_ptr<EmuTimer> createOPL3_2(
 		Scheduler& scheduler, EmuTimerCallback& cb);
-	static std::unique_ptr<EmuTimer> createOPL4_2(
+	[[nodiscard]] static std::unique_ptr<EmuTimer> createOPL4_1(
+		Scheduler& scheduler, EmuTimerCallback& cb);
+	[[nodiscard]] static std::unique_ptr<EmuTimer> createOPL4_2(
 		Scheduler& scheduler, EmuTimerCallback& cb);
 
 	void setValue(int value);
@@ -49,12 +51,13 @@ private:
 	void schedule(EmuTime::param time);
 	void unschedule();
 
+private:
 	EmuTimerCallback& cb;
 	DynamicClock clock;
-	const unsigned maxval;
+	const int maxVal;
 	int count;
 	const byte flag;
-	bool counting;
+	bool counting = false;
 };
 
 } // namespace openmsx

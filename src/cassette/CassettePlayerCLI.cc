@@ -1,46 +1,56 @@
 #include "CassettePlayerCLI.hh"
 #include "CommandLineParser.hh"
-#include "GlobalCommandController.hh"
+#include "Interpreter.hh"
 #include "MSXException.hh"
 #include "TclObject.hh"
 
-using std::string;
-
 namespace openmsx {
+
+std::span<const std::string_view> CassettePlayerCLI::getExtensions()
+{
+	static constexpr std::array<std::string_view, 3> extensions = {
+		"cas", "wav", "tsx"
+	};
+	return extensions;
+}
 
 CassettePlayerCLI::CassettePlayerCLI(CommandLineParser& parser_)
 	: parser(parser_)
 {
 	parser.registerOption("-cassetteplayer", *this);
-	parser.registerFileType("cas,wav,tsx", *this);
+	parser.registerFileType(getExtensions(), *this);
 }
 
-void CassettePlayerCLI::parseOption(const string& option, array_ref<string>& cmdLine)
+void CassettePlayerCLI::parseOption(const std::string& option,
+                                    std::span<std::string>& cmdLine)
 {
 	parseFileType(getArgument(option, cmdLine), cmdLine);
 }
 
-string_view CassettePlayerCLI::optionHelp() const
+std::string_view CassettePlayerCLI::optionHelp() const
 {
 	return "Put cassette image specified in argument in "
 	       "virtual cassetteplayer";
 }
 
-void CassettePlayerCLI::parseFileType(const string& filename,
-                                      array_ref<string>& /*cmdLine*/)
+void CassettePlayerCLI::parseFileType(const std::string& filename,
+                                      std::span<std::string>& /*cmdLine*/)
 {
-	if (!parser.getGlobalCommandController().hasCommand("cassetteplayer")) {
-		throw MSXException("No cassetteplayer.");
+	if (!parser.getInterpreter().hasCommand("cassetteplayer")) {
+		throw MSXException("No cassette player present.");
 	}
-	TclObject command;
-	command.addListElement("cassetteplayer");
-	command.addListElement(filename);
+	TclObject command = makeTclList("cassetteplayer", filename);
 	command.executeCommand(parser.getInterpreter());
 }
 
-string_view CassettePlayerCLI::fileTypeHelp() const
+std::string_view CassettePlayerCLI::fileTypeHelp() const
 {
-	return "Cassette image, raw recording, fMSX CAS image or TSX file";
+	return "Cassette image, raw recording, fMSX CAS image, or TSX file";
+}
+
+std::string_view CassettePlayerCLI::fileTypeCategoryName() const
+{
+	return "cassette";
 }
 
 } // namespace openmsx

@@ -3,11 +3,15 @@
 
 #include "DeviceConfig.hh"
 #include "EmuTime.hh"
+#include "IterableBitSet.hh"
+#include "narrow.hh"
 #include "openmsx.hh"
 #include "serialize_meta.hh"
+#include <array>
+#include <cassert>
+#include <span>
 #include <string>
 #include <vector>
-#include <utility> // for pair
 
 namespace openmsx {
 
@@ -16,7 +20,7 @@ class MSXMotherBoard;
 class MSXCPU;
 class MSXCPUInterface;
 class Scheduler;
-class CliComm;
+class MSXCliComm;
 class Reactor;
 class CommandController;
 class LedStatus;
@@ -32,7 +36,9 @@ class MSXDevice
 {
 public:
 	MSXDevice(const MSXDevice&) = delete;
+	MSXDevice(MSXDevice&&) = delete;
 	MSXDevice& operator=(const MSXDevice&) = delete;
+	MSXDevice& operator=(MSXDevice&&) = delete;
 
 	using Devices = std::vector<MSXDevice*>;
 
@@ -40,14 +46,14 @@ public:
 
 	/** Returns the hardwareconfig this device belongs to.
 	  */
-	const HardwareConfig& getHardwareConfig() const {
+	[[nodiscard]] const HardwareConfig& getHardwareConfig() const {
 		return deviceConfig.getHardwareConfig();
 	}
 
 	/** Checks whether this device can be removed (no other device has a
 	  * reference to it). Throws an exception if it can't be removed.
 	  */
-	void testRemove(Devices alreadyRemoved) const;
+	void testRemove(std::span<const std::unique_ptr<MSXDevice>> removed) const;
 
 	/**
 	 * This method is called on reset.
@@ -62,7 +68,7 @@ public:
 	 * supported in the MSX standard.
 	 * Default implementation returns 0xFF.
 	 */
-	virtual byte readIRQVector();
+	[[nodiscard]] virtual byte readIRQVector();
 
 	/**
 	 * This method is called when MSX is powered down. The default
@@ -83,7 +89,7 @@ public:
 	 * Returns a human-readable name for this device.
 	 * Default implementation is normally ok.
 	 */
-	virtual std::string getName() const;
+	[[nodiscard]] virtual const std::string& getName() const;
 
 	/** Returns list of name(s) of this device.
 	 * This is normally the same as getName() (but formatted as a Tcl list)
@@ -110,7 +116,7 @@ public:
 	 * Read a byte from an IO port at a certain time from this device.
 	 * The default implementation returns 255.
 	 */
-	virtual byte readIO(word port, EmuTime::param time);
+	[[nodiscard]] virtual byte readIO(word port, EmuTime::param time);
 
 	/**
 	 * Write a byte to a given IO port at a certain time to this
@@ -121,13 +127,13 @@ public:
 
 	/**
 	 * Read a byte from a given IO port. Reading via this method has no
-	 * side effects (doesn't change the device status). If save reading
+	 * side effects (doesn't change the device status). If safe reading
 	 * is not possible this method returns 0xFF.
 	 * This method is not used by the emulation. It can however be used
 	 * by a debugger.
 	 * The default implementation just returns 0xFF.
 	 */
-	virtual byte peekIO(word port, EmuTime::param time) const;
+	[[nodiscard]] virtual byte peekIO(word port, EmuTime::param time) const;
 
 
 	// Memory
@@ -137,7 +143,7 @@ public:
 	 * device.
 	 * The default implementation returns 255.
 	 */
-	virtual byte readMem(word address, EmuTime::param time);
+	[[nodiscard]] virtual byte readMem(word address, EmuTime::param time);
 
 	/**
 	 * Write a given byte to a given location at a certain time
@@ -157,7 +163,7 @@ public:
 	 * The default implementation always returns a null pointer.
 	 * The start of the interval is CacheLine::SIZE aligned.
 	 */
-	virtual const byte* getReadCacheLine(word start) const;
+	[[nodiscard]] virtual const byte* getReadCacheLine(word start) const;
 
 	/**
 	 * Test that the memory in the interval [start, start +
@@ -170,7 +176,7 @@ public:
 	 * The default implementation always returns a null pointer.
 	 * The start of the interval is CacheLine::SIZE aligned.
 	 */
-	virtual byte* getWriteCacheLine(word start) const;
+	[[nodiscard]] virtual byte* getWriteCacheLine(word start) const;
 
 	/**
 	 * Read a byte from a given memory location. Reading memory
@@ -184,7 +190,7 @@ public:
 	 * cacheable you cannot read it by default, Override this
 	 * method if you want to improve this behaviour.
 	 */
-	virtual byte peekMem(word address, EmuTime::param time) const;
+	[[nodiscard]] virtual byte peekMem(word address, EmuTime::param time) const;
 
 	/** Global writes.
 	  * Some devices violate the MSX standard by ignoring the SLOT-SELECT
@@ -202,40 +208,52 @@ public:
 	  */
 	virtual void globalRead(word address, EmuTime::param time);
 
-	/** Invalidate CPU memory-mapping cache.
-	  * This is a shortcut to the MSXCPU::invalidateMemCache() method,
-	  * see that method for more details.
+	/** Calls MSXCPUInterface::invalidateXXCache() for the specific (part
+	  * of) the slot that this device is located in.
 	  */
-	void invalidateMemCache(word start, unsigned size);
+	void invalidateDeviceRWCache() { invalidateDeviceRWCache(0x0000, 0x10000); }
+	void invalidateDeviceRCache()  { invalidateDeviceRCache (0x0000, 0x10000); }
+	void invalidateDeviceWCache()  { invalidateDeviceWCache (0x0000, 0x10000); }
+	void invalidateDeviceRWCache(unsigned start, unsigned size);
+	void invalidateDeviceRCache (unsigned start, unsigned size);
+	void invalidateDeviceWCache (unsigned start, unsigned size);
+
+	/** Calls MSXCPUInterface::fillXXCache() for the specific (part of) the
+	  * slot that this device is located in.
+	  */
+	void fillDeviceRWCache(unsigned start, unsigned size, byte* rwData);
+	void fillDeviceRWCache(unsigned start, unsigned size, const byte* rData, byte* wData);
+	void fillDeviceRCache (unsigned start, unsigned size, const byte* rData);
+	void fillDeviceWCache (unsigned start, unsigned size, byte* wData);
 
 	/** Get the mother board this device belongs to
 	  */
-	MSXMotherBoard& getMotherBoard() const;
+	[[nodiscard]] MSXMotherBoard& getMotherBoard() const;
 
 	/** Get the configuration section for this device.
 	  * This was passed as a constructor argument.
 	  */
-	const XMLElement& getDeviceConfig() const {
+	[[nodiscard]] const XMLElement& getDeviceConfig() const {
 		return *deviceConfig.getXML();
 	}
-	const DeviceConfig& getDeviceConfig2() const { // TODO
+	[[nodiscard]] const DeviceConfig& getDeviceConfig2() const { // TODO
 		return deviceConfig;
 	}
 
 	/** Get the device references that are specified for this device
 	 */
-	const Devices& getReferences() const;
+	[[nodiscard]] const Devices& getReferences() const;
 
 	// convenience functions, these delegate to MSXMotherBoard
-	EmuTime::param getCurrentTime() const;
-	MSXCPU& getCPU() const;
-	MSXCPUInterface& getCPUInterface() const;
-	Scheduler& getScheduler() const;
-	CliComm& getCliComm() const;
-	Reactor& getReactor() const;
-	CommandController& getCommandController() const;
-	PluggingController& getPluggingController() const;
-	LedStatus& getLedStatus() const;
+	[[nodiscard]] EmuTime::param getCurrentTime() const;
+	[[nodiscard]] MSXCPU& getCPU() const;
+	[[nodiscard]] MSXCPUInterface& getCPUInterface() const;
+	[[nodiscard]] Scheduler& getScheduler() const;
+	[[nodiscard]] MSXCliComm& getCliComm() const;
+	[[nodiscard]] Reactor& getReactor() const;
+	[[nodiscard]] CommandController& getCommandController() const;
+	[[nodiscard]] PluggingController& getPluggingController() const;
+	[[nodiscard]] LedStatus& getLedStatus() const;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
@@ -246,14 +264,14 @@ protected:
 	  * @param config config entry for this device.
 	  * @param name The name for the MSXDevice (will be made unique)
 	  */
-	MSXDevice(const DeviceConfig& config, const std::string& name);
+	MSXDevice(const DeviceConfig& config, std::string_view name);
 	explicit MSXDevice(const DeviceConfig& config);
 
 	/** Constructing a MSXDevice is a 2-step process, after the constructor
 	  * is called this init() method must be called. The reason is exception
 	  * safety (init() might throw and we use the destructor to clean up
 	  * some stuff, this is more difficult when everything is done in the
-	  * constrcutor).
+	  * constructor).
 	  * This is also a non-public method. This means you can only construct
 	  * MSXDevices via DeviceFactory.
 	  * In rare cases you need to override this method, for example when you
@@ -263,6 +281,20 @@ protected:
 	friend class DeviceFactory;
 	virtual void init();
 
+	/** The 'base' and 'size' attribute values need to be at least aligned
+	  * to CacheLine::SIZE. Though some devices may need a stricter
+	  * alignment. In that case they must override this method.
+	  */
+	[[nodiscard]] virtual unsigned getBaseSizeAlignment() const;
+
+	/** By default we don't allow unaligned <mem> specifications in the
+	  * config file. Though for a machine like 'Victor HC-95A' is it useful
+	  * to model it with combinations of unaligned devices. So we do allow
+	  * it for a select few devices: devices that promise to not call any
+	  * of the 'fillDeviceXXXCache()' methods.
+	  */
+	[[nodiscard]] virtual bool allowUnaligned() const { return false; }
+
 	/** @see getDeviceInfo()
 	 * Default implementation does nothing. Subclasses can override this
 	 * method to add extra info (like subtypes).
@@ -271,12 +303,15 @@ protected:
 
 public:
 	// public to allow non-MSXDevices to use these same arrays
-	static byte unmappedRead [0x10000]; // Read only
-	static byte unmappedWrite[0x10000]; // Write only
+	static inline std::array<byte, 0x10000> unmappedRead;  // Read only
+	static inline std::array<byte, 0x10000> unmappedWrite; // Write only
 
 private:
-	void initName(const std::string& name);
-	void staticInit();
+	template<typename Action, typename... Args>
+	void clip(unsigned start, unsigned size, Action action, Args... args);
+
+	void initName(std::string_view name);
+	static void staticInit();
 
 	void lockDevices();
 	void unlockDevices();
@@ -287,19 +322,33 @@ private:
 	void registerPorts();
 	void unregisterPorts();
 
-	using MemRegions = std::vector<std::pair<unsigned, unsigned>>;
+protected:
+	std::string deviceName;
+
+	[[nodiscard]] byte getPrimarySlot() const {
+		// must already be resolved to an actual slot
+		assert((0 <= ps) && (ps <= 3));
+		return narrow_cast<byte>(ps);
+	}
+
+private:
+	struct BaseSize {
+		unsigned base;
+		unsigned size;
+		[[nodiscard]] unsigned end() const { return base + size; }
+	};
+	using MemRegions = std::vector<BaseSize>;
 	MemRegions memRegions;
-	std::vector<byte> inPorts;
-	std::vector<byte> outPorts;
+	IterableBitSet<256> inPorts;
+	IterableBitSet<256> outPorts;
 
 	DeviceConfig deviceConfig;
-	std::string deviceName;
 
 	Devices references;
 	Devices referencedBy;
 
-	int ps;
-	int ss;
+	int ps = 0;
+	int ss = 0;
 };
 
 REGISTER_BASE_NAME_HELPER(MSXDevice, "Device");

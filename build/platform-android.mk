@@ -12,7 +12,17 @@ LIBRARYEXT:=.so
 TARGET_FLAGS:=-DANDROID -fPIC
 
 LINK_FLAGS+=-llog
+#LDFLAGS+=--no-undefined
 
 # Build a maximum set of components.
 # See configure.py for LINK_MODE definition and usage
 LINK_MODE:=3RD_STA_GLES
+
+# Automatically select the cross compiler.
+ifeq ($(origin CXX),default)
+ifeq ($(OPENMSX_TARGET_CPU),arm)
+CXX:=armv7a-linux-androideabi21-clang++
+else
+CXX:=$(OPENMSX_TARGET_CPU)-linux-android-clang++
+endif
+endif

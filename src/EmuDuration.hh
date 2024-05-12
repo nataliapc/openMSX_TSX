@@ -1,15 +1,21 @@
-#ifndef EMUDUARTION_HH
-#define EMUDUARTION_HH
+#ifndef EMUDURATION_HH
+#define EMUDURATION_HH
 
+#include "narrow.hh"
+#include "serialize.hh"
 #include <cassert>
+#include <concepts>
 #include <cstdint>
+#include <limits>
+#include <type_traits>
 
 namespace openmsx {
 
 // constants
-static const uint64_t MAIN_FREQ = 3579545ULL * 960;
-static const unsigned MAIN_FREQ32 = MAIN_FREQ;
-static_assert(MAIN_FREQ < (1ull << 32), "must fit in 32 bit");
+inline constexpr uint64_t MAIN_FREQ = 3579545ULL * 960;
+inline constexpr unsigned MAIN_FREQ32 = MAIN_FREQ;
+static_assert(MAIN_FREQ < (1ULL << 32), "must fit in 32 bit");
+inline constexpr double RECIP_MAIN_FREQ = 1.0 / MAIN_FREQ;
 
 
 class EmuDuration
@@ -19,7 +25,7 @@ public:
 	// it's cheaper to pass this by value. On 32-bit CPUs pass-by-reference
 	// is cheaper.
 #ifdef __x86_64
-	using param = const EmuDuration;
+	using param = EmuDuration;
 #else
 	using param = const EmuDuration&;
 #endif
@@ -28,50 +34,39 @@ public:
 	friend class EmuTime;
 
 	// constructors
-	EmuDuration()                  : time(0) {}
-	explicit EmuDuration(uint64_t n) : time(n) {}
-	explicit EmuDuration(double duration)
-		: time(uint64_t(duration * MAIN_FREQ)) {}
+	constexpr EmuDuration() = default;
+	constexpr explicit EmuDuration(uint64_t n) : time(n) {}
+	constexpr explicit EmuDuration(double duration)
+		: time(uint64_t(duration * MAIN_FREQ + 0.5)) {}
 
-	static EmuDuration sec(unsigned x)
+	static constexpr EmuDuration sec(unsigned x)
 		{ return EmuDuration(x * MAIN_FREQ); }
-	static EmuDuration msec(unsigned x)
+	static constexpr EmuDuration msec(unsigned x)
 		{ return EmuDuration(x * MAIN_FREQ / 1000); }
-	static EmuDuration usec(unsigned x)
+	static constexpr EmuDuration usec(unsigned x)
 		{ return EmuDuration(x * MAIN_FREQ / 1000000); }
-	static EmuDuration hz(unsigned x)
+	static constexpr EmuDuration hz(unsigned x)
 		{ return EmuDuration(MAIN_FREQ / x); }
 
 	// conversions
-	double toDouble() const { return double(time) / MAIN_FREQ32; }
-	uint64_t length() const { return time; }
+	[[nodiscard]] constexpr double toDouble() const { return double(time) * RECIP_MAIN_FREQ; }
+	[[nodiscard]] constexpr uint64_t length() const { return time; }
 
 	// comparison operators
-	bool operator==(EmuDuration::param d) const
-		{ return time == d.time; }
-	bool operator!=(EmuDuration::param d) const
-		{ return time != d.time; }
-	bool operator< (EmuDuration::param d) const
-		{ return time <  d.time; }
-	bool operator<=(EmuDuration::param d) const
-		{ return time <= d.time; }
-	bool operator> (EmuDuration::param d) const
-		{ return time >  d.time; }
-	bool operator>=(EmuDuration::param d) const
-		{ return time >= d.time; }
+	[[nodiscard]] constexpr auto operator<=>(const EmuDuration&) const = default;
 
 	// arithmetic operators
-	const EmuDuration operator%(EmuDuration::param d) const
+	[[nodiscard]] constexpr EmuDuration operator%(EmuDuration::param d) const
 		{ return EmuDuration(time % d.time); }
-	const EmuDuration operator+(EmuDuration::param d) const
+	[[nodiscard]] constexpr EmuDuration operator+(EmuDuration::param d) const
 		{ return EmuDuration(time + d.time); }
-	const EmuDuration operator*(unsigned fact) const
+	[[nodiscard]] constexpr EmuDuration operator*(uint64_t fact) const
 		{ return EmuDuration(time * fact); }
-	const EmuDuration operator/(unsigned fact) const
+	[[nodiscard]] constexpr EmuDuration operator/(unsigned fact) const
 		{ return EmuDuration(time / fact); }
-	const EmuDuration divRoundUp(unsigned fact) const
+	[[nodiscard]] constexpr EmuDuration divRoundUp(unsigned fact) const
 		{ return EmuDuration((time + fact - 1) / fact); }
-	unsigned operator/(EmuDuration::param d) const
+	[[nodiscard]] constexpr unsigned operator/(EmuDuration::param d) const
 	{
 		uint64_t result = time / d.time;
 #ifdef DEBUG
@@ -80,26 +75,31 @@ public:
 #endif
 		return unsigned(result);
 	}
-	unsigned divUp(EmuDuration::param d) const {
+	[[nodiscard]] constexpr unsigned divUp(EmuDuration::param d) const {
 		uint64_t result = (time + d.time - 1) / d.time;
 #ifdef DEBUG
 		assert(result == unsigned(result));
 #endif
 		return unsigned(result);
 	}
-	double div(EmuDuration::param d) const
-		{ return double(time) / d.time; }
+	[[nodiscard]] constexpr double div(EmuDuration::param d) const
+		{ return narrow_cast<double>(time) / narrow_cast<double>(d.time); }
 
-	EmuDuration& operator*=(unsigned fact)
+	constexpr EmuDuration& operator*=(unsigned fact)
 		{ time *= fact; return *this; }
-	EmuDuration& operator*=(double fact)
-		{ time = uint64_t(time * fact); return *this; }
-	EmuDuration& operator/=(double fact)
-		{ time = uint64_t(time / fact); return *this; }
+	constexpr EmuDuration& operator*=(double fact)
+		{ time = narrow_cast<uint64_t>(narrow_cast<double>(time) * fact); return *this; }
+	constexpr EmuDuration& operator/=(double fact)
+		{ time = narrow_cast<uint64_t>(narrow_cast<double>(time) / fact); return *this; }
+
+	// The smallest duration larger than zero
+	[[nodiscard]] static constexpr EmuDuration epsilon() {
+		return EmuDuration(uint64_t(1));
+	}
 
 	// ticks
 	// TODO: Used in WavAudioInput. Keep or use DynamicClock instead?
-	unsigned getTicksAt(unsigned freq) const
+	[[nodiscard]] constexpr unsigned getTicksAt(unsigned freq) const
 	{
 		uint64_t result = time / (MAIN_FREQ32 / freq);
 #ifdef DEBUG
@@ -109,16 +109,61 @@ public:
 		return unsigned(result);
 	}
 
-	template<typename Archive>
-	void serialize(Archive& ar, unsigned version);
+	[[nodiscard]] static constexpr EmuDuration zero()
+	{
+		return EmuDuration(uint64_t(0));
+	}
 
-	static const EmuDuration zero;
-	static const EmuDuration infinity;
+	[[nodiscard]] static constexpr EmuDuration infinity()
+	{
+		return EmuDuration(std::numeric_limits<uint64_t>::max());
+	}
+
+	template<typename Archive>
+	void serialize(Archive& ar, unsigned /*version*/)
+	{
+		ar.serialize("time", time);
+	}
 
 private:
-	uint64_t time;
+	uint64_t time = 0;
 };
 
+template<> struct SerializeAsMemcpy<EmuDuration> : std::true_type {};
+
+
+template<std::unsigned_integral T> class EmuDurationCompactStorage
+{
+public:
+	explicit constexpr EmuDurationCompactStorage(EmuDuration e)
+		: time(T(e.length()))
+	{
+		assert(e.length() <= std::numeric_limits<T>::max());
+	}
+
+	[[nodiscard]] explicit constexpr operator EmuDuration() const
+	{
+		return EmuDuration(uint64_t(time));
+	}
+private:
+	T time;
+};
+
+using EmuDuration32 = EmuDurationCompactStorage<uint32_t>;
+using EmuDuration16 = EmuDurationCompactStorage<uint16_t>;
+using EmuDuration8  = EmuDurationCompactStorage<uint8_t>;
+
+namespace detail {
+	// via intermediate variable to work around gcc-10 warning
+	inline constexpr uint64_t max32 = std::numeric_limits<uint32_t>::max();
+	inline constexpr uint64_t max16 = std::numeric_limits<uint16_t>::max();
+	inline constexpr uint64_t max8  = std::numeric_limits<uint8_t >::max();
+}
+template<uint64_t MAX>
+using EmuDurationStorageFor = std::conditional_t<(MAX > detail::max32), EmuDuration,
+                              std::conditional_t<(MAX > detail::max16), EmuDuration32,
+                              std::conditional_t<(MAX > detail::max8 ), EmuDuration16,
+                                                                        EmuDuration8>>>;
 } // namespace openmsx
 
 #endif

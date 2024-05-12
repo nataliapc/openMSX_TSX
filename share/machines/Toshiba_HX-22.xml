@@ -6,8 +6,9 @@
     <manufacturer>Toshiba</manufacturer>
     <code>HX-22</code>
     <release_year>1984</release_year>
-    <description>A Toshiba HX-21 with RS-232C</description>
+    <description>A Toshiba HX-21 with RS-232C.</description>
     <type>MSX</type>
+    <region>jp</region>
   </info>
 
   <!-- Thanks to Werner Kai for the details! -->
@@ -37,15 +38,15 @@
 
     <PSG id="PSG">
       <type>AY8910</type>
-      <keyboardlayout>jis</keyboardlayout>
+      <keyboardlayout>JIS</keyboardlayout>
       <sound>
         <volume>21000</volume>
         <balance channel="1">0</balance>
         <balance channel="2">100</balance> <!-- According to Werner Kai -->
         <balance channel="3">-100</balance><!-- According to Werner Kai -->
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <PrinterPort id="Printer Port">
@@ -55,6 +56,7 @@
     <MSX-RS232 id="RS-232">
       <io base="0x80" num="8"/>
       <toshiba_rs232c_switch>true</toshiba_rs232c_switch>
+      <has_ri_pin>false</has_ri_pin>
     </MSX-RS232>
 
     <primary slot="0">

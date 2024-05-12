@@ -1,14 +1,18 @@
 #ifndef MSXMIXER_HH
 #define MSXMIXER_HH
 
-#include "Schedulable.hh"
-#include "Observer.hh"
-#include "InfoTopic.hh"
-#include "EmuTime.hh"
 #include "DynamicClock.hh"
-#include <cstdint>
-#include <vector>
+#include "EmuTime.hh"
+#include "InfoTopic.hh"
+#include "Mixer.hh"
+#include "Schedulable.hh"
+
+#include "Observer.hh"
+#include "dynarray.hh"
+
 #include <memory>
+#include <span>
+#include <vector>
 
 namespace openmsx {
 
@@ -17,6 +21,7 @@ class Mixer;
 class MSXMotherBoard;
 class MSXCommandController;
 class GlobalSettings;
+class SpeedManager;
 class ThrottleManager;
 class IntegerSetting;
 class StringSetting;
@@ -25,6 +30,7 @@ class Setting;
 class AviRecorder;
 
 class MSXMixer final : private Schedulable, private Observer<Setting>
+                     , private Observer<SpeedManager>
                      , private Observer<ThrottleManager>
 {
 public:
@@ -32,13 +38,32 @@ public:
 	// and MSXMixer::updateVolumeParams()
 	static constexpr int AMP_BITS = 9;
 
+	struct SoundDeviceInfo {
+		explicit SoundDeviceInfo(unsigned numChannels);
+
+		SoundDevice* device = nullptr;
+		std::unique_ptr<IntegerSetting> volumeSetting;
+		std::unique_ptr<IntegerSetting> balanceSetting;
+		struct ChannelSettings {
+			std::unique_ptr<StringSetting> record;
+			std::unique_ptr<BooleanSetting> mute;
+		};
+		dynarray<ChannelSettings> channelSettings;
+		float defaultVolume = 0.f;
+		float left1 = 0.f, right1 = 0.f, left2 = 0.f, right2 = 0.f;
+	};
+
 public:
 	MSXMixer(Mixer& mixer, MSXMotherBoard& motherBoard,
 	         GlobalSettings& globalSettings);
+	MSXMixer(const MSXMixer&) = delete;
+	MSXMixer(MSXMixer&&) = delete;
+	MSXMixer& operator=(const MSXMixer&) = delete;
+	MSXMixer& operator=(MSXMixer&&) = delete;
 	~MSXMixer();
 
 	/**
-	 * Use this method to register a given sounddevice.
+	 * Use this method to register a given SoundDevice.
 	 *
 	 * While registering, the device its setSampleRate() method is
 	 * called (see SoundDevice for more info).
@@ -49,7 +74,7 @@ public:
 	                   int balance, unsigned numChannels);
 
 	/**
-	 * Every sounddevice must unregister before it is destructed
+	 * Every SoundDevice must unregister before it is destructed
 	 */
 	void unregisterSound(SoundDevice& device);
 
@@ -64,18 +89,19 @@ public:
 	 */
 	void updateSoftwareVolume(SoundDevice& device);
 
-	/** Returns the ratio of emutime-speed per realtime-speed.
-	 * In other words how many times faster emutime goes compared to
+	/** Returns the ratio of EmuTime-speed per realtime-speed.
+	 * In other words how many times faster EmuTime goes compared to
 	 * realtime. This depends on the 'speed' setting but also on whether
 	 * we're recording or not (in case of recording we want to generate
-	 * sound as if realtime and emutime go at the same speed.
+	 * sound as if realtime and EmuTime go at the same speed.
 	 */
-	double getEffectiveSpeed() const;
+	[[nodiscard]] double getEffectiveSpeed() const;
 
-	/** If we're recording, we want to emulate sound at 100% emutime speed.
-	 * See alsoe getEffectiveSpeed().
+	/** If we're recording, we want to emulate sound at 100% EmuTime speed.
+	 * See also getEffectiveSpeed().
 	 */
 	void setSynchronousMode(bool synchronous);
+	[[nodiscard]] bool isSynchronousMode() const { return synchronousCounter != 0; }
 
 	/** TODO
 	 * This methods (un)mute the sound.
@@ -101,50 +127,42 @@ public:
 	  * the requested speed or because the 'speed' setting is different
 	  * from 100.
 	  */
-	const DynamicClock& getHostSampleClock() const { return prevTime; }
+	[[nodiscard]] const DynamicClock& getHostSampleClock() const { return prevTime; }
 
 	// Called by AviRecorder
-	bool needStereoRecording() const;
+	[[nodiscard]] bool needStereoRecording() const;
 	void setRecorder(AviRecorder* recorder);
 
 	// Returns the nominal host sample rate (not adjusted for speed setting)
-	unsigned getSampleRate() const { return hostSampleRate; }
+	[[nodiscard]] unsigned getSampleRate() const { return hostSampleRate; }
 
-	SoundDevice* findDevice(string_view name) const;
+	[[nodiscard]] SoundDevice* findDevice(std::string_view name) const;
+	[[nodiscard]] const SoundDeviceInfo* findDeviceInfo(std::string_view name) const;
+	[[nodiscard]] const auto& getDeviceInfos() const { return infos; }
 
 	void reInit();
 
 private:
-	struct SoundDeviceInfo {
-		SoundDevice* device;
-		float defaultVolume;
-		std::unique_ptr<IntegerSetting> volumeSetting;
-		std::unique_ptr<IntegerSetting> balanceSetting;
-		struct ChannelSettings {
-			std::unique_ptr<StringSetting> recordSetting;
-			std::unique_ptr<BooleanSetting> muteSetting;
-		};
-		std::vector<ChannelSettings> channelSettings;
-		int left1, right1, left2, right2;
-	};
-
-	void updateVolumeParams(SoundDeviceInfo& info);
+	void updateVolumeParams(SoundDeviceInfo& info) const;
 	void updateMasterVolume();
 	void reschedule();
 	void reschedule2();
-	void generate(int16_t* output, EmuTime::param time, unsigned samples);
+	void generate(std::span<StereoFloat> output, EmuTime::param time);
 
 	// Schedulable
 	void executeUntil(EmuTime::param time) override;
 
 	// Observer<Setting>
-	void update(const Setting& setting) override;
+	void update(const Setting& setting) noexcept override;
+	// Observer<SpeedManager>
+	void update(const SpeedManager& speedManager) noexcept override;
 	// Observer<ThrottleManager>
-	void update(const ThrottleManager& throttleManager) override;
+	void update(const ThrottleManager& throttleManager) noexcept override;
 
 	void changeRecordSetting(const Setting& setting);
 	void changeMuteSetting(const Setting& setting);
 
+private:
 	unsigned fragmentSize;
 	unsigned hostSampleRate; // requested freq by sound driver,
 	                         // not compensated for speed
@@ -156,24 +174,24 @@ private:
 	MSXCommandController& commandController;
 
 	IntegerSetting& masterVolume;
-	IntegerSetting& speedSetting;
+	SpeedManager& speedManager;
 	ThrottleManager& throttleManager;
 
 	DynamicClock prevTime;
 
 	struct SoundDeviceInfoTopic final : InfoTopic {
 		explicit SoundDeviceInfoTopic(InfoCommand& machineInfoCommand);
-		void execute(array_ref<TclObject> tokens,
+		void execute(std::span<const TclObject> tokens,
 			     TclObject& result) const override;
-		std::string help(const std::vector<std::string>& tokens) const override;
+		[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override;
 		void tabCompletion(std::vector<std::string>& tokens) const override;
 	} soundDeviceInfo;
 
-	AviRecorder* recorder;
-	unsigned synchronousCounter;
+	AviRecorder* recorder = nullptr;
+	unsigned synchronousCounter = 0;
 
 	unsigned muteCount;
-	int32_t tl0, tr0; // internal DC-filter state
+	float tl0, tr0; // internal DC-filter state
 };
 
 } // namespace openmsx

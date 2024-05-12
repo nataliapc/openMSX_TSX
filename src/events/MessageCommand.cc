@@ -11,10 +11,10 @@ MessageCommand::MessageCommand(CommandController& controller)
 {
 }
 
-static CliComm::LogLevel getLevel(string_view level)
+[[nodiscard]] static CliComm::LogLevel getLevel(std::string_view level)
 {
-	auto levels = CliComm::getLevelStrings();
-	for (auto i : xrange(levels.size())) {
+	for (auto levels = CliComm::getLevelStrings();
+	     auto i : xrange(levels.size())) {
 		if (level == levels[i]) {
 			return static_cast<CliComm::LogLevel>(i);
 		}
@@ -22,23 +22,22 @@ static CliComm::LogLevel getLevel(string_view level)
 	throw CommandException("Unknown level string: ", level);
 }
 
-void MessageCommand::execute(array_ref<TclObject> tokens, TclObject& /*result*/)
+void MessageCommand::execute(std::span<const TclObject> tokens, TclObject& /*result*/)
 {
+	checkNumArgs(tokens, Between{2, 3}, "string ?level?");
 	CliComm& cliComm = getCliComm();
 	CliComm::LogLevel level = CliComm::INFO;
 	switch (tokens.size()) {
 	case 3:
 		level = getLevel(tokens[2].getString());
-		// fall-through
+		[[fallthrough]];
 	case 2:
 		cliComm.log(level, tokens[1].getString());
 		break;
-	default:
-		throw SyntaxError();
 	}
 }
 
-std::string MessageCommand::help(const std::vector<std::string>& /*tokens*/) const
+std::string MessageCommand::help(std::span<const TclObject> /*tokens*/) const
 {
 	return "message <text> [<level>]\n"
 	       "Print a message. (By default) this message will be shown in "

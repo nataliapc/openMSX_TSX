@@ -1,41 +1,44 @@
 #ifndef TCLCALLBACK_HH
 #define TCLCALLBACK_HH
 
+#include "static_string_view.hh"
+#include "StringSetting.hh"
 #include "TclObject.hh"
-#include "string_view.hh"
-#include <memory>
+#include <optional>
+#include <string_view>
 
 namespace openmsx {
 
 class CommandController;
-class StringSetting;
 
 class TclCallback
 {
 public:
+	friend class TclCallbackMessages;
+
 	TclCallback(CommandController& controller,
-	            string_view name,
-	            string_view description,
-	            bool useCliComm = true,
-	            bool save = true);
+	            std::string_view name,
+	            static_string_view description,
+	            std::string_view defaultValue,
+	            Setting::SaveSetting saveSetting,
+	            bool isMessageCallback = false);
 	explicit TclCallback(StringSetting& setting);
-	~TclCallback();
 
-	TclObject execute();
-	TclObject execute(int arg1);
-	TclObject execute(int arg1, int arg2);
-	TclObject execute(int arg1, string_view arg2);
-	TclObject execute(string_view arg1, string_view arg2);
+	TclObject execute() const;
+	TclObject execute(int arg1) const;
+	TclObject execute(int arg1, int arg2) const;
+	TclObject execute(int arg1, std::string_view arg2) const;
+	TclObject execute(std::string_view arg1, std::string_view arg2) const;
 
-	TclObject getValue() const;
-	StringSetting& getSetting() const { return callbackSetting; }
+	[[nodiscard]] TclObject getValue() const;
+	[[nodiscard]] StringSetting& getSetting() const { return callbackSetting; }
 
 private:
-	TclObject executeCommon(TclObject& command);
+	TclObject executeCommon(TclObject& command) const;
 
-	std::unique_ptr<StringSetting> callbackSetting2; // can be nullptr
+	std::optional<StringSetting> callbackSetting2;
 	StringSetting& callbackSetting;
-	const bool useCliComm;
+	const bool isMessageCallback;
 };
 
 } // namespace openmsx

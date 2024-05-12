@@ -6,8 +6,9 @@
     <manufacturer>Sony</manufacturer>
     <code>HB-201P</code>
     <release_year>1985</release_year>
-    <description/>
+    <description>Like the HB-101P, but with 64kB RAM.</description>
     <type>MSX</type>
+    <region>eu</region>
   </info>
 
   <CassettePort/>
@@ -36,8 +37,8 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <PrinterPort id="Printer Port">

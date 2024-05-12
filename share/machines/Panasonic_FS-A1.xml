@@ -6,15 +6,16 @@
     <manufacturer>Panasonic</manufacturer>
     <code>FS-A1</code>
     <release_year>1986</release_year>
-    <description/>
+    <description>Basic Japanese MSX2 with built in DESKPAC software.</descripton>
     <type>MSX2</type>
+    <region>jp</region>
   </info>
 
   <CassettePort/>
 
   <devices>
 
-    <S1985 id="S1985">
+    <S1985 id="S1985"> <!-- includes 5 bits mapper-read-back, as confirmed by Peter Hanraets with serial 6LAKC38645 -->
       <sramname>fs-a1_s1985.sram</sramname>
     </S1985>
 
@@ -22,7 +23,7 @@
       <sound>
         <volume>16000</volume>
       </sound>
-      <io base="0xA8" num="4"/>
+      <io base="0xA8" num="8"/> <!-- S-1985 mirrors -->
       <keyboard_type>jp_ansi</keyboard_type>
       <has_keypad>false</has_keypad>
       <key_ghosting_sgc_protected>false</key_ghosting_sgc_protected>
@@ -33,8 +34,8 @@
     <VDP id="VDP">
       <version>V9938</version>
       <vram>128</vram>
-      <io base="0x98" num="4" type="O"/>
-      <io base="0x98" num="2" type="I"/>
+      <io base="0x98" num="8" type="O"/> <!-- S-1985 mirrors -->
+      <io base="0x98" num="8" type="I"/> <!-- S-1985 mirrors -->
     </VDP>
 
     <PSG id="PSG">
@@ -42,18 +43,19 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="8" type="IO"/> <!-- S-1985 mirrors -->
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <RTC id="Real time clock">
       <sramname>fs-a1.cmos</sramname>
-      <io base="0xB4" num="2" type="O"/>
-      <io base="0xB5" num="1" type="I"/>
+      <io base="0xB4" num="4" type="IO"/> <!-- S-1985 mirrors -->
     </RTC>
 
     <PrinterPort id="Printer Port">
-      <io base="0x90" num="2"/>
+      <io base="0x90" num="8" type="IO"/> <!-- S-1985 mirrors -->
+      <bidirectional>true</bidirectional> <!-- S-1985 feature (but not used, nor implemented) -->
+      <unused_bits>0x00</unused_bits>
     </PrinterPort>
 
     <primary slot="0">
@@ -80,6 +82,34 @@
       <secondary slot="0">
         <RAM id="Main RAM">
           <mem base="0x0000" size="0x10000"/>
+          <initialContent encoding="gz-base64">eJztzzFqJUAQxNB//0uvYzsx7lmECjRpD9TT5/P9/fvxPr/c//r/5/2v///3/rqf7rX56V6bn+61+elem5/utfnbb7/99tu/7a/76V6bn+61+elem7/9t/11P91r89O9Nj/da/PTvTY/3Wvzt99++/f9dT/da/PTvTY/3Wvz0702P91r87f/tr/up3ttfrrX5qd7bf7222+//fZv++t+utfmp3ttfrrX5qd7bX661+Zv/21/3U/32vx0r81P99r87bfffvvt3/bX/XSvzU/32vx0r81P99r8dK/NT/fa/HSvzU/32vx0r81P99r8dK/NT/fa/O2333777d/21/10r81P99r8dK/N3/7b/rqf7rX56V6bn+61+elem5/utfnbb7/9+/66n+61+elem5/utfnpXpuf7rX523/bX/fTvTY/3Wvz0702f/vtt99++7f9dT/da/PTvTY/3Wvz0702P91r87f/tr/up3ttfrrX5qd7bf7222+//fZv++t+utfmp3ttfrrX5qd7bX661+Zv/21/3U/32vx0r81P99r8dK/NT/fa/O2333777d/21/10r81P99r8dK/N3/7b/rqf7rX56V6bn+61+elem5/utfnbb7/99tu/7a/76V6bn+61+elem7/9t/11P91r89O9Nj/da/PTvTY/3Wvzt99++/f9dT/da/PTvTY/3Wvz0702P91r87f/tr/up3ttfrrX5qd7bf7222+//fZv++t+utfmp3ttfrrX5qd7bX661+ane21+utfmp3ttfrrX5qd7bX661+ane23+9ttvv/32b/vrfrrX5qd7bX661+Zv/21/3U/32vx0r81P99r8dK/NT/fa/O2333777d/21/10r81P99r8dK/N3/7b/rqf7rX56V6bn+61+elem5/utfnbb7/9+/66n+61+elem5/utfnpXpuf7rX523/bX/fTvTY/3Wvz0702f/vtt99++7f9dT/da/PTvTY/3Wvz0702P91r87/ufwE704dy</initialContent>
+          <!-- pattern:
+               let a = (chr(  0)*16 + chr(255)*16)*2
+               let b = (chr(255)*16 + chr(  0)*16)*2
+               let X = a + b + a + b
+               let Y = b + a + b + a
+               let m00 = (X+Y)*3 + (X+X)*3 + (Y+X)*2
+               let m01 = (X+Y)*3 + (X+X)*2 + (Y+X)*3
+               let m03 = (X+Y)*2 + (X+X)*3 + (Y+X)*3
+               let m10 = (Y+X)*3 + (Y+Y)*3 + (X+Y)*2
+               let m11 = (Y+X)*3 + (Y+Y)*2 + (X+Y)*3
+               let m12 = (Y+X)*2 + (Y+Y)*3 + (X+Y)*3
+               let m13 = (Y+X)*2 + (Y+Y)*3 + (X+Y)*3
+               let m20 = (Y+X)*3 + (Y+Y)*3 + (X+Y)*2
+               let m21 = (Y+X)*3 + (Y+Y)*3 + (X+Y)*2
+               let m22 = (Y+X)*3 + (Y+Y)*2 + (X+Y)*3
+               let m23 = (Y+X)*2 + (Y+Y)*3 + (X+Y)*3
+               let m30 = (X+Y)*3 + (X+X)*3 + (Y+X)*2
+               let m31 = (X+Y)*3 + (X+X)*3 + (Y+X)*2
+               let m32 = (X+Y)*3 + (X+X)*2 + (Y+X)*3
+               let m33 = (X+Y)*2 + (X+X)*3 + (Y+X)*3
+               let m0 = m00 + m01 + m02 + m03
+               let m1 = m10 + m11 + m12 + m13
+               let m2 = m20 + m21 + m22 + m23
+               let m3 = m30 + m31 + m32 + m33
+               content = (m0+m1+m2+m3).encode('zip').encode('base64')
+               As found the machine with serial 6LAKC38645.
+               -->
         </RAM>
       </secondary>
 

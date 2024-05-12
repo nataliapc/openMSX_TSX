@@ -1,52 +1,61 @@
 #include "SamplePlayer.hh"
 #include "DeviceConfig.hh"
-#include "CliComm.hh"
+#include "MSXCliComm.hh"
 #include "FileContext.hh"
 #include "MSXException.hh"
+#include "narrow.hh"
 #include "serialize.hh"
+#include "xrange.hh"
 #include <cassert>
+#include <memory>
 
 namespace openmsx {
 
-SamplePlayer::SamplePlayer(const std::string& name_, const std::string& desc,
-                           const DeviceConfig& config,
-                           const std::string& samplesBaseName, unsigned numSamples,
-                           const std::string& alternativeName)
-	: ResampledSoundDevice(config.getMotherBoard(), name_, desc, 1)
+static constexpr unsigned DUMMY_INPUT_RATE = 44100; // actual rate depends on .wav files
+
+[[nodiscard]] static auto loadSamples(
+	std::string_view name, const DeviceConfig& config,
+	std::string_view baseName, std::string_view alternativeName,
+	unsigned numSamples)
 {
-	setInputRate(44100); // Initialize with dummy value
+	dynarray<WavData> result(numSamples); // initialize with empty WAVs
 
 	bool alreadyWarned = false;
-	samples.resize(numSamples); // initialize with empty wavs
-	auto context = systemFileContext();
-	for (unsigned i = 0; i < numSamples; ++i) {
+	const auto& context = systemFileContext();
+	for (auto i : xrange(numSamples)) {
 		try {
-			std::string filename = strCat(samplesBaseName, i, ".wav");
-			samples[i] = WavData(context.resolve(filename));
+			auto filename = tmpStrCat(baseName, i, ".wav");
+			result[i] = WavData(context.resolve(filename));
 		} catch (MSXException& e1) {
 			try {
 				if (alternativeName.empty()) throw;
-				std::string filename = strCat(
+				auto filename = tmpStrCat(
 					alternativeName, i, ".wav");
-				samples[i] = WavData(context.resolve(filename));
+				result[i] = WavData(context.resolve(filename));
 			} catch (MSXException& /*e2*/) {
 				if (!alreadyWarned) {
 					alreadyWarned = true;
 					// print message from the 1st error
 					config.getCliComm().printWarning(
-						"Couldn't read ", name_, " sample data: ",
+						"Couldn't read ", name, " sample data: ",
 						e1.getMessage(),
 						". Continuing without sample data.");
 				}
 			}
 		}
 	}
+	return result;
+}
 
+SamplePlayer::SamplePlayer(const std::string& name_, static_string_view desc,
+                           const DeviceConfig& config,
+                           std::string_view samplesBaseName, unsigned numSamples,
+                           std::string_view alternativeName)
+	: ResampledSoundDevice(config.getMotherBoard(), name_, desc, 1, DUMMY_INPUT_RATE, false)
+	, samples(loadSamples(name_, config, samplesBaseName, alternativeName, numSamples))
+{
 	registerSound(config);
 	reset();
-
-	// avoid UMR on serialize
-	index = 0;
 }
 
 SamplePlayer::~SamplePlayer()
@@ -72,13 +81,8 @@ void SamplePlayer::setWavParams()
 {
 	if ((currentSampleNum < samples.size()) &&
 	    samples[currentSampleNum].getSize()) {
-		auto& wav = samples[currentSampleNum];
-		sampBuf = wav.getData();
+		const auto& wav = samples[currentSampleNum];
 		bufferSize = wav.getSize();
-
-		unsigned bits = wav.getBits();
-		assert((bits == 8) || (bits == 16));
-		bits8 = (bits == 8);
 
 		unsigned freq = wav.getFreq();
 		if (freq != getInputRate()) {
@@ -102,21 +106,17 @@ void SamplePlayer::repeat(unsigned sampleNum)
 	}
 }
 
-inline int SamplePlayer::getSample(unsigned idx)
-{
-	return bits8
-	     ? (static_cast<const uint8_t*>(sampBuf)[idx] - 0x80) * 256
-	     :  static_cast<const int16_t*>(sampBuf)[idx];
-}
-
-void SamplePlayer::generateChannels(int** bufs, unsigned num)
+void SamplePlayer::generateChannels(std::span<float*> bufs, unsigned num)
 {
 	// Single channel device: replace content of bufs[0] (not add to it).
+	assert(bufs.size() == 1);
 	if (!isPlaying()) {
 		bufs[0] = nullptr;
 		return;
 	}
-	for (unsigned i = 0; i < num; ++i) {
+
+	const auto& wav = samples[currentSampleNum];
+	for (auto i : xrange(num)) {
 		if (index >= bufferSize) {
 			if (nextSampleNum != unsigned(-1)) {
 				doRepeat();
@@ -124,12 +124,12 @@ void SamplePlayer::generateChannels(int** bufs, unsigned num)
 				currentSampleNum = unsigned(-1);
 				// fill remaining buffer with zeros
 				do {
-					bufs[0][i++] = 0;
+					bufs[0][i++] = 0.0f;
 				} while (i < num);
 				break;
 			}
 		}
-		bufs[0][i] = 3 * getSample(index++);
+		bufs[0][i] = narrow<float>(3 * wav.getSample(index++));
 	}
 }
 
@@ -141,10 +141,10 @@ void SamplePlayer::doRepeat()
 template<typename Archive>
 void SamplePlayer::serialize(Archive& ar, unsigned /*version*/)
 {
-	ar.serialize("index", index);
-	ar.serialize("currentSampleNum", currentSampleNum);
-	ar.serialize("nextSampleNum", nextSampleNum);
-	if (ar.isLoader()) {
+	ar.serialize("index",            index,
+	             "currentSampleNum", currentSampleNum,
+	             "nextSampleNum",    nextSampleNum);
+	if constexpr (Archive::IS_LOADER) {
 		setWavParams();
 	}
 }

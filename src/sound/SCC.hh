@@ -5,6 +5,8 @@
 #include "SimpleDebuggable.hh"
 #include "Clock.hh"
 #include "openmsx.hh"
+#include <array>
+#include <cstdint>
 
 namespace openmsx {
 
@@ -20,9 +22,9 @@ public:
 	// interaction with realCartridge
 	void powerUp(EmuTime::param time);
 	void reset(EmuTime::param time);
-	byte readMem(byte address,EmuTime::param time);
-	byte peekMem(byte address,EmuTime::param time) const;
-	void writeMem(byte address, byte value, EmuTime::param time);
+	[[nodiscard]] uint8_t readMem(uint8_t address,EmuTime::param time);
+	[[nodiscard]] uint8_t peekMem(uint8_t address,EmuTime::param time) const;
+	void writeMem(uint8_t address, uint8_t value, EmuTime::param time);
 	void setChipMode(ChipMode newMode);
 
 	template<typename Archive>
@@ -30,42 +32,42 @@ public:
 
 private:
 	// SoundDevice
-	int getAmplificationFactorImpl() const override;
-	void generateChannels(int** bufs, unsigned num) override;
+	[[nodiscard]] float getAmplificationFactorImpl() const override;
+	void generateChannels(std::span<float*> bufs, unsigned num) override;
 
-	inline int adjust(signed char wav, byte vol);
-	byte readWave(unsigned channel, unsigned address, EmuTime::param time) const;
-	void writeWave(unsigned channel, unsigned address, byte value);
-	void setDeformReg(byte value, EmuTime::param time);
-	void setDeformRegHelper(byte value);
-	void setFreqVol(unsigned address, byte value, EmuTime::param time);
-	byte getFreqVol(unsigned address) const;
+	[[nodiscard]] uint8_t readWave(unsigned channel, unsigned address, EmuTime::param time) const;
+	void writeWave(unsigned channel, unsigned address, uint8_t value);
+	void setDeformReg(uint8_t value, EmuTime::param time);
+	void setDeformRegHelper(uint8_t value);
+	void setFreqVol(unsigned address, uint8_t value, EmuTime::param time);
+	[[nodiscard]] uint8_t getFreqVol(unsigned address) const;
 
-	static const int CLOCK_FREQ = 3579545;
+private:
+	static constexpr int CLOCK_FREQ = 3579545;
 
 	struct Debuggable final : SimpleDebuggable {
 		Debuggable(MSXMotherBoard& motherBoard, const std::string& name);
-		byte read(unsigned address, EmuTime::param time) override;
-		void write(unsigned address, byte value, EmuTime::param time) override;
+		[[nodiscard]] uint8_t read(unsigned address, EmuTime::param time) override;
+		void write(unsigned address, uint8_t value, EmuTime::param time) override;
 	} debuggable;
 
 	Clock<CLOCK_FREQ> deformTimer;
 	ChipMode currentChipMode;
 
-	signed char wave[5][32];
-	int volAdjustedWave[5][32];
-	unsigned incr[5];
-	unsigned count[5];
-	unsigned pos[5];
-	unsigned period[5];
-	unsigned orgPeriod[5];
-	int out[5];
-	byte volume[5];
-	byte ch_enable;
+	std::array<std::array<int8_t, 32>, 5> wave;
+	std::array<std::array<float, 32>, 5> volAdjustedWave; // ints stored as floats, see comment in adjust()
+	std::array<unsigned, 5> incr;
+	std::array<unsigned, 5> count;
+	std::array<unsigned, 5> pos;
+	std::array<unsigned, 5> period;
+	std::array<unsigned, 5> orgPeriod;
+	std::array<float, 5> out; // ints stored as floats
+	std::array<uint8_t, 5> volume;
+	uint8_t ch_enable;
 
-	byte deformValue;
-	bool rotate[5];
-	bool readOnly[5];
+	uint8_t deformValue;
+	std::array<bool, 5> rotate;
+	std::array<bool, 5> readOnly;
 };
 
 } // namespace openmsx

@@ -1,89 +1,24 @@
 #include "TclObject.hh"
 #include "Interpreter.hh"
 #include "CommandException.hh"
+#include "narrow.hh"
 
 namespace openmsx {
 
-static void throwException(Tcl_Interp* interp)
+[[noreturn]] static void throwException(Tcl_Interp* interp)
 {
-	string_view message = interp ? Tcl_GetStringResult(interp)
+	std::string_view message = interp ? Tcl_GetStringResult(interp)
 	                            : "TclObject error";
 	throw CommandException(message);
 }
 
-void TclObject::setString(string_view value)
+static void unshare(Tcl_Obj*& obj)
 {
 	if (Tcl_IsShared(obj)) {
 		Tcl_DecrRefCount(obj);
-		obj = Tcl_NewStringObj(value.data(), int(value.size()));
+		obj = Tcl_DuplicateObj(obj);
 		Tcl_IncrRefCount(obj);
-	} else {
-		Tcl_SetStringObj(obj, value.data(), int(value.size()));
 	}
-}
-
-void TclObject::setInt(int value)
-{
-	if (Tcl_IsShared(obj)) {
-		Tcl_DecrRefCount(obj);
-		obj = Tcl_NewIntObj(value);
-		Tcl_IncrRefCount(obj);
-	} else {
-		Tcl_SetIntObj(obj, value);
-	}
-}
-
-void TclObject::setBoolean(bool value)
-{
-	if (Tcl_IsShared(obj)) {
-		Tcl_DecrRefCount(obj);
-		obj = Tcl_NewBooleanObj(value);
-		Tcl_IncrRefCount(obj);
-	} else {
-		Tcl_SetBooleanObj(obj, value);
-	}
-}
-
-void TclObject::setDouble(double value)
-{
-	if (Tcl_IsShared(obj)) {
-		Tcl_DecrRefCount(obj);
-		obj = Tcl_NewDoubleObj(value);
-		Tcl_IncrRefCount(obj);
-	} else {
-		Tcl_SetDoubleObj(obj, value);
-	}
-}
-
-void TclObject::setBinary(byte* buf, unsigned length)
-{
-	if (Tcl_IsShared(obj)) {
-		Tcl_DecrRefCount(obj);
-		obj = Tcl_NewByteArrayObj(buf, length);
-		Tcl_IncrRefCount(obj);
-	} else {
-		Tcl_SetByteArrayObj(obj, buf, length);
-	}
-}
-
-void TclObject::addListElement(string_view element)
-{
-	addListElement(Tcl_NewStringObj(element.data(), int(element.size())));
-}
-
-void TclObject::addListElement(int value)
-{
-	addListElement(Tcl_NewIntObj(value));
-}
-
-void TclObject::addListElement(double value)
-{
-	addListElement(Tcl_NewDoubleObj(value));
-}
-
-void TclObject::addListElement(const TclObject& element)
-{
-	addListElement(element.obj);
 }
 
 void TclObject::addListElement(Tcl_Obj* element)
@@ -95,14 +30,39 @@ void TclObject::addListElement(Tcl_Obj* element)
 	// functions. And in the very unlikely case that it does happen the
 	// only problem is that the error message is less descriptive than it
 	// could be.
+	unshare(obj);
 	Tcl_Interp* interp = nullptr;
-	if (Tcl_IsShared(obj)) {
-		Tcl_DecrRefCount(obj);
-		obj = Tcl_DuplicateObj(obj);
-		Tcl_IncrRefCount(obj);
-	}
 	if (Tcl_ListObjAppendElement(interp, obj, element) != TCL_OK) {
 		throwException(interp);
+	}
+}
+
+void TclObject::addListElementsImpl(std::initializer_list<Tcl_Obj*> l)
+{
+	addListElementsImpl(int(l.size()), l.begin());
+}
+
+void TclObject::addListElementsImpl(int objc, Tcl_Obj* const* objv)
+{
+	unshare(obj);
+	Tcl_Interp* interp = nullptr; // see comment in addListElement
+	if (Tcl_ListObjReplace(interp, obj, INT_MAX, 0, objc, objv) != TCL_OK) {
+		throwException(interp);
+	}
+}
+
+void TclObject::addDictKeyValues(std::initializer_list<Tcl_Obj*> keyValuePairs)
+{
+	assert((keyValuePairs.size() % 2) == 0);
+	unshare(obj);
+	Tcl_Interp* interp = nullptr; // see comment in addListElement
+	auto it = keyValuePairs.begin(), et = keyValuePairs.end();
+	while (it != et) {
+		Tcl_Obj* key   = *it++;
+		Tcl_Obj* value = *it++;
+		if (Tcl_DictObjPut(interp, obj, key, value) != TCL_OK) {
+			throwException(interp);
+		}
 	}
 }
 
@@ -112,6 +72,15 @@ int TclObject::getInt(Interpreter& interp_) const
 	int result;
 	if (Tcl_GetIntFromObj(interp, obj, &result) != TCL_OK) {
 		throwException(interp);
+	}
+	return result;
+}
+
+std::optional<int> TclObject::getOptionalInt() const
+{
+	int result;
+	if (Tcl_GetIntFromObj(nullptr, obj, &result) != TCL_OK) {
+		return {};
 	}
 	return result;
 }
@@ -126,6 +95,30 @@ bool TclObject::getBoolean(Interpreter& interp_) const
 	return result != 0;
 }
 
+std::optional<bool> TclObject::getOptionalBool() const
+{
+	int result;
+	if (Tcl_GetBooleanFromObj(nullptr, obj, &result) != TCL_OK) {
+		return {};
+	}
+	return result != 0;
+}
+
+float TclObject::getFloat(Interpreter& interp_) const
+{
+	// Tcl doesn't directly support 'float', only 'double', so use that.
+	// But we hide this from the rest from the code, and we do the
+	// narrowing conversion in only this single location.
+	return narrow_cast<float>(getDouble(interp_));
+}
+std::optional<float> TclObject::getOptionalFloat() const
+{
+	if (auto d = getOptionalDouble()) {
+		return narrow_cast<float>(*d);
+	}
+	return {};
+}
+
 double TclObject::getDouble(Interpreter& interp_) const
 {
 	auto* interp = interp_.interp;
@@ -136,17 +129,27 @@ double TclObject::getDouble(Interpreter& interp_) const
 	return result;
 }
 
-string_view TclObject::getString() const
+std::optional<double> TclObject::getOptionalDouble() const
+{
+	double result;
+	if (Tcl_GetDoubleFromObj(nullptr, obj, &result) != TCL_OK) {
+		return {};
+	}
+	return result;
+}
+
+zstring_view TclObject::getString() const
 {
 	int length;
 	char* buf = Tcl_GetStringFromObj(obj, &length);
-	return string_view(buf, length);
+	return {buf, size_t(length)};
 }
 
-const byte* TclObject::getBinary(unsigned& length) const
+std::span<const uint8_t> TclObject::getBinary() const
 {
-	return static_cast<const byte*>(Tcl_GetByteArrayFromObj(
-		obj, reinterpret_cast<int*>(&length)));
+	int length;
+	auto* buf = Tcl_GetByteArrayFromObj(obj, &length);
+	return {buf, size_t(length)};
 }
 
 unsigned TclObject::getListLength(Interpreter& interp_) const
@@ -171,7 +174,7 @@ TclObject TclObject::getListIndex(Interpreter& interp_, unsigned index) const
 {
 	auto* interp = interp_.interp;
 	Tcl_Obj* element;
-	if (Tcl_ListObjIndex(interp, obj, index, &element) != TCL_OK) {
+	if (Tcl_ListObjIndex(interp, obj, narrow<int>(index), &element) != TCL_OK) {
 		throwException(interp);
 	}
 	return element ? TclObject(element) : TclObject();
@@ -179,10 +182,28 @@ TclObject TclObject::getListIndex(Interpreter& interp_, unsigned index) const
 TclObject TclObject::getListIndexUnchecked(unsigned index) const
 {
 	Tcl_Obj* element;
-	if (Tcl_ListObjIndex(nullptr, obj, index, &element) != TCL_OK) {
-		return TclObject();
+	if (Tcl_ListObjIndex(nullptr, obj, narrow<int>(index), &element) != TCL_OK) {
+		return {};
 	}
 	return element ? TclObject(element) : TclObject();
+}
+
+void TclObject::removeListIndex(Interpreter& interp_, unsigned index)
+{
+	unshare(obj);
+	auto* interp = interp_.interp;
+	if (Tcl_ListObjReplace(interp, obj, narrow<int>(index), 1, 0, nullptr) != TCL_OK) {
+		throwException(interp);
+	}
+}
+
+void TclObject::setDictValue(Interpreter& interp_, const TclObject& key, const TclObject& value)
+{
+	unshare(obj);
+	auto* interp = interp_.interp;
+	if (Tcl_DictObjPut(interp, obj, key.obj, value.obj) != TCL_OK) {
+		throwException(interp);
+	}
 }
 
 TclObject TclObject::getDictValue(Interpreter& interp_, const TclObject& key) const
@@ -195,6 +216,15 @@ TclObject TclObject::getDictValue(Interpreter& interp_, const TclObject& key) co
 	return value ? TclObject(value) : TclObject();
 }
 
+std::optional<TclObject> TclObject::getOptionalDictValue(const TclObject& key) const
+{
+	Tcl_Obj* value;
+	if ((Tcl_DictObjGet(nullptr, obj, key.obj, &value) != TCL_OK) || !value) {
+		return {};
+	}
+	return TclObject(value);
+}
+
 bool TclObject::evalBool(Interpreter& interp_) const
 {
 	auto* interp = interp_.interp;
@@ -205,12 +235,21 @@ bool TclObject::evalBool(Interpreter& interp_) const
 	return result != 0;
 }
 
+TclObject TclObject::eval(Interpreter& interp_) const
+{
+	auto* interp = interp_.interp;
+	Tcl_Obj* result;
+	if (Tcl_ExprObj(interp, obj, &result) != TCL_OK) {
+		throwException(interp);
+	}
+	return TclObject(result);
+}
+
 TclObject TclObject::executeCommand(Interpreter& interp_, bool compile)
 {
 	auto* interp = interp_.interp;
 	int flags = compile ? 0 : TCL_EVAL_DIRECT;
-	int success = Tcl_EvalObjEx(interp, obj, flags);
-	if (success != TCL_OK) {
+	if (Tcl_EvalObjEx(interp, obj, flags) != TCL_OK) {
 		throw CommandException(Tcl_GetStringResult(interp));
 	}
 	return TclObject(Tcl_GetObjResult(interp));

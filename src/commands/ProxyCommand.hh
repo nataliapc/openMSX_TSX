@@ -2,7 +2,7 @@
 #define PROXYCOMMAND_HH
 
 #include "Command.hh"
-#include "string_view.hh"
+#include <string_view>
 
 namespace openmsx {
 
@@ -11,13 +11,13 @@ class Reactor;
 class ProxyCmd final : public Command
 {
 public:
-	ProxyCmd(Reactor& reactor, string_view name);
-	void execute(array_ref<TclObject> tokens,
+	ProxyCmd(Reactor& reactor, std::string_view name);
+	void execute(std::span<const TclObject> tokens,
 	             TclObject& result) override;
-	std::string help(const std::vector<std::string>& tokens) const override;
+	[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override;
 	void tabCompletion(std::vector<std::string>& tokens) const override;
 private:
-	Command* getMachineCommand() const;
+	[[nodiscard]] Command* getMachineCommand() const;
 	Reactor& reactor;
 };
 

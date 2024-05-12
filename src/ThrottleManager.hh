@@ -26,7 +26,9 @@ public:
 	 * also on the fullspeedwhenfastloading setting and if the MSX has
 	 * notified us that it is loading... To be used for the timing.
 	 */
-	bool isThrottled() const { return throttle; }
+	[[nodiscard]] bool isThrottled() const { return throttle; }
+
+	[[nodiscard]] auto& getFullSpeedLoadingSetting() { return fullSpeedLoadingSetting; }
 
 private:
 	friend class LoadingIndicator;
@@ -43,12 +45,13 @@ private:
 	void updateStatus();
 
 	// Observer<Setting>
-	void update(const Setting& setting) override;
+	void update(const Setting& setting) noexcept override;
 
+private:
 	BooleanSetting throttleSetting;
 	BooleanSetting fullSpeedLoadingSetting;
-	int loading;
-	bool throttle;
+	int loading = 0;
+	bool throttle = true;
 };
 
 /**
@@ -67,7 +70,7 @@ public:
 
 private:
 	ThrottleManager& throttleManager;
-	bool isLoading;
+	bool isLoading = false;
 };
 
 } // namespace openmsx

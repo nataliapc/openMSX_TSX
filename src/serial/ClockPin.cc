@@ -1,15 +1,12 @@
 #include "ClockPin.hh"
+#include "narrow.hh"
 #include "serialize.hh"
 #include <cassert>
-
-using std::string;
 
 namespace openmsx {
 
 ClockPin::ClockPin(Scheduler& scheduler_, ClockPinListener* listener_)
 	: Schedulable(scheduler_), listener(listener_)
-	, referenceTime(EmuTime::zero)
-	, periodic(false) , status(false), signalEdge(false)
 {
 }
 
@@ -76,17 +73,17 @@ EmuDuration::param ClockPin::getHighDuration() const
 	return hiDur;
 }
 
-int ClockPin::getTicksBetween(EmuTime::param begin, EmuTime::param end) const
+unsigned ClockPin::getTicksBetween(EmuTime::param begin, EmuTime::param end) const
 {
 	assert(begin <= end);
 	if (!periodic) {
 		return 0;
 	}
-	if (totalDur > EmuDuration::zero) {
-		int a = (begin < referenceTime) ?
-		        0 :
-		        (begin - referenceTime) / totalDur;
-		int b = (end   - referenceTime) / totalDur;
+	if (totalDur > EmuDuration::zero()) {
+		auto a = (begin < referenceTime)
+		       ? 0
+		       : (begin - referenceTime) / totalDur;
+		auto b = (end   - referenceTime) / totalDur;
 		return b - a;
 	} else {
 		return 0;
@@ -129,7 +126,7 @@ void ClockPin::executeUntil(EmuTime::param time)
 {
 	assert(signalEdge && periodic && listener);
 	listener->signalPosEdge(*this, time);
-	if (signalEdge && (totalDur > EmuDuration::zero)) {
+	if (signalEdge && (totalDur > EmuDuration::zero())) {
 		schedule(time + totalDur);
 	}
 }
@@ -139,12 +136,12 @@ template<typename Archive>
 void ClockPin::serialize(Archive& ar, unsigned /*version*/)
 {
 	ar.template serializeBase<Schedulable>(*this);
-	ar.serialize("totalDur", totalDur);
-	ar.serialize("hiDur", hiDur);
-	ar.serialize("referenceTime", referenceTime);
-	ar.serialize("periodic", periodic);
-	ar.serialize("status", status);
-	ar.serialize("signalEdge", signalEdge);
+	ar.serialize("totalDur",      totalDur,
+	             "hiDur",         hiDur,
+	             "referenceTime", referenceTime,
+	             "periodic",      periodic,
+	             "status",        status,
+	             "signalEdge",    signalEdge);
 }
 INSTANTIATE_SERIALIZE_METHODS(ClockPin);
 

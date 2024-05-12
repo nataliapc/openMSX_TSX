@@ -2,6 +2,7 @@
 #define NINJATAP_HH
 
 #include "JoyTap.hh"
+#include <array>
 
 namespace openmsx {
 
@@ -11,20 +12,20 @@ public:
 	NinjaTap(PluggingController& pluggingController, std::string name);
 
 	// Pluggable
-	string_view getDescription() const override;
+	[[nodiscard]] std::string_view getDescription() const override;
 	void plugHelper(Connector& connector, EmuTime::param time) override;
 
 	// JoystickDevice
-	byte read(EmuTime::param time) override;
-	void write(byte value, EmuTime::param time) override;
+	[[nodiscard]] uint8_t read(EmuTime::param time) override;
+	void write(uint8_t value, EmuTime::param time) override;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 private:
-	byte status;
-	byte previous;
-	byte buf[4];
+	uint8_t status = 0x3F; // TODO check initial value
+	uint8_t previous = 0;
+	std::array<uint8_t, 4> buf;
 };
 
 } // namespace openmsx

@@ -8,8 +8,9 @@
     <manufacturer>Mitsubishi</manufacturer>
     <code>ML-G3 (ES)</code>
     <release_year>1986</release_year>
-    <description/>
+    <description>Spanish version of the ML-G10 Model 2, with 64kB RAM, 1 diskdrive and RS-232C interface.</description>
     <type>MSX2</type>
+    <region>es</region>
   </info>
 
   <MapperReadBackBits>largest</MapperReadBackBits>
@@ -42,8 +43,8 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <RTC id="Real time clock">

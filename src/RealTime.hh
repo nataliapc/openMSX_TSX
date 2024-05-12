@@ -1,10 +1,11 @@
 #ifndef MSXREALTIME_HH
 #define MSXREALTIME_HH
 
-#include "Schedulable.hh"
+#include "EmuTime.hh"
 #include "EventListener.hh"
 #include "Observer.hh"
-#include "EmuTime.hh"
+#include "Schedulable.hh"
+
 #include <cstdint>
 
 namespace openmsx {
@@ -13,13 +14,14 @@ class MSXMotherBoard;
 class GlobalSettings;
 class EventDistributor;
 class EventDelay;
-class IntegerSetting;
 class BooleanSetting;
+class SpeedManager;
 class ThrottleManager;
 class Setting;
 
 class RealTime final : private Schedulable, private EventListener
                      , private Observer<Setting>
+                     , private Observer<SpeedManager>
                      , private Observer<ThrottleManager>
 {
 public:
@@ -30,18 +32,18 @@ public:
 
 	/** Convert EmuTime to RealTime.
 	  */
-	double getRealDuration(EmuTime::param time1, EmuTime::param time2);
+	[[nodiscard]] double getRealDuration(EmuTime::param time1, EmuTime::param time2) const;
 
 	/** Convert RealTime to EmuTime.
 	  */
-	EmuDuration getEmuDuration(double realDur);
+	[[nodiscard]] EmuDuration getEmuDuration(double realDur) const;
 
 	/** Check that there is enough real time left before we reach as certain
 	  * point in emulated time.
 	  * @param us Real time duration is micro seconds.
 	  * @param time Point in emulated time.
 	  */
-	bool timeLeft(uint64_t us, EmuTime::param time);
+	[[nodiscard]] bool timeLeft(uint64_t us, EmuTime::param time) const;
 
 	void resync();
 
@@ -60,27 +62,29 @@ private:
 	void executeUntil(EmuTime::param time) override;
 
 	// EventListener
-	int signalEvent(const std::shared_ptr<const Event>& event) override;
+	int signalEvent(const Event& event) override;
 
 	// Observer<Setting>
-	void update(const Setting& setting) override;
+	void update(const Setting& setting) noexcept override;
+	// Observer<SpeedManager>
+	void update(const SpeedManager& speedManager) noexcept override;
 	// Observer<ThrottleManager>
-	void update(const ThrottleManager& throttleManager) override;
+	void update(const ThrottleManager& throttleManager) noexcept override;
 
 	void internalSync(EmuTime::param time, bool allowSleep);
 
 	MSXMotherBoard& motherBoard;
 	EventDistributor& eventDistributor;
 	EventDelay& eventDelay;
+	SpeedManager& speedManager;
 	ThrottleManager& throttleManager;
-	IntegerSetting& speedSetting;
 	BooleanSetting& pauseSetting;
 	BooleanSetting& powerSetting;
 
 	uint64_t idealRealTime;
-	EmuTime emuTime;
+	EmuTime emuTime = EmuTime::zero();
 	double sleepAdjust;
-	bool enabled;
+	bool enabled = true;
 };
 
 } // namespace openmsx

@@ -2,14 +2,14 @@
 #define VDPACCESSSLOTS_HH
 
 #include "VDP.hh"
-#include "likely.hh"
+#include "narrow.hh"
 #include <cassert>
 #include <cstdint>
+#include <span>
 
-namespace openmsx {
-namespace VDPAccessSlots {
+namespace openmsx::VDPAccessSlots {
 
-static const int TICKS = VDP::TICKS_PER_LINE;
+inline constexpr int TICKS = VDP::TICKS_PER_LINE;
 
 enum Delta : int {
 	DELTA_0    =  0 * TICKS,
@@ -40,15 +40,15 @@ class Calculator
 public:
 	/** This shouldn't be called directly, instead use getCalculator(). */
 	Calculator(EmuTime::param frame, EmuTime::param time,
-	           EmuTime::param limit_, const uint8_t* tab_)
+	           EmuTime::param limit_, std::span<const uint8_t, NUM_DELTAS * TICKS> tab_)
 		: ref(frame), tab(tab_)
 	{
 		assert(frame <= time);
 		assert(frame <= limit_);
 		// not required that time <= limit
 
-		ticks = ref.getTicksTill_fast(time);
-		limit = ref.getTicksTill_fast(limit_);
+		ticks = narrow<int>(ref.getTicksTill_fast(time));
+		limit = narrow<int>(ref.getTicksTill_fast(limit_));
 		int lines = ticks / TICKS;
 		ticks -= lines * TICKS;
 		limit -= lines * TICKS; // might be negative
@@ -57,14 +57,14 @@ public:
 	}
 
 	/** Has 'time' advanced to or past 'limit'? */
-	inline bool limitReached() const {
+	[[nodiscard]] inline bool limitReached() const {
 		return ticks >= limit;
 	}
 
 	/** Get the current time. Initially this will return the 'time'
 	  * constructor parameter. Each call to next() will increase this
 	  * value. */
-	inline EmuTime getTime() const {
+	[[nodiscard]] inline EmuTime getTime() const {
 		return ref.getFastAdd(ticks);
 	}
 
@@ -72,7 +72,7 @@ public:
 	  * ticks later than the current time. */
 	inline void next(Delta delta) {
 		ticks += tab[delta + ticks];
-		if (unlikely(ticks >= TICKS)) {
+		if (ticks >= TICKS) [[unlikely]] {
 			ticks -= TICKS;
 			limit -= TICKS;
 			ref   += TICKS;
@@ -83,22 +83,21 @@ private:
 	int ticks;
 	int limit;
 	VDP::VDPClock ref;
-	const uint8_t* const tab;
+	std::span<const uint8_t, NUM_DELTAS * TICKS> tab;
 };
 
 /** Return the time of the next available access slot that is at least 'delta'
   * cycles later than 'time'. The start of the current 'frame' is needed for
   * reference. */
-EmuTime getAccessSlot(EmuTime::param frame, EmuTime::param time, Delta delta,
+[[nodiscard]] EmuTime getAccessSlot(EmuTime::param frame, EmuTime::param time, Delta delta,
                       const VDP& vdp);
 
 /** When many calls to getAccessSlot() are needed, it's more efficient to
   * instead use this function. */
-Calculator getCalculator(
+[[nodiscard]] Calculator getCalculator(
 	EmuTime::param frame, EmuTime::param time, EmuTime::param limit,
 	const VDP& vdp);
 
-} // namespace VDPAccessSlots
-} // namespace openmsx
+} // namespace openmsx::VDPAccessSlots
 
 #endif

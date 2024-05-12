@@ -6,8 +6,9 @@
     <manufacturer>Sanyo</manufacturer>
     <code>PHC-35J</code>
     <release_year>1989</release_year>
-    <description/>
+    <description>Basic MSX2+ with Ren-sha slider (but no MSX-MUSIC).</description>
     <type>MSX2+</type>
+    <region>jp</region>
   </info>
 
   <RenShaTurbo>
@@ -54,8 +55,8 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <RTC id="Real time clock">

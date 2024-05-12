@@ -1,9 +1,10 @@
 #ifndef DIVISIONBYCONST_HH
 #define DIVISIONBYCONST_HH
 
-#include "build-info.hh"
+#include "narrow.hh"
 #include <cassert>
 #include <cstdint>
+#include <utility>
 
 namespace openmsx {
 
@@ -11,7 +12,7 @@ namespace openmsx {
  * Binary division can be performed by:
  *   - multiplication by a magic number
  *   - followed by an addition of a magic number
- *   - follwed by a right shift over some magic number of bits
+ *   - followed by a right shift over some magic number of bits
  * These magic constants only depend on the divisor, but they are quite
  * expensive to calculate.
  * However if you know you will divide many times by the same number this
@@ -25,19 +26,19 @@ class DivModBySame
 {
 public:
 	void setDivisor(uint32_t divisor);
-	inline uint32_t getDivisor() const { return divisor; }
+	[[nodiscard]] inline uint32_t getDivisor() const { return divisor; }
 
-	uint32_t div(uint64_t dividend) const
+	[[nodiscard]] uint32_t div(uint64_t dividend) const
 	{
 	#if defined __x86_64 && !defined _MSC_VER
-		uint64_t t = (__uint128_t(dividend) * m + a) >> 64;
-		return t >> s;
+		auto t = narrow_cast<uint64_t>((__uint128_t(dividend) * m + a) >> 64);
+		return narrow_cast<uint32_t>(t >> s);
 	#else
-		return divinC(dividend);
+		return divInC(dividend);
 	#endif
 	}
 
-	inline uint32_t divinC(uint64_t dividend) const
+	[[nodiscard]] inline uint32_t divInC(uint64_t dividend) const
 	{
 		uint64_t t1 = uint64_t(uint32_t(dividend)) * uint32_t(m);
 		uint64_t t2 = (dividend >> 32) * uint32_t(m);
@@ -57,20 +58,28 @@ public:
 		return uint32_t(result);
 	}
 
-	uint32_t mod(uint64_t dividend) const
+	[[nodiscard]] std::pair<uint32_t, uint32_t> divMod(uint64_t dividend) const
 	{
 		assert(uint32_t(divisor) == divisor); // must fit in 32-bit
 		uint64_t q = div(dividend);
 		assert(uint32_t(q) == q); // must fit in 32 bit
 		// result fits in 32-bit, so no 64-bit calculations required
-		return uint32_t(dividend) - uint32_t(q) * uint32_t(divisor);
+		uint32_t r = uint32_t(dividend) - uint32_t(q) * uint32_t(divisor);
+		return {uint32_t(q), r};
+	}
+
+	[[nodiscard]] uint32_t mod(uint64_t dividend) const
+	{
+		auto [q, r] = divMod(dividend);
+		(void)q;
+		return r;
 	}
 
 private:
-	uint64_t m;
-	uint64_t a;
-	uint32_t s;
-	uint32_t divisor; // only used by mod() and getDivisor()
+	uint64_t m = 0;
+	uint64_t a = 0;
+	uint32_t s = 0;
+	uint32_t divisor= 0; // only used by mod() and getDivisor()
 };
 
 } // namespace openmsx

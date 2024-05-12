@@ -1,8 +1,12 @@
 #include "Y8950KeyboardConnector.hh"
-#include "Y8950KeyboardDevice.hh"
+
 #include "DummyY8950KeyboardDevice.hh"
-#include "checked_cast.hh"
+#include "Y8950KeyboardDevice.hh"
+
 #include "serialize.hh"
+
+#include "checked_cast.hh"
+
 #include <memory>
 
 namespace openmsx {
@@ -11,7 +15,6 @@ Y8950KeyboardConnector::Y8950KeyboardConnector(
 	PluggingController& pluggingController_)
 	: Connector(pluggingController_, "audiokeyboardport",
 	            std::make_unique<DummyY8950KeyboardDevice>())
-	, data(255)
 {
 }
 
@@ -23,7 +26,7 @@ void Y8950KeyboardConnector::write(byte newData, EmuTime::param time)
 	}
 }
 
-byte Y8950KeyboardConnector::read(EmuTime::param time)
+byte Y8950KeyboardConnector::read(EmuTime::param time) const
 {
 	return getPluggedKeyb().read(time);
 }
@@ -31,15 +34,15 @@ byte Y8950KeyboardConnector::read(EmuTime::param time)
 byte Y8950KeyboardConnector::peek(EmuTime::param time) const
 {
 	// TODO implement proper peek
-	return const_cast<Y8950KeyboardConnector*>(this)->read(time);
+	return read(time);
 }
 
-const std::string Y8950KeyboardConnector::getDescription() const
+std::string_view Y8950KeyboardConnector::getDescription() const
 {
 	return "MSX-AUDIO keyboard connector";
 }
 
-string_view Y8950KeyboardConnector::getClass() const
+std::string_view Y8950KeyboardConnector::getClass() const
 {
 	return "Y8950 Keyboard Port";
 }

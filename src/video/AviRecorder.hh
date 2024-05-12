@@ -2,49 +2,60 @@
 #define AVIRECORDER_HH
 
 #include "Command.hh"
+#include "EmuDuration.hh"
 #include "EmuTime.hh"
-#include "array_ref.hh"
+#include "Mixer.hh"
 #include <cstdint>
-#include <vector>
 #include <memory>
+#include <span>
+#include <vector>
 
 namespace openmsx {
 
-class Reactor;
 class AviWriter;
-class Wav16Writer;
 class Filename;
-class PostProcessor;
 class FrameSource;
+class Interpreter;
 class MSXMixer;
+class PostProcessor;
+class Reactor;
 class TclObject;
+class Wav16Writer;
 
 class AviRecorder
 {
 public:
+	static constexpr std::string_view VIDEO_DIR = "videos";
+	static constexpr std::string_view AUDIO_DIR = "soundlogs";
+	static constexpr std::string_view VIDEO_EXTENSION = ".avi";
+	static constexpr std::string_view AUDIO_EXTENSION = ".wav";
+
+public:
 	explicit AviRecorder(Reactor& reactor);
 	~AviRecorder();
 
-	void addWave(unsigned num, int16_t* data);
-	void addImage(FrameSource* frame, EmuTime::param time);
+	void addWave(std::span<const StereoFloat> data);
+	void addImage(const FrameSource* frame, EmuTime::param time);
 	void stop();
-	unsigned getFrameHeight() const;
+	[[nodiscard]] unsigned getFrameHeight() const;
+	[[nodiscard]] bool isRecording() const;
 
 private:
 	void start(bool recordAudio, bool recordVideo, bool recordMono,
 		   bool recordStereo, const Filename& filename);
-	void status(array_ref<TclObject> tokens, TclObject& result) const;
+	void status(std::span<const TclObject> tokens, TclObject& result) const;
 
-	void processStart (array_ref<TclObject> tokens, TclObject& result);
-	void processStop  (array_ref<TclObject> tokens);
-	void processToggle(array_ref<TclObject> tokens, TclObject& result);
+	void processStart (Interpreter& interp, std::span<const TclObject> tokens, TclObject& result);
+	void processStop  (std::span<const TclObject> tokens);
+	void processToggle(Interpreter& interp, std::span<const TclObject> tokens, TclObject& result);
 
+private:
 	Reactor& reactor;
 
 	struct Cmd final : Command {
 		explicit Cmd(CommandController& commandController);
-		void execute(array_ref<TclObject> tokens, TclObject& result) override;
-		std::string help(const std::vector<std::string>& tokens) const override;
+		void execute(std::span<const TclObject> tokens, TclObject& result) override;
+		[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override;
 		void tabCompletion(std::vector<std::string>& tokens) const override;
 	} recordCommand;
 
@@ -52,12 +63,12 @@ private:
 	std::unique_ptr<AviWriter>   aviWriter; // can be nullptr
 	std::unique_ptr<Wav16Writer> wavWriter; // can be nullptr
 	std::vector<PostProcessor*> postProcessors;
-	MSXMixer* mixer;
-	EmuDuration duration;
-	EmuTime prevTime;
+	MSXMixer* mixer = nullptr;
+	EmuDuration duration = EmuDuration::infinity();
+	EmuTime prevTime = EmuTime::infinity();
 	unsigned sampleRate;
 	unsigned frameWidth;
-	unsigned frameHeight;
+	unsigned frameHeight = 0;
 	bool warnedFps;
 	bool warnedSampleRate;
 	bool warnedStereo;

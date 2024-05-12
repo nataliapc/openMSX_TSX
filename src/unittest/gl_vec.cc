@@ -1,15 +1,17 @@
 #include "catch.hpp"
 #include "gl_vec.hh"
+#include "Math.hh"
+#include <concepts>
 
 using namespace gl;
 
 // Test approximations.
-template<typename T>
+template<std::floating_point T>
 bool approxEq(T x, T y)
 {
 	return std::abs(x - y) < T(1.0e-5);
 }
-template<int N, typename T>
+template<int N, std::floating_point T>
 bool approxEq(const vecN<N, T>& x, const vecN<N, T>&y)
 {
 	return length2(x - y) < T(1.0e-4);
@@ -24,12 +26,12 @@ TEST_CASE("gl_vec: rsqrt")
 
 TEST_CASE("gl_vec: radians, degrees")
 {
-	CHECK(approxEq(radians(  0.0), 0.0     ));
-	CHECK(approxEq(radians( 90.0), M_PI / 2));
-	CHECK(approxEq(radians(180.0), M_PI    ));
-	CHECK(approxEq(degrees(0.0     ),   0.0));
-	CHECK(approxEq(degrees(M_PI / 2),  90.0));
-	CHECK(approxEq(degrees(M_PI    ), 180.0));
+	CHECK(approxEq(radians(  0.0), 0.0         ));
+	CHECK(approxEq(radians( 90.0), Math::pi / 2));
+	CHECK(approxEq(radians(180.0), Math::pi    ));
+	CHECK(approxEq(degrees(0.0         ),   0.0));
+	CHECK(approxEq(degrees(Math::pi / 2),  90.0));
+	CHECK(approxEq(degrees(Math::pi    ), 180.0));
 }
 
 // It's useful to test both integer and float variants because the
@@ -155,7 +157,7 @@ TEST_CASE("gl_vec: constructors")
 		CHECK(j4[3] == 8);
 
 	#if 0
-		// Not implemeneted yet (also not yet needed).
+		// Not implemented yet (also not yet needed).
 		vec4 x4(1, vec2(3, 5), 7);
 		CHECK(x4[0] == 1);
 		CHECK(x4[1] == 3);
@@ -244,41 +246,42 @@ TEST_CASE("gl_vec: (in)equality")
 
 TEST_CASE("gl_vec: copy constructor, assignment")
 {
-	vec2 v2(2, 3);
-	vec2 w2(v2);
-	CHECK(v2 == w2);
-	v2[0] = 9; w2 = v2;
-	CHECK(v2 == w2);
-
-	ivec2 i2(2, 3);
-	ivec2 j2(i2);
-	CHECK(i2 == j2);
-	i2[1] = 9; j2 = i2;
-	CHECK(i2 == j2);
-
-	vec3 v3(3, 4, 5);
-	vec3 w3(v3);
-	CHECK(v3 == w3);
-	v3[2] = 8; w3 = v3;
-	CHECK(v3 == w3);
-
-	ivec3 i3(3, 4, 5);
-	ivec3 j3(i3);
-	CHECK(i3 == j3);
-	i3[1] = 8; j3 = i3;
-	CHECK(i3 == j3);
-
-	vec4 v4(4, 5, 6, 7);
-	vec4 w4(v4);
-	CHECK(v4 == w4);
-	v3[3] = 0; w4 = v4;
-	CHECK(v4 == w4);
-
-	ivec4 i4(4, 5, 6, 7);
-	ivec4 j4(i4);
-	CHECK(i4 == j4);
-	i3[0] = 1; j4 = i4;
-	CHECK(i4 == j4);
+	SECTION("vec2") {
+		vec2 v(2, 3);
+		vec2 w(v); CHECK(v == w);
+		v[0] = 9;  CHECK(v != w);
+		w = v;     CHECK(v == w);
+	}
+	SECTION("ivec2") {
+		ivec2 v(2, 3);
+		ivec2 w(v); CHECK(v == w);
+		v[1] = 9;   CHECK(v != w);
+		w = v;      CHECK(v == w);
+	}
+	SECTION("vec3") {
+		vec3 v(3, 4, 5);
+		vec3 w(v); CHECK(v == w);
+		v[2] = 8;  CHECK(v != w);
+		w = v;     CHECK(v == w);
+	}
+	SECTION("ivec3") {
+		ivec3 v(3, 4, 5);
+		ivec3 w(v); CHECK(v == w);
+		v[1] = 8;   CHECK(v != w);
+		w = v;      CHECK(v == w);
+	}
+	SECTION("vec4") {
+		vec4 v(4, 5, 6, 7);
+		vec4 w(v); CHECK(v == w);
+		v[3] = 0;  CHECK(v != w);
+		w = v;     CHECK(v == w);
+	}
+	SECTION("ivec4") {
+		ivec4 v(4, 5, 6, 7);
+		ivec4 w(v); CHECK(v == w);
+		v[0] = 1;   CHECK(v != w);
+		w = v;      CHECK(v == w);
+	}
 }
 
 TEST_CASE("gl_vec: construct from larger vector")
@@ -413,6 +416,14 @@ TEST_CASE("gl_vec: component-wise min/max")
 	CHECK(max(ivec4(1, -2, 5, -7), ivec4(0, 2, -4, -3)) == ivec4(1, 2, 5, -3));
 }
 
+TEST_CASE("gl_vec: minimum component within a vector")
+{
+	CHECK(min_component( vec3(1, 5, -7.2f)) == -7.2f);
+	CHECK(min_component(ivec3(3, 2, 4)) == 2);
+	CHECK(min_component( vec4(-1, 2, 5.2f, 0)) == -1);
+	CHECK(min_component(ivec4(1, -2, 5, -7)) == -7);
+}
+
 TEST_CASE("gl_vec: clamp") {
 	CHECK(clamp( vec3(2, 3, 4),  vec3(0, 4, -4),  vec3(4, 7, 0)) ==  vec3(2, 4, 0));
 	CHECK(clamp(ivec3(2, 3, 4), ivec3(0, 4, -4), ivec3(4, 7, 0)) == ivec3(2, 4, 0));
@@ -486,6 +497,72 @@ TEST_CASE("gl_vec: trunc")
 	CHECK(trunc(vec4(-1.1f, 2.5f,  3.8f, -4.5f)) == ivec4(-1, 2,  3, -4));
 	// trunc integers, nop
 	CHECK(trunc(ivec4(1, -2, 3, -4)) == ivec4(1, -2, 3, -4));
+}
+
+TEST_CASE("gl_vec: named elements")
+{
+	SECTION("ivec2") {
+		ivec2 v2(10, 20);
+		CHECK(sizeof(v2) == 2 * sizeof(int));
+
+		CHECK(v2[0] == 10);
+		CHECK(v2[1] == 20);
+		CHECK(v2.x == 10);
+		CHECK(v2.y == 20);
+
+		v2.x = 100;
+		v2.y = 200;
+		CHECK(v2[0] == 100);
+		CHECK(v2[1] == 200);
+		CHECK(v2.x == 100);
+		CHECK(v2.y == 200);
+
+		v2[0] = 3;
+		v2[1] = 4;
+		CHECK(v2[0] == 3);
+		CHECK(v2[1] == 4);
+		CHECK(v2.x == 3);
+		CHECK(v2.y == 4);
+
+		//v2.z = 10;     // Ok, compile error
+		//int i = v2.z;
+	}
+	SECTION("ivec3") {
+		ivec3 v3(10, 20, 30);
+		CHECK(sizeof(v3) == 3 * sizeof(int));
+
+		CHECK(v3.x == 10);
+		CHECK(v3.y == 20);
+		CHECK(v3.z == 30);
+
+		v3.x = 100;
+		v3.y = 200;
+		v3.z = 300;
+		CHECK(v3.x == 100);
+		CHECK(v3.y == 200);
+		CHECK(v3.z == 300);
+
+		//v3.w = 10;     // Ok, compile error
+		//int i = v3.w;
+	}
+	SECTION("ivec4") {
+		ivec4 v4(10, 20, 30, 40);
+		CHECK(sizeof(v4) == 4 * sizeof(int));
+
+		CHECK(v4.x == 10);
+		CHECK(v4.y == 20);
+		CHECK(v4.z == 30);
+		CHECK(v4.w == 40);
+
+		v4.x = 100;
+		v4.y = 200;
+		v4.z = 300;
+		v4.w = 400;
+		CHECK(v4.x == 100);
+		CHECK(v4.y == 200);
+		CHECK(v4.z == 300);
+		CHECK(v4.w == 400);
+	}
 }
 
 

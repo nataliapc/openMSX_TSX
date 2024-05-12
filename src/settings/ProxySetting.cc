@@ -5,9 +5,6 @@
 #include "MSXMotherBoard.hh"
 #include "MSXException.hh"
 
-using std::string;
-using std::vector;
-
 namespace openmsx {
 
 ProxySetting::ProxySetting(Reactor& reactor_, const TclObject& name)
@@ -37,18 +34,18 @@ void ProxySetting::setValue(const TclObject& value)
 	}
 }
 
-string_view ProxySetting::getTypeString() const
+std::string_view ProxySetting::getTypeString() const
 {
-	if (auto* setting = getSetting()) {
+	if (const auto* setting = getSetting()) {
 		return setting->getTypeString();
 	} else {
-		return "proxy";
+		throw MSXException("No setting '", getFullName(), "' on current machine.");
 	}
 }
 
-string_view ProxySetting::getDescription() const
+std::string_view ProxySetting::getDescription() const
 {
-	if (auto* setting = getSetting()) {
+	if (const auto* setting = getSetting()) {
 		return setting->getDescription();
 	} else {
 		return "proxy";
@@ -57,26 +54,26 @@ string_view ProxySetting::getDescription() const
 
 const TclObject& ProxySetting::getValue() const
 {
-	if (auto* setting = getSetting()) {
+	if (const auto* setting = getSetting()) {
 		return setting->getValue();
 	} else {
 		throw MSXException("No setting '", getFullName(), "' on current machine.");
 	}
 }
 
-TclObject ProxySetting::getDefaultValue() const
+std::optional<TclObject> ProxySetting::getOptionalValue() const
 {
-	if (auto* setting = getSetting()) {
-		return setting->getDefaultValue();
+	if (const auto* setting = getSetting()) {
+		return setting->getOptionalValue();
 	} else {
-		return TclObject("proxy");
+		return {};
 	}
 }
 
-TclObject ProxySetting::getRestoreValue() const
+TclObject ProxySetting::getDefaultValue() const
 {
-	if (auto* setting = getSetting()) {
-		return setting->getRestoreValue();
+	if (const auto* setting = getSetting()) {
+		return setting->getDefaultValue();
 	} else {
 		return TclObject("proxy");
 	}
@@ -92,16 +89,16 @@ void ProxySetting::setValueDirect(const TclObject& value)
 	}
 }
 
-void ProxySetting::tabCompletion(vector<string>& tokens) const
+void ProxySetting::tabCompletion(std::vector<std::string>& tokens) const
 {
-	if (auto* setting = getSetting()) {
+	if (const auto* setting = getSetting()) {
 		setting->tabCompletion(tokens);
 	}
 }
 
 bool ProxySetting::needLoadSave() const
 {
-	if (auto* setting = getSetting()) {
+	if (const auto* setting = getSetting()) {
 		return setting->needLoadSave();
 	} else {
 		return false;
@@ -110,23 +107,16 @@ bool ProxySetting::needLoadSave() const
 
 bool ProxySetting::needTransfer() const
 {
-	if (auto* setting = getSetting()) {
+	if (const auto* setting = getSetting()) {
 		return setting->needTransfer();
 	} else {
 		return false;
 	}
 }
 
-void ProxySetting::setDontSaveValue(const TclObject& dontSaveValue)
-{
-	if (auto* setting = getSetting()) {
-		setting->setDontSaveValue(dontSaveValue);
-	}
-}
-
 void ProxySetting::additionalInfo(TclObject& result) const
 {
-	if (auto* setting = getSetting()) {
+	if (const auto* setting = getSetting()) {
 		setting->additionalInfo(result);
 	}
 }

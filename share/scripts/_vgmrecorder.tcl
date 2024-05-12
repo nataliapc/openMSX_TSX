@@ -7,6 +7,8 @@ variable y8950_register
 variable opl4_register_wave
 variable opl4_register
 variable active_fm_register -1
+variable opl3_register
+variable opl3_port
 
 variable start_time 0
 variable tick_time 0
@@ -18,9 +20,11 @@ variable directory [file normalize $::env(OPENMSX_USER_DATA)/../vgm_recordings]
 
 variable psg_logged       false
 variable fm_logged        false
+variable y2151_logged     false
 variable y8950_logged     false
 variable moonsound_logged false
 variable scc_logged       false
+variable opl3_logged      false
 
 variable scc_plus_used
 
@@ -35,14 +39,14 @@ variable mbwave_title_hack       false
 variable mbwave_loop_hack	 false
 variable mbwave_basic_title_hack false
 
-variable supported_chips [list MSX-Music PSG Moonsound MSX-Audio SCC]
+variable supported_chips [list MSX-Music PSG MoonSound MSX-Audio SCC SFG OPL3]
 
 set_help_proc vgm_rec [namespace code vgm_rec_help]
 proc vgm_rec_help {args} {
         switch -- [lindex $args 1] {
                 "start"    {return {VGM recording will be initialised, specify one or more soundchips to record.
 
-Syntax: vgm_rec start <MSX-Audio|MSX-Music|Moonsound|PSG|SCC>
+Syntax: vgm_rec start <MSX-Audio|MSX-Music|Moonsound|PSG|SCC|SFG|OPL3>
 
 Actual recording will start when audio is detected to avoid silence at the beginning of the recording. This mechanism will only work if the MSX and/or playback routine does not send data to the soundchip when not playing, recording will start immediately in those cases.
 }}
@@ -139,9 +143,11 @@ proc vgm_rec {args} {
 
 	variable psg_logged
 	variable fm_logged
+	variable y2151_logged
 	variable y8950_logged
 	variable moonsound_logged
 	variable scc_logged
+	variable opl3_logged
 
 	set prefix_index [lsearch -exact $args "prefix"]
 	if {$prefix_index >= 0} {
@@ -211,16 +217,20 @@ proc vgm_rec {args} {
 		}
 		set psg_logged       false
 		set fm_logged        false
+		set y2151_logged     false
 		set y8950_logged     false
 		set moonsound_logged false
 		set scc_logged       false
+		set opl3_logged      false
 
 		foreach a [lrange $args $index+1 end] {
 			if     {[string compare -nocase $a "PSG"      ] == 0} {set psg_logged       true} \
 			elseif {[string compare -nocase $a "MSX-Music"] == 0} {set fm_logged        true} \
+			elseif {[string compare -nocase $a "SFG"      ] == 0} {set y2151_logged     true} \
 			elseif {[string compare -nocase $a "MSX-Audio"] == 0} {set y8950_logged     true} \
-			elseif {[string compare -nocase $a "Moonsound"] == 0} {set moonsound_logged true} \
+			elseif {[string compare -nocase $a "MoonSound"] == 0} {set moonsound_logged true} \
 			elseif {[string compare -nocase $a "SCC"      ] == 0} {set scc_logged       true} \
+			elseif {[string compare -nocase $a "OPL3"     ] == 0} {set opl3_logged      true} \
 			else {
 				error "Invalid chip to record for specified, use tab completion"
 				return
@@ -257,9 +267,11 @@ proc vgm_rec_start {} {
 
 	variable psg_register       -1
 	variable fm_register        -1
+	variable y2151_register     -1
 	variable y8950_register     -1
 	variable opl4_register_wave -1
 	variable opl4_register      -1
+	variable opl3_register      -1
 
 	variable ticks 0
 	variable music_data ""
@@ -286,13 +298,22 @@ proc vgm_rec_start {} {
 		append recording_text " MSX-Music"
 	}
 
+	variable y2151_logged
+	if {$y2151_logged} {
+		foreach {ps ss} [find_all_sfg] {
+			lappend watchpoints [debug set_watchpoint write_mem 0x3FF0 "\[watch_in_slot $ps $ss\]" {vgm::write_y2151_address}] \
+			                    [debug set_watchpoint write_mem 0x3FF1 "\[watch_in_slot $ps $ss\]" {vgm::write_y2151_data}]
+		}
+		append recording_text " SFG"
+	}
 	variable y8950_logged
 	if {$y8950_logged} {
 		lappend watchpoints [debug set_watchpoint write_io 0xC0 {} {vgm::write_y8950_address}] \
 		                    [debug set_watchpoint write_io 0xC1 {} {vgm::write_y8950_data}]
 
 		# Save the sample RAM as a datablock. If loaded before starting the recording it's fine, if loaded afterward it'll be saved as vgm commands which will be optimised to datablock by the vgmtools
-		set y8950_ram [concat [machine_info output_port 0xC0] RAM]
+		# Note that we only support the first Y8950 device on the I/O port
+		set y8950_ram [concat [lindex [machine_info output_port 0xC0] 0] RAM]
 		if {[lsearch -exact [debug list] $y8950_ram] >= 0} {
 			set y8950_ram_size [debug size $y8950_ram]
 			if {$y8950_ram_size > 0} {
@@ -323,7 +344,8 @@ proc vgm_rec_start {} {
 		                    [debug set_watchpoint write_io 0xC7 {} {vgm::write_opl4_data}]
 
 		# Save the sample RAM as a datablock. If loaded before starting the recording it's fine, if loaded afterward it'll be saved as vgm commands which will be optimised to datablock by the vgmtools
-		set moonsound_ram [concat [machine_info output_port 0x7E] {wave RAM}]
+		# Note that we only support the first MoonSound device on the I/O port
+		set moonsound_ram [concat [lindex [machine_info output_port 0x7E] 0] {wave RAM}]
 		if {[lsearch -exact [debug list] $moonsound_ram] >= 0} {
 			set moonsound_ram_size [debug size $moonsound_ram]
 			if {$moonsound_ram_size > 0} {
@@ -337,7 +359,19 @@ proc vgm_rec_start {} {
 				append temp_music_data [binary format cccc 0xD0 0x01 0x05 0x03]
 			}
 		}
-		append recording_text " Moondsound"
+		append recording_text " MoonSound"
+	}
+	variable opl3_logged
+	if {$opl3_logged} {
+		lappend watchpoints [debug set_watchpoint write_io 0xC0 {} {vgm::write_opl3_address_1}] \
+		                    [debug set_watchpoint write_io 0xC1 {} {vgm::write_opl3_data}] \
+		                    [debug set_watchpoint write_io 0xC2 {} {vgm::write_opl3_address_2}] \
+		                    [debug set_watchpoint write_io 0xC3 {} {vgm::write_opl3_data}] \
+		                    [debug set_watchpoint write_io 0xC4 {} {vgm::write_opl3_address_1}] \
+		                    [debug set_watchpoint write_io 0xC5 {} {vgm::write_opl3_data}] \
+		                    [debug set_watchpoint write_io 0xC6 {} {vgm::write_opl3_address_2}] \
+		                    [debug set_watchpoint write_io 0xC7 {} {vgm::write_opl3_data}]
+		append recording_text " OPL3"
 	}
 
 	variable scc_logged
@@ -363,15 +397,37 @@ proc find_all_scc {} {
 			set device_list [machine_info slot $ps $ss 2]
 			if {[llength $device_list] != 0} {
 				set device [lindex $device_list 0]
-				set device_info_list [machine_info device $device]
-				lassign $device_info_list device_info device_sub_info
-				if {[string match -nocase *scc* $device_info]} {
+				set device_info_dict [machine_info device $device]
+				set device_type [dict get $device_info_dict "type"]
+				if {[string match -nocase *scc* $device_type]} {
 					lappend result $ps $ss 1
+				} elseif {[dict exists $device_info_dict "mappertype"]} {
+					set mapper_type [dict get $device_info_dict "mappertype"]
+					if {[string match -nocase *scc* $mapper_type] ||
+					    [string match -nocase manbow2 $mapper_type] ||
+					    [string match -nocase KonamiUltimateCollection $mapper_type]} {
+						lappend result $ps $ss 0
+					}
 				}
-				if {[string match -nocase *scc* $device_sub_info] ||
-				    [string match -nocase manbow2 $device_sub_info] ||
-				    [string match -nocase KonamiUltimateCollection $device_sub_info]} {
-					lappend result $ps $ss 0
+			}
+			if {![machine_info issubslotted $ps]} break
+		}
+	}
+	return $result
+}
+
+proc find_all_sfg {} {
+	set result [list]
+	for {set ps 0} {$ps < 4} {incr ps} {
+		for {set ss 0} {$ss < 4} {incr ss} {
+			set device_list [machine_info slot $ps $ss 0]
+			if {[llength $device_list] != 0} {
+				set device [lindex $device_list 0]
+				set device_info_dict [machine_info device $device]
+				set device_type [dict get $device_info_dict "type"]
+				# expected string is "YamahaSFG"
+				if {[string match -nocase *sfg* $device_type]} {
+					lappend result $ps $ss
 				}
 			}
 			if {![machine_info issubslotted $ps]} break
@@ -403,6 +459,18 @@ proc write_opll_data {} {
 		update_time
 		variable music_data
 		append music_data [binary format ccc 0x51 $opll_register $::wp_last_value]
+	}
+}
+
+proc write_y2151_address {} {
+	variable y2151_register $::wp_last_value
+}
+proc write_y2151_data {} {
+	variable y2151_register
+	if {$y2151_register >= 0} { # initialised to -1
+		update_time
+		variable music_data
+		append music_data [binary format ccc 0x54 $y2151_register $::wp_last_value]
 	}
 }
 
@@ -451,6 +519,29 @@ proc write_opl4_data {} {
 		update_time
 		variable music_data
 		append music_data [binary format cccc 0xD0 $active_fm_register $opl4_register $::wp_last_value]
+	}
+}
+
+proc write_opl3_address_1 {} {
+	variable opl3_register $::wp_last_value
+	variable opl3_port 0xC0
+}
+
+proc write_opl3_address_2 {} {
+	variable opl3_register $::wp_last_value
+	variable opl3_port 0xC2
+}
+
+proc write_opl3_data {} {
+	variable opl3_register
+	if {$opl3_register >= 0} {
+		update_time
+		variable opl3_port
+		variable music_data
+		switch $opl3_port {
+			0xC0 { append music_data [binary format ccc 0x5E $opl3_register $::wp_last_value] }
+			0xC2 { append music_data [binary format ccc 0x5F $opl3_register $::wp_last_value] }
+		}
 	}
 }
 
@@ -608,7 +699,15 @@ proc vgm_rec_end {abort} {
 		variable ticks
 		append header [little_endian_32 $ticks]
 		set ticks 0
-		append header [zeros 24]
+		append header [zeros 20]
+
+		variable y2151_logged
+		if {$y2151_logged} {
+			append header [little_endian_32 3579545]
+		} else {
+			append header [zeros 4]
+		}
+
 		# Data starts at offset 0x100
 		append header [little_endian_32 [expr {0x100 - 0x34}]] [zeros 32]
 
@@ -620,7 +719,13 @@ proc vgm_rec_end {abort} {
 			append header [zeros 4]
 		}
 
-		append header [zeros 4]
+		# YMF262 clock
+		variable opl3_logged
+		if {$opl3_logged} {
+			append header [little_endian_32 14318182]
+		} else {
+			append header [zeros 4]
+		}
 
 		# YMF278B clock
 		variable moonsound_logged

@@ -12,7 +12,7 @@ namespace openmsx {
 class DACSound16S : public SoundDevice
 {
 public:
-	DACSound16S(string_view name, string_view desc,
+	DACSound16S(std::string_view name, static_string_view desc,
 	            const DeviceConfig& config);
 	virtual ~DACSound16S();
 
@@ -24,13 +24,14 @@ public:
 
 private:
 	// SoundDevice
-	void setOutputRate(unsigned sampleRate) override;
-	void generateChannels(int** bufs, unsigned num) override;
-	bool updateBuffer(unsigned length, int* buffer,
+	void setOutputRate(unsigned hostSampleRate, double speed) override;
+	void generateChannels(std::span<float*> bufs, unsigned num) override;
+	bool updateBuffer(size_t length, float* buffer,
 	                  EmuTime::param time) override;
 
+private:
 	BlipBuffer blip;
-	int16_t lastWrittenValue;
+	int16_t lastWrittenValue = 0;
 };
 
 } // namespace openmsx

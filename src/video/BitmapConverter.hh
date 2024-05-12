@@ -3,20 +3,21 @@
 
 #include "DisplayMode.hh"
 #include "openmsx.hh"
+
+#include <array>
 #include <cstdint>
+#include <span>
 
 namespace openmsx {
 
-template<int N> struct DoublePixel;
-template<> struct DoublePixel<2> { using type = uint32_t; };
-template<> struct DoublePixel<4> { using type = uint64_t; };
-
 /** Utility class for converting VRAM contents to host pixels.
   */
-template <class Pixel>
 class BitmapConverter
 {
 public:
+	using Pixel = uint32_t;
+	using DPixel = uint64_t;
+
 	/** Create a new bitmap scanline converter.
 	  * @param palette16 Pointer to 2*16-entries array that specifies
 	  *   VDP color index to host pixel mapping.
@@ -38,25 +39,32 @@ public:
 	  *   are immediately picked up by convertLine.
 	  *   Used when YJK filter is active.
 	  */
-	BitmapConverter(const Pixel* palette16,
-	                const Pixel* palette256,
-	                const Pixel* palette32768);
+	BitmapConverter(std::span<const Pixel, 16 * 2> palette16,
+	                std::span<const Pixel, 256>    palette256,
+	                std::span<const Pixel, 32768>  palette32768);
 
-	/** Convert a line of V9938 VRAM to 512 host pixels.
+	/** Convert a line of V9938 VRAM to 256 or 512 host pixels.
 	  * Call this method in non-planar display modes (Graphic4 and Graphic5).
-	  * @param linePtr Pointer to array of host pixels.
+	  * @param buf Buffer where host pixels will be written to.
+	  *            Depending on the screen mode, the buffer must contain at
+	  *            least 256 or 512 pixels, but more is allowed (the extra
+	  *            pixels aren't touched).
 	  * @param vramPtr Pointer to VRAM contents.
 	  */
-	void convertLine(Pixel* linePtr, const byte* vramPtr);
+	void convertLine(std::span<Pixel> buf, std::span<const byte, 128> vramPtr);
 
-	/** Convert a line of V9938 VRAM to 512 host pixels.
+	/** Convert a line of V9938 VRAM to 256 or 512 host pixels.
 	  * Call this method in planar display modes (Graphic6 and Graphic7).
-	  * @param linePtr Pointer to array of host pixels.
+	  * @param buf Buffer where host pixels will be written to.
+	  *            Depending on the screen mode, the buffer must contain at
+	  *            least 256 or 512 pixels, but more is allowed (the extra
+	  *            pixels aren't touched).
 	  * @param vramPtr0 Pointer to VRAM contents, first plane.
 	  * @param vramPtr1 Pointer to VRAM contents, second plane.
 	  */
-	void convertLinePlanar(Pixel* linePtr,
-	                       const byte* vramPtr0, const byte* vramPtr1);
+	void convertLinePlanar(std::span<Pixel> buf,
+	                       std::span<const byte, 128> vramPtr0,
+	                       std::span<const byte, 128> vramPtr1);
 
 	/** Select the display mode to use for scanline conversion.
 	  * @param mode_ The new display mode.
@@ -76,26 +84,32 @@ public:
 private:
 	void calcDPalette();
 
-	inline void renderGraphic4(Pixel* pixelPtr, const byte* vramPtr0);
-	inline void renderGraphic5(Pixel* pixelPtr, const byte* vramPtr0);
-	inline void renderGraphic6(
-		Pixel* pixelPtr, const byte* vramPtr0, const byte* vramPtr1);
-	inline void renderGraphic7(
-		Pixel* pixelPtr, const byte* vramPtr0, const byte* vramPtr1);
-	inline void renderYJK(
-		Pixel* pixelPtr, const byte* vramPtr0, const byte* vramPtr1);
-	inline void renderYAE(
-		Pixel* pixelPtr, const byte* vramPtr0, const byte* vramPtr1);
-	inline void renderBogus(Pixel* pixelPtr);
+	inline void renderGraphic4(std::span<Pixel, 256> buf,
+	                           std::span<const byte, 128> vramPtr0);
+	inline void renderGraphic5(std::span<Pixel, 512> buf,
+	                           std::span<const byte, 128> vramPtr0) const;
+	inline void renderGraphic6(std::span<Pixel, 512> buf,
+	                           std::span<const byte, 128> vramPtr0,
+				   std::span<const byte, 128> vramPtr1);
+	inline void renderGraphic7(std::span<Pixel, 256> buf,
+	                           std::span<const byte, 128> vramPtr0,
+				   std::span<const byte, 128> vramPtr1) const;
+	inline void renderYJK(     std::span<Pixel, 256> buf,
+	                           std::span<const byte, 128> vramPtr0,
+				   std::span<const byte, 128> vramPtr1) const;
+	inline void renderYAE(     std::span<Pixel, 256> buf,
+	                           std::span<const byte, 128> vramPtr0,
+				   std::span<const byte, 128> vramPtr1) const;
+	inline void renderBogus(   std::span<Pixel, 256> buf) const;
 
-	const Pixel* const __restrict palette16;
-	const Pixel* const __restrict palette256;
-	const Pixel* const __restrict palette32768;
+private:
+	std::span<const Pixel, 16 * 2> palette16;
+	std::span<const Pixel, 256>    palette256;
+	std::span<const Pixel, 32768>  palette32768;
 
-	using DPixel = typename DoublePixel<sizeof(Pixel)>::type;
-	DPixel dPalette[16 * 16];
+	std::array<DPixel, 16 * 16> dPalette;
 	DisplayMode mode;
-	bool dPaletteValid;
+	bool dPaletteValid = false;
 };
 
 } // namespace openmsx

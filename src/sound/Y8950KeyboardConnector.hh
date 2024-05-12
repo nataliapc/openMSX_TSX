@@ -14,20 +14,20 @@ public:
 	explicit Y8950KeyboardConnector(PluggingController& pluggingController);
 
 	void write(byte data, EmuTime::param time);
-	byte read(EmuTime::param time);
-	byte peek(EmuTime::param time) const;
-	Y8950KeyboardDevice& getPluggedKeyb() const;
+	[[nodiscard]] byte read(EmuTime::param time) const;
+	[[nodiscard]] byte peek(EmuTime::param time) const;
+	[[nodiscard]] Y8950KeyboardDevice& getPluggedKeyb() const;
 
 	// Connector
-	const std::string getDescription() const final override;
-	string_view getClass() const final override;
+	[[nodiscard]] std::string_view getDescription() const override;
+	[[nodiscard]] std::string_view getClass() const override;
 	void plug(Pluggable& dev, EmuTime::param time) override;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 private:
-	byte data;
+	byte data = 255;
 };
 
 } // namespace openmsx

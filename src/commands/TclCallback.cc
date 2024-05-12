@@ -2,113 +2,107 @@
 #include "CommandController.hh"
 #include "CliComm.hh"
 #include "CommandException.hh"
-#include "StringSetting.hh"
+#include "GlobalCommandController.hh"
+#include "Reactor.hh"
+#include "checked_cast.hh"
 #include <iostream>
 #include <memory>
-
-using std::string;
 
 namespace openmsx {
 
 TclCallback::TclCallback(
 		CommandController& controller,
-		string_view name,
-		string_view description,
-		bool useCliComm_,
-		bool save)
-	: callbackSetting2(std::make_unique<StringSetting>(
-		controller, name, description, string_view{},
-		save ? Setting::SAVE : Setting::DONT_SAVE))
+		std::string_view name,
+		static_string_view description,
+		std::string_view defaultValue,
+		Setting::SaveSetting saveSetting,
+		bool isMessageCallback_)
+	: callbackSetting2(std::in_place,
+		controller, name, description, defaultValue,
+		saveSetting)
 	, callbackSetting(*callbackSetting2)
-	, useCliComm(useCliComm_)
+	, isMessageCallback(isMessageCallback_)
 {
 }
 
 TclCallback::TclCallback(StringSetting& setting)
 	: callbackSetting(setting)
-	, useCliComm(true)
+	, isMessageCallback(false)
 {
 }
-
-TclCallback::~TclCallback() = default;
 
 TclObject TclCallback::getValue() const
 {
 	return getSetting().getValue();
 }
 
-TclObject TclCallback::execute()
+TclObject TclCallback::execute() const
 {
 	const auto& callback = getValue();
-	if (callback.empty()) return TclObject();
+	if (callback.empty()) return {};
 
-	TclObject command;
-	command.addListElement(callback);
+	auto command = makeTclList(callback);
 	return executeCommon(command);
 }
 
-TclObject TclCallback::execute(int arg1)
+TclObject TclCallback::execute(int arg1) const
 {
 	const auto& callback = getValue();
-	if (callback.empty()) return TclObject();
+	if (callback.empty()) return {};
 
-	TclObject command;
-	command.addListElement(callback);
-	command.addListElement(arg1);
+	auto command = makeTclList(callback, arg1);
 	return executeCommon(command);
 }
 
-TclObject TclCallback::execute(int arg1, int arg2)
+TclObject TclCallback::execute(int arg1, int arg2) const
 {
 	const auto& callback = getValue();
-	if (callback.empty()) return TclObject();
+	if (callback.empty()) return {};
 
-	TclObject command;
-	command.addListElement(callback);
-	command.addListElement(arg1);
-	command.addListElement(arg2);
+	auto command = makeTclList(callback, arg1, arg2);
 	return executeCommon(command);
 }
 
-TclObject TclCallback::execute(int arg1, string_view arg2)
+TclObject TclCallback::execute(int arg1, std::string_view arg2) const
 {
 	const auto& callback = getValue();
-	if (callback.empty()) return TclObject();
+	if (callback.empty()) return {};
 
-	TclObject command;
-	command.addListElement(callback);
-	command.addListElement(arg1);
-	command.addListElement(arg2);
+	auto command = makeTclList(callback, arg1, arg2);
 	return executeCommon(command);
 }
 
-TclObject TclCallback::execute(string_view arg1, string_view arg2)
+TclObject TclCallback::execute(std::string_view arg1, std::string_view arg2) const
 {
 	const auto& callback = getValue();
-	if (callback.empty()) return TclObject();
+	if (callback.empty()) return {};
 
-	TclObject command;
-	command.addListElement(callback);
-	command.addListElement(arg1);
-	command.addListElement(arg2);
+	auto command = makeTclList(callback, arg1, arg2);
 	return executeCommon(command);
 }
 
-TclObject TclCallback::executeCommon(TclObject& command)
+TclObject TclCallback::executeCommon(TclObject& command) const
 {
 	try {
 		return command.executeCommand(callbackSetting.getInterpreter());
 	} catch (CommandException& e) {
-		string message = strCat(
+		auto message = strCat(
 			"Error executing callback function \"",
 			getSetting().getFullName(), "\": ", e.getMessage());
-		if (useCliComm) {
-			getSetting().getCommandController().getCliComm().printWarning(
-				message);
+		auto& commandController = getSetting().getCommandController();
+		if (!isMessageCallback) {
+			commandController.getCliComm().printWarning(message);
 		} else {
-			std::cerr << message << std::endl;
+			if (checked_cast<GlobalCommandController&>(commandController).getReactor().isFullyStarted()) {
+				std::cerr << message << '\n';
+			} else {
+				// This is a message callback that cannot be
+				// executed yet.
+				// Let the caller deal with this.
+				throw command;
+			}
 		}
-		return TclObject();
+		return {};
 	}
 }
 

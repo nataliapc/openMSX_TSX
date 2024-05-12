@@ -5,12 +5,6 @@
 
 namespace openmsx {
 
-BreakPointBase::BreakPointBase(TclObject command_, TclObject condition_)
-	: command(std::move(command_)), condition(std::move(condition_))
-	, executing(false)
-{
-}
-
 bool BreakPointBase::isTrue(GlobalCliComm& cliComm, Interpreter& interp) const
 {
 	if (condition.getString().empty()) {
@@ -25,20 +19,22 @@ bool BreakPointBase::isTrue(GlobalCliComm& cliComm, Interpreter& interp) const
 	}
 }
 
-void BreakPointBase::checkAndExecute(GlobalCliComm& cliComm, Interpreter& interp)
+bool BreakPointBase::checkAndExecute(GlobalCliComm& cliComm, Interpreter& interp)
 {
 	if (executing) {
 		// no recursive execution
-		return;
+		return false;
 	}
-	ScopedAssign<bool> sa(executing, true);
+	ScopedAssign sa(executing, true);
 	if (isTrue(cliComm, interp)) {
 		try {
 			command.executeCommand(interp, true); // compile command
 		} catch (CommandException& e) {
 			cliComm.printWarning(e.getMessage());
 		}
+		return onlyOnce();
 	}
+	return false;
 }
 
 } // namespace openmsx

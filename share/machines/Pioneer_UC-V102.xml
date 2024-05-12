@@ -6,7 +6,7 @@
      Information provided by http://msxarcheology.blogspot.nl/ (Piter Punk)
      Serial number JL1000114
 
-     - Uses same keyboard as Mitsubishi ML-G30
+     - Uses same keyboard as Mitsubishi ML-G30, but is labeled UK-V101
      - 2 FDD's
      - RS-232C interface
      - superimpose capabilities (not emulated!)
@@ -40,11 +40,14 @@
     <release_year>1987</release_year>
     <description>Videodisc Controller, internally an MSX2.</description>
     <type>MSX2</type>
+    <region>jp</region>
   </info>
 
-  <MapperReadBackBits>largest</MapperReadBackBits>
-
   <devices>
+
+    <S1985 id="S1985"> <!-- includes 5 bits mapper-read-back -->
+      <sramname>uc-v102_s1985.sram</sramname>
+    </S1985>
 
     <Kanji id="Kanji ROM">
       <rom>
@@ -55,14 +58,13 @@
       <io base="0xD9" num="1" type="I"/>
     </Kanji>
 
-
     <PPI id="ppi">
       <key_ghosting>true</key_ghosting>
       <sound>
         <volume>16000</volume>
       </sound>
-      <io base="0xA8" num="4"/>
-      <keyboard_type>jp_ansi</keyboard_type>
+      <io base="0xA8" num="8"/> <!-- S-1985 mirrors -->
+      <keyboard_type>jp_jis</keyboard_type>
       <has_keypad>true</has_keypad>
       <key_ghosting_sgc_protected>false</key_ghosting_sgc_protected>
       <code_kana_locks>true</code_kana_locks>
@@ -72,32 +74,29 @@
     <VDP id="VDP">
       <version>V9938</version>
       <vram>128</vram>
-      <io base="0x98" num="4" type="O"/>
-      <io base="0x98" num="2" type="I"/>
+      <io base="0x98" num="8" type="O"/> <!-- S-1985 mirrors -->
+      <io base="0x98" num="8" type="I"/> <!-- S-1985 mirrors -->
     </VDP>
-
-    <S1985 id="S1985">
-      <sramname>uc-v102_s1985.sram</sramname>
-    </S1985>
 
     <PSG id="PSG">
       <type>YM2149</type>
-      <keyboardlayout>50on</keyboardlayout>
+      <keyboardlayout>JIS</keyboardlayout>
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="8" type="IO"/> <!-- S-1985 mirrors -->
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <RTC id="Real time clock">
       <sramname>uc-v102.cmos</sramname>
-      <io base="0xB4" num="2" type="O"/>
-      <io base="0xB5" num="1" type="I"/>
+      <io base="0xB4" num="4" type="IO"/> <!-- S-1985 mirrors -->
     </RTC>
 
     <PrinterPort id="Printer Port">
-      <io base="0x90" num="2"/>
+      <io base="0x90" num="8" type="IO"/> <!-- S-1985 mirrors -->
+      <bidirectional>true</bidirectional> <!-- S-1985 feature (but not used, nor implemented) -->
+      <unused_bits>0x00</unused_bits>
     </PrinterPort>
 
     <primary slot="0">

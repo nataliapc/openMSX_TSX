@@ -6,8 +6,9 @@
     <manufacturer>Toshiba</manufacturer>
     <code>HX-32</code>
     <release_year>1985</release_year>
-    <description>Japanese MSX1 with RAM disk feature, Kanji ROM and stereo PSG.</description>
+    <description>Japanese MSX1 with RAM disk feature, Kanji ROM, stereo PSG and word processing software built in.</description>
     <type>MSX</type>
+    <region>jp</region>
   </info>
 
   <!--
@@ -61,15 +62,15 @@
 
     <PSG id="PSG">
       <type>YM2149</type>
-      <keyboardlayout>jis</keyboardlayout>
+      <keyboardlayout>JIS</keyboardlayout>
       <sound>
         <volume>21000</volume>
         <balance channel="1">0</balance>
         <balance channel="2">100</balance> <!-- According to Werner Kai's HX-21 -->
         <balance channel="3">-100</balance><!-- According to Werner Kai's HX-21 -->
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <PrinterPort id="Printer Port">

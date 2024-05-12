@@ -4,15 +4,12 @@
 #include "MSXCommandController.hh"
 #include "checked_cast.hh"
 
-using std::vector;
-using std::string;
-
 namespace openmsx {
 
 // class CommandCompleter
 
 CommandCompleter::CommandCompleter(CommandController& controller_,
-                                   string_view name_)
+                                   std::string_view name_)
 	: Completer(name_)
 	, commandController(controller_)
 {
@@ -29,7 +26,7 @@ CommandCompleter::~CommandCompleter()
 
 GlobalCommandController& CommandCompleter::getGlobalCommandController() const
 {
-	if (auto globalCommandController =
+	if (auto* globalCommandController =
 	    dynamic_cast<GlobalCommandController*>(&commandController)) {
 		return *globalCommandController;
 	} else {
@@ -50,10 +47,8 @@ CliComm& CommandCompleter::getCliComm() const
 
 // class Command
 
-Command::Command(CommandController& controller_, string_view name_)
+Command::Command(CommandController& controller_, std::string_view name_)
 	: CommandCompleter(controller_, name_)
-	, allowInEmptyMachine(true)
-	, token(nullptr)
 {
 	getCommandController().registerCommand(*this, getName());
 }
@@ -63,7 +58,7 @@ Command::~Command()
 	getCommandController().unregisterCommand(*this, getName());
 }
 
-void Command::tabCompletion(vector<string>& /*tokens*/) const
+void Command::tabCompletion(std::vector<std::string>& /*tokens*/) const
 {
 	// do nothing
 }

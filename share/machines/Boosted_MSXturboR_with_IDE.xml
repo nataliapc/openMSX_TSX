@@ -8,6 +8,7 @@
     <release_year>2013</release_year>
     <description>A super-charged Panasonic FS-A1GT with IDE interface.</description>
     <type>MSXturboR</type>
+    <region>jp</region>
   </info>
 
   <RenShaTurbo>
@@ -70,6 +71,7 @@
             <volume>9000</volume>
             <balance>-75</balance>
           </sound>
+          <ym2413-core>NukeYKT</ym2413-core>
         </MSX-MUSIC>
         <ROM id="BASIC Compiler">
           <rom>
@@ -252,13 +254,20 @@
       <device idref="Sunrise GFX9000"/>
     </Video9000>
 
-    <PSG id="psg">
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+    <PSG id="PSG">
+      <io base="0xA0" num="4" type="IO"/>
       <sound>
         <volume>21000</volume>
       </sound>
       <keyboardlayout>JIS</keyboardlayout>
+      <ignorePortDirections>true</ignorePortDirections> <!-- highest compatibility -->
+    </PSG>
+
+    <PSG id="PSG 2">
+      <io base="0x10" num="4" type="IO"/>
+      <sound>
+        <volume>21000</volume>
+      </sound>
     </PSG>
 
     <RTC id="Real time clock">

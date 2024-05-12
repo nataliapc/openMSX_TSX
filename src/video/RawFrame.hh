@@ -2,22 +2,12 @@
 #define RAWFRAME_HH
 
 #include "FrameSource.hh"
+
 #include "MemBuffer.hh"
-#include "openmsx.hh"
+
 #include <cassert>
 
 namespace openmsx {
-
-// Used by SDLRasterizer to implement left/right border drawing optimization.
-struct V9958RasterizerBorderInfo
-{
-	V9958RasterizerBorderInfo()
-		: mode(0xff) {} // invalid mode
-	uint32_t color0, color1;
-	byte mode, adjust, scroll;
-	bool masked;
-};
-
 
 /** A video frame as output by the VDP scanline conversion unit,
   * before any postprocessing filters are applied.
@@ -25,51 +15,43 @@ struct V9958RasterizerBorderInfo
 class RawFrame final : public FrameSource
 {
 public:
-	RawFrame(const SDL_PixelFormat& format, unsigned maxWidth, unsigned height);
+	RawFrame(unsigned maxWidth, unsigned height);
 
-	template<typename Pixel>
-	Pixel* getLinePtrDirect(unsigned y) {
-		return reinterpret_cast<Pixel*>(data.data() + y * pitch);
+	[[nodiscard]] std::span<Pixel> getLineDirect(unsigned y) {
+		assert(y < getHeight());
+		return {data.data() + y * size_t(maxWidth), maxWidth};
+	}
+	[[nodiscard]] std::span<const Pixel> getLineDirect(unsigned y) const {
+		return const_cast<RawFrame*>(this)->getLineDirect(y);
 	}
 
-	unsigned getLineWidthDirect(unsigned y) const {
+	[[nodiscard]] unsigned getLineWidthDirect(unsigned y) const {
+		assert(y < getHeight());
 		return lineWidths[y];
 	}
 
-	inline void setLineWidth(unsigned line, unsigned width) {
+	void setLineWidth(unsigned line, unsigned width) {
 		assert(line < getHeight());
 		assert(width <= maxWidth);
 		lineWidths[line] = width;
 	}
 
-	template <class Pixel>
-	inline void setBlank(unsigned line, Pixel color) {
+	void setBlank(unsigned line, Pixel color) {
 		assert(line < getHeight());
-		Pixel* pixels = getLinePtrDirect<Pixel>(line);
-		pixels[0] = color;
+		getLineDirect(line)[0] = color;
 		lineWidths[line] = 1;
 	}
 
-	unsigned getRowLength() const override;
-
-	// RawFrame is mostly agnostic of the border info struct. The only
-	// thing it does is store the information and give access to it.
-	V9958RasterizerBorderInfo& getBorderInfo() { return borderInfo; }
-
-protected:
-	unsigned getLineWidth(unsigned line) const override;
-	const void* getLineInfo(
-		unsigned line, unsigned& width,
-		void* buf, unsigned bufWidth) const override;
-	bool hasContiguousStorage() const override;
+private:
+	[[nodiscard]] unsigned getLineWidth(unsigned line) const override;
+	[[nodiscard]] std::span<const Pixel> getUnscaledLine(
+		unsigned line, std::span<Pixel> helpBuf) const override;
+	[[nodiscard]] bool hasContiguousStorage() const override;
 
 private:
-	MemBuffer<char, 64> data;
+	MemBuffer<Pixel, 64> data; // aligned on cache-lines
 	MemBuffer<unsigned> lineWidths;
-	unsigned maxWidth;
-	unsigned pitch;
-
-	V9958RasterizerBorderInfo borderInfo;
+	unsigned maxWidth; // may be larger (rounded up) than requested in the constructor
 };
 
 } // namespace openmsx

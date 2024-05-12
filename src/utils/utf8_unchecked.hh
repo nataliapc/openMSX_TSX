@@ -31,41 +31,42 @@ DEALINGS IN THE SOFTWARE.
 #define UTF8_UNCHECKED_HH
 
 #include "utf8_core.hh"
-#include "string_view.hh"
+#include "narrow.hh"
+#include "xrange.hh"
+#include <string_view>
 
-namespace utf8 {
-namespace unchecked {
+namespace utf8::unchecked {
 
-template <typename octet_iterator>
+template<typename octet_iterator>
 octet_iterator append(uint32_t cp, octet_iterator result)
 {
 	if (cp < 0x80) {
 		// one octet
-		*result++ = cp;
+		*result++ = narrow_cast<uint8_t>(cp);
 	} else if (cp < 0x800) {
 		// two octets
-		*result++ = ((cp >>  6)       ) | 0xc0;
-		*result++ = ((cp >>  0) & 0x3f) | 0x80;
+		*result++ = narrow_cast<uint8_t>(((cp >>  6) & 0x1f) | 0xc0); // 0b110,'....  (5)
+		*result++ = narrow_cast<uint8_t>(((cp >>  0) & 0x3f) | 0x80); // 0b10..'....  (6)
 	} else if (cp < 0x10000) {
 		// three octets
-		*result++ = ((cp >> 12)       ) | 0xe0;
-		*result++ = ((cp >>  6) & 0x3f) | 0x80;
-		*result++ = ((cp >>  0) & 0x3f) | 0x80;
+		*result++ = narrow_cast<uint8_t>(((cp >> 12) & 0x0f) | 0xe0); // 0b1110'....  (4)
+		*result++ = narrow_cast<uint8_t>(((cp >>  6) & 0x3f) | 0x80); // 0b10..'....  (6)
+		*result++ = narrow_cast<uint8_t>(((cp >>  0) & 0x3f) | 0x80); // 0b10..'....  (6)
 	} else {
 		// four octets
-		*result++ = ((cp >> 18)       ) | 0xf0;
-		*result++ = ((cp >> 12) & 0x3f) | 0x80;
-		*result++ = ((cp >>  6) & 0x3f) | 0x80;
-		*result++ = ((cp >>  0) & 0x3f) | 0x80;
+		*result++ = narrow_cast<uint8_t>(((cp >> 18) & 0x07) | 0xf0); // 0b1111'0...  (3)
+		*result++ = narrow_cast<uint8_t>(((cp >> 12) & 0x3f) | 0x80); // 0b10..'....  (6)
+		*result++ = narrow_cast<uint8_t>(((cp >>  6) & 0x3f) | 0x80); // 0b10..'....  (6)
+		*result++ = narrow_cast<uint8_t>(((cp >>  0) & 0x3f) | 0x80); // 0b10..'....  (6)
 	}
 	return result;
 }
 
-template <typename octet_iterator>
+template<typename octet_iterator>
 uint32_t next(octet_iterator& it)
 {
-	uint32_t cp = *it;
-	switch (utf8::internal::sequence_length(cp)) {
+	uint32_t cp = narrow_cast<uint8_t>(*it);
+	switch (utf8::internal::sequence_length(narrow_cast<uint8_t>(cp))) {
 	case 1:
 		break;
 	case 2:
@@ -91,40 +92,38 @@ uint32_t next(octet_iterator& it)
 	return cp;
 }
 
-template <typename octet_iterator>
-uint32_t peek_next(octet_iterator it)
+template<typename octet_iterator>
+[[nodiscard]] uint32_t peek_next(octet_iterator it)
 {
 	return next(it);
 }
 
-template <typename octet_iterator>
+template<typename octet_iterator>
 uint32_t prior(octet_iterator& it)
 {
 	while (internal::is_trail(*(--it))) ;
 	auto temp = it;
-	return next(temp);
+	return unchecked::next(temp);
 }
 
-template <typename octet_iterator, typename distance_type>
+template<typename octet_iterator, typename distance_type>
 void advance(octet_iterator& it, distance_type n)
 {
-	for (distance_type i = 0; i < n; ++i) {
-		unchecked::next(it);
-	}
+	repeat(n, [&] { unchecked::next(it); });
 }
 
-template <typename octet_iterator>
-typename std::iterator_traits<octet_iterator>::difference_type
-distance(octet_iterator first, octet_iterator last)
+template<typename octet_iterator>
+[[nodiscard]] auto distance(octet_iterator first, octet_iterator last)
 {
-	typename std::iterator_traits<octet_iterator>::difference_type dist;
-	for (dist = 0; first < last; ++dist) {
+	typename std::iterator_traits<octet_iterator>::difference_type dist = 0;
+	while (first < last) {
+		++dist;
 		unchecked::next(first);
 	}
 	return dist;
 }
 
-template <typename u16bit_iterator, typename octet_iterator>
+template<typename u16bit_iterator, typename octet_iterator>
 octet_iterator utf16to8(u16bit_iterator start, u16bit_iterator end,
                         octet_iterator result)
 {
@@ -140,7 +139,7 @@ octet_iterator utf16to8(u16bit_iterator start, u16bit_iterator end,
 	return result;
 }
 
-template <typename u16bit_iterator, typename octet_iterator>
+template<typename u16bit_iterator, typename octet_iterator>
 u16bit_iterator utf8to16(octet_iterator start, octet_iterator end,
                          u16bit_iterator result)
 {
@@ -157,7 +156,7 @@ u16bit_iterator utf8to16(octet_iterator start, octet_iterator end,
 	return result;
 }
 
-template <typename octet_iterator, typename u32bit_iterator>
+template<typename octet_iterator, typename u32bit_iterator>
 octet_iterator utf32to8(u32bit_iterator start, u32bit_iterator end,
                         octet_iterator result)
 {
@@ -167,7 +166,7 @@ octet_iterator utf32to8(u32bit_iterator start, u32bit_iterator end,
 	return result;
 }
 
-template <typename octet_iterator, typename u32bit_iterator>
+template<typename octet_iterator, typename u32bit_iterator>
 u32bit_iterator utf8to32(octet_iterator start, octet_iterator end,
                          u32bit_iterator result)
 {
@@ -178,29 +177,28 @@ u32bit_iterator utf8to32(octet_iterator start, octet_iterator end,
 }
 
 // The iterator class
-template <typename octet_iterator>
-class iterator : public std::iterator<std::bidirectional_iterator_tag, uint32_t>
+template<typename octet_iterator>
+class iterator
 {
 	octet_iterator it;
 public:
-	iterator() {};
+	using iterator_category = std::bidirectional_iterator_tag;
+	using difference_type   = ptrdiff_t;
+	using value_type        = uint32_t;
+	using pointer           = uint32_t*;
+	using reference         = uint32_t&;
+
+	iterator() = default;
 	explicit iterator(const octet_iterator& octet_it)
 		: it(octet_it) {}
 	// the default "big three" are OK
-	octet_iterator base() const { return it; }
-	uint32_t operator*() const
+	[[nodiscard]] octet_iterator base() const { return it; }
+	[[nodiscard]] uint32_t operator*() const
 	{
 		octet_iterator temp = it;
 		return next(temp);
 	}
-	bool operator==(const iterator& rhs) const
-	{
-		return it == rhs.it;
-	}
-	bool operator!=(const iterator& rhs) const
-	{
-		return !(operator==(rhs));
-	}
+	[[nodiscard]] bool operator==(const iterator&) const = default;
 	iterator& operator++()
 	{
 		std::advance(it, internal::sequence_length(*it));
@@ -226,17 +224,17 @@ public:
 };
 
 // convenience functions
-inline size_t size(string_view utf8)
+[[nodiscard]] inline size_t size(std::string_view utf8)
 {
 	return utf8::unchecked::distance(begin(utf8), end(utf8));
 }
-inline string_view substr(string_view utf8, string_view::size_type first = 0,
-                         string_view::size_type len = string_view::npos)
+[[nodiscard]] inline std::string_view substr(std::string_view utf8, std::string_view::size_type first = 0,
+                                             std::string_view::size_type len = std::string_view::npos)
 {
 	auto b = begin(utf8);
 	utf8::unchecked::advance(b, first);
-	string_view::const_iterator e;
-	if (len != string_view::npos) {
+	std::string_view::const_iterator e;
+	if (len != std::string_view::npos) {
 		e = b;
 		while (len && (e != end(utf8))) {
 			unchecked::next(e); --len;
@@ -244,10 +242,9 @@ inline string_view substr(string_view utf8, string_view::size_type first = 0,
 	} else {
 		e = end(utf8);
 	}
-	return string_view(b, e);
+	return {std::to_address(b), narrow<std::string_view::size_type>(e - b)};
 }
 
-} // namespace unchecked
-} // namespace utf8
+} // namespace utf8::unchecked
 
 #endif

@@ -1,8 +1,7 @@
 #include "SaveStateCLI.hh"
 #include "CommandLineParser.hh"
 #include "TclObject.hh"
-
-using std::string;
+#include <array>
 
 namespace openmsx {
 
@@ -10,51 +9,48 @@ SaveStateCLI::SaveStateCLI(CommandLineParser& parser_)
 	: parser(parser_)
 {
 	parser.registerOption("-savestate", *this);
-	parser.registerFileType("oms", *this);
+	parser.registerFileType(std::array<std::string_view, 1>{"oms"}, *this);
 }
 
-void SaveStateCLI::parseOption(const string& option, array_ref<string>& cmdLine)
+void SaveStateCLI::parseOption(const std::string& option, std::span<std::string>& cmdLine)
 {
 	parseFileType(getArgument(option, cmdLine), cmdLine);
 }
 
-string_view SaveStateCLI::optionHelp() const
+std::string_view SaveStateCLI::optionHelp() const
 {
 	return "Load savestate and start emulation from there";
 }
 
-void SaveStateCLI::parseFileType(const string& filename,
-                                 array_ref<string>& /*cmdLine*/)
+void SaveStateCLI::parseFileType(const std::string& filename,
+                                 std::span<std::string>& /*cmdLine*/)
 {
 	// TODO: this is basically a C++ version of a part of savestate.tcl.
 	// Can that be improved?
 	auto& interp = parser.getInterpreter();
 
-	TclObject command1;
-	command1.addListElement("restore_machine");
-	command1.addListElement(filename);
+	TclObject command1 = makeTclList("restore_machine", filename);
 	auto newId = command1.executeCommand(interp);
 
-	TclObject command2;
-	command2.addListElement("machine");
-	auto currentId = command2.executeCommand(interp);
-
-	if (!currentId.empty()) {
-		TclObject command3;
-		command3.addListElement("delete_machine");
-		command3.addListElement(currentId);
+	TclObject command2 = makeTclList("machine");
+	if (auto currentId = command2.executeCommand(interp);
+	    !currentId.empty()) {
+		TclObject command3 = makeTclList("delete_machine", currentId);
 		command3.executeCommand(interp);
 	}
 
-	TclObject command4;
-	command4.addListElement("activate_machine");
-	command4.addListElement(newId);
+	TclObject command4 = makeTclList("activate_machine", newId);
 	command4.executeCommand(interp);
 }
 
-string_view SaveStateCLI::fileTypeHelp() const
+std::string_view SaveStateCLI::fileTypeHelp() const
 {
 	return "openMSX savestate";
+}
+
+std::string_view SaveStateCLI::fileTypeCategoryName() const
+{
+	return "savestate";
 }
 
 } // namespace openmsx

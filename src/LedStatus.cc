@@ -1,15 +1,19 @@
 #include "LedStatus.hh"
 #include "MSXCliComm.hh"
-#include "ReadOnlySetting.hh"
 #include "CommandController.hh"
 #include "Timer.hh"
-#include <memory>
+#include "ranges.hh"
+#include "stl.hh"
+#include "strCat.hh"
+#include "xrange.hh"
+#include <array>
+#include <string_view>
 
 namespace openmsx {
 
-static std::string getLedName(LedStatus::Led led)
+[[nodiscard]] static std::string_view getLedName(LedStatus::Led led)
 {
-	static const char* const names[LedStatus::NUM_LEDS] = {
+	static constexpr std::array<std::string_view, LedStatus::NUM_LEDS> names = {
 		"power", "caps", "kana", "pause", "turbo", "FDD"
 	};
 	return names[led];
@@ -22,19 +26,17 @@ LedStatus::LedStatus(
 	: RTSchedulable(rtScheduler)
 	, msxCliComm(msxCliComm_)
 	, interp(commandController.getInterpreter())
-{
-	lastTime = Timer::getTime();
-	for (int i = 0; i < NUM_LEDS; ++i) {
-		ledValue[i] = false;
-		std::string name = getLedName(static_cast<Led>(i));
-		ledStatus[i] = std::make_unique<ReadOnlySetting>(
-			commandController, "led_" + name,
-			"Current status for LED: " + name,
+	, ledStatus(generate_array<NUM_LEDS>([&](auto i) {
+		return ReadOnlySetting(
+			commandController,
+			tmpStrCat("led_", getLedName(static_cast<Led>(i))),
+			"Current status for LED",
 			TclObject("off"));
-	}
+	}))
+	, lastTime(Timer::getTime())
+{
+	ranges::fill(ledValue, false);
 }
-
-LedStatus::~LedStatus() = default;
 
 void LedStatus::setLed(Led led, bool status)
 {
@@ -59,20 +61,17 @@ void LedStatus::setLed(Led led, bool status)
 	}
 }
 
-void LedStatus::handleEvent(Led led)
+void LedStatus::handleEvent(Led led) noexcept
 {
-	static const string_view ON  = "on";
-	static const string_view OFF = "off";
-	const string_view& str = ledValue[led] ? ON : OFF;
-
-	ledStatus[led]->setReadOnlyValue(TclObject(str));
-	msxCliComm.update(CliComm::LED, getLedName(led), str);
+	std::string_view str = ledValue[led] ? "on": "off";
+	ledStatus[led].setReadOnlyValue(TclObject(str));
+	msxCliComm.updateFiltered(CliComm::LED, getLedName(led), str);
 }
 
 void LedStatus::executeRT()
 {
-	for (int i = 0; i < NUM_LEDS; ++i) {
-		if (ledValue[i] != ledStatus[i]->getValue().getBoolean(interp)) {
+	for (auto i : xrange(int(NUM_LEDS))) {
+		if (ledValue[i] != ledStatus[i].getValue().getBoolean(interp)) {
 			handleEvent(static_cast<Led>(i));
 		}
 	}

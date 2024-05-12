@@ -14,26 +14,23 @@
 #include "RomKonamiSCC.hh"
 #include "CacheLine.hh"
 #include "MSXMotherBoard.hh"
-#include "CliComm.hh"
+#include "MSXCliComm.hh"
 #include "sha1.hh"
 #include "serialize.hh"
+#include "xrange.hh"
 
 namespace openmsx {
-
-// minimal attempt to avoid seeing this warning too often
-static Sha1Sum alreadyWarnedForSha1Sum;
 
 RomKonamiSCC::RomKonamiSCC(const DeviceConfig& config, Rom&& rom_)
 	: Rom8kBBlocks(config, std::move(rom_))
 	, scc("SCC", config, getCurrentTime())
 {
 	// warn if a ROM is used that would not work on a real KonamiSCC mapper
-	if ((rom.getSize() > 512 * 1024) && alreadyWarnedForSha1Sum != rom.getOriginalSHA1()) {
+	if (rom.size() > 512 * 1024) {
 		getMotherBoard().getMSXCliComm().printWarning(
 			"The size of this ROM image is larger than 512kB, "
 			"which is not supported on real Konami SCC mapper "
 			"chips!");
-		alreadyWarnedForSha1Sum = rom.getOriginalSHA1();
 	}
 	powerUp(getCurrentTime());
 }
@@ -44,15 +41,27 @@ void RomKonamiSCC::powerUp(EmuTime::param time)
 	reset(time);
 }
 
+void RomKonamiSCC::bankSwitch(unsigned page, unsigned block)
+{
+	setRom(page, block);
+
+	// Note: the mirror behavior is different from RomKonami !
+	if (page == 2 || page == 3) {
+		// [0x4000-0x8000), mirrored in [0xC000-0x10000)
+		setRom(page + 4, block);
+	} else if (page == 4 || page == 5) {
+		// [0x8000-0xC000), mirrored in [0x0000-0x4000)
+		setRom(page - 4, block);
+	} else {
+		assert(false);
+	}
+}
+
 void RomKonamiSCC::reset(EmuTime::param time)
 {
-	setUnmapped(0);
-	setUnmapped(1);
-	for (int i = 2; i < 6; i++) {
-		setRom(i, i - 2);
+	for (auto i : xrange(2, 6)) {
+		bankSwitch(i, i - 2);
 	}
-	setUnmapped(6);
-	setUnmapped(7);
 
 	sccEnabled = false;
 	scc.reset(time);
@@ -61,7 +70,7 @@ void RomKonamiSCC::reset(EmuTime::param time)
 byte RomKonamiSCC::peekMem(word address, EmuTime::param time) const
 {
 	if (sccEnabled && (0x9800 <= address) && (address < 0xA000)) {
-		return scc.peekMem(address & 0xFF, time);
+		return scc.peekMem(narrow_cast<uint8_t>(address & 0xFF), time);
 	} else {
 		return Rom8kBBlocks::peekMem(address, time);
 	}
@@ -70,7 +79,7 @@ byte RomKonamiSCC::peekMem(word address, EmuTime::param time) const
 byte RomKonamiSCC::readMem(word address, EmuTime::param time)
 {
 	if (sccEnabled && (0x9800 <= address) && (address < 0xA000)) {
-		return scc.readMem(address & 0xFF, time);
+		return scc.readMem(narrow_cast<uint8_t>(address & 0xFF), time);
 	} else {
 		return Rom8kBBlocks::readMem(address, time);
 	}
@@ -93,24 +102,31 @@ void RomKonamiSCC::writeMem(word address, byte value, EmuTime::param time)
 	}
 	if (sccEnabled && (0x9800 <= address) && (address < 0xA000)) {
 		// write to SCC
-		scc.writeMem(address & 0xFF, value, time);
+		scc.writeMem(narrow_cast<uint8_t>(address & 0xFF), value, time);
 		return;
 	}
 	if ((address & 0xF800) == 0x9000) {
 		// SCC enable/disable
-		sccEnabled = ((value & 0x3F) == 0x3F);
-		invalidateMemCache(0x9800, 0x0800);
+		bool newSccEnabled = ((value & 0x3F) == 0x3F);
+		if (newSccEnabled != sccEnabled) {
+			sccEnabled = newSccEnabled;
+			invalidateDeviceRWCache(0x9800, 0x0800);
+		}
 	}
 	if ((address & 0x1800) == 0x1000) {
 		// page selection
-		setRom(address >> 13, value);
+		auto region = address >> 13;
+		bankSwitch(region, value);
+		if ((region == 4) && sccEnabled) {
+			invalidateDeviceRCache(0x9800, 0x0800);
+		}
 	}
 }
 
 byte* RomKonamiSCC::getWriteCacheLine(word address) const
 {
 	if ((address < 0x5000) || (address >= 0xC000)) {
-		return unmappedWrite;
+		return unmappedWrite.data();
 	} else if (sccEnabled && (0x9800 <= address) && (address < 0xA000)) {
 		// write to SCC
 		return nullptr;
@@ -121,7 +137,7 @@ byte* RomKonamiSCC::getWriteCacheLine(word address) const
 		// page selection
 		return nullptr;
 	} else {
-		return unmappedWrite;
+		return unmappedWrite.data();
 	}
 }
 
@@ -129,8 +145,8 @@ template<typename Archive>
 void RomKonamiSCC::serialize(Archive& ar, unsigned /*version*/)
 {
 	ar.template serializeBase<Rom8kBBlocks>(*this);
-	ar.serialize("scc", scc);
-	ar.serialize("sccEnabled", sccEnabled);
+	ar.serialize("scc",        scc,
+	             "sccEnabled", sccEnabled);
 }
 INSTANTIATE_SERIALIZE_METHODS(RomKonamiSCC);
 REGISTER_MSXDEVICE(RomKonamiSCC, "RomKonamiSCC");

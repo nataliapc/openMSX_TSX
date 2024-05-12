@@ -1,16 +1,15 @@
 #include "BlipBuffer.hh"
 #include "cstd.hh"
-#include "likely.hh"
+#include "Math.hh"
+#include "narrow.hh"
+#include "ranges.hh"
+#include "xrange.hh"
 #include <algorithm>
-#include <cstring>
+#include <array>
 #include <cassert>
 #include <iostream>
 
 namespace openmsx {
-
-// The input sample stream can only use this many bits out of the available 32
-// bits. So 29 bits means the sample values must be in range [-256M, 256M].
-static constexpr int BLIP_SAMPLE_BITS = 29;
 
 // Number of samples in a (pre-calculated) impulse-response wave-form.
 static constexpr int BLIP_IMPULSE_WIDTH = 16;
@@ -19,182 +18,160 @@ static constexpr int BLIP_IMPULSE_WIDTH = 16;
 static constexpr int BLIP_RES = 1 << BlipBuffer::BLIP_PHASE_BITS;
 
 
-#if defined(__GNUC__) && (__GNUC__ < 6)
-  // gcc-5.5 fails to compile the calcImpulses() code below when we use
-  // constexpr, it works with gcc-6.
-  // TODO require gcc-6 for the next release and drop this workaround.
-  #define BLIP_CONSTEXPR
-#else
-  #define BLIP_CONSTEXPR CONSTEXPR
-#endif
-
 // Precalculated impulse table.
-struct Impulses {
-	int a[BLIP_RES][BLIP_IMPULSE_WIDTH];
-};
-static BLIP_CONSTEXPR Impulses calcImpulses()
-{
+static constexpr auto impulses = [] {
 	constexpr int HALF_SIZE = BLIP_RES / 2 * (BLIP_IMPULSE_WIDTH - 1);
-	double fimpulse[HALF_SIZE + 2 * BLIP_RES] = {};
-	double* out = &fimpulse[BLIP_RES];
+	std::array<double, BLIP_RES + HALF_SIZE + BLIP_RES> fImpulse = {};
+	std::span<double, HALF_SIZE> out = subspan<HALF_SIZE>(fImpulse, BLIP_RES);
+	std::span<double, BLIP_RES>  end = subspan<BLIP_RES >(fImpulse, BLIP_RES + HALF_SIZE);
 
 	// generate sinc, apply hamming window
-	double oversample = ((4.5 / (BLIP_IMPULSE_WIDTH - 1)) + 0.85);
-	double to_angle = M_PI / (2.0 * oversample * BLIP_RES);
-	double to_fraction = M_PI / (2 * (HALF_SIZE - 1));
-	for (int i = 0; i < HALF_SIZE; ++i) {
+	double overSample = ((4.5 / (BLIP_IMPULSE_WIDTH - 1)) + 0.85);
+	double to_angle = Math::pi / (2.0 * overSample * BLIP_RES);
+	double to_fraction = Math::pi / (2 * (HALF_SIZE - 1));
+	for (auto i : xrange(HALF_SIZE)) {
 		double angle = ((i - HALF_SIZE) * 2 + 1) * to_angle;
 		out[i] = cstd::sin<2>(angle) / angle;
 		out[i] *= 0.54 - 0.46 * cstd::cos<2>((2 * i + 1) * to_fraction);
 	}
 
 	// need mirror slightly past center for calculation
-	for (int i = 0; i < BLIP_RES; ++i) {
-		out[HALF_SIZE + i] = out[HALF_SIZE - 1 - i];
+	for (auto i : xrange(BLIP_RES)) {
+		end[i] = out[HALF_SIZE - 1 - i];
 	}
 
 	// find rescale factor
 	double total = 0.0;
-	for (int i = 0; i < HALF_SIZE; ++i) {
+	for (auto i : xrange(HALF_SIZE)) {
 		total += out[i];
 	}
-	int kernelUnit = 1 << (BLIP_SAMPLE_BITS - 16);
-	double rescale = kernelUnit / (2.0 * total);
+	double rescale = 1.0 / (2.0 * total);
 
-	// integrate, first difference, rescale, convert to int
+	// integrate, first difference, rescale, convert to float
 	constexpr int IMPULSES_SIZE = BLIP_RES * (BLIP_IMPULSE_WIDTH / 2) + 1;
-	int imp[IMPULSES_SIZE] = {};
+	std::array<float, IMPULSES_SIZE> imp = {};
 	double sum = 0.0;
 	double next = 0.0;
-	for (int i = 0; i < IMPULSES_SIZE; ++i) {
-		imp[i] = cstd::round((next - sum) * rescale);
-		sum += fimpulse[i];
-		next += fimpulse[i + BLIP_RES];
+	for (auto i : xrange(IMPULSES_SIZE)) {
+		imp[i] = float((next - sum) * rescale);
+		sum += fImpulse[i];
+		next += fImpulse[i + BLIP_RES];
 	}
-
-	// sum pairs for each phase and add error correction to end of first half
-	for (int p = BLIP_RES; p-- >= BLIP_RES / 2; /**/) {
-		int p2 = BLIP_RES - 2 - p;
-		int error = kernelUnit;
-		for (int i = 1; i < IMPULSES_SIZE; i += BLIP_RES) {
-			error -= imp[i + p ];
-			error -= imp[i + p2];
-		}
-		if (p == p2) {
-			// phase = 0.5 impulse uses same half for both sides
-			error /= 2;
-		}
-		imp[IMPULSES_SIZE - BLIP_RES + p] += error;
-	}
+	// Original code would now apply a correction on each kernel so that
+	// the (integer) coefficients sum up to 'kernelUnit'. I've measured
+	// that after switching to float coefficients this correction is
+	// roughly equal to std::numeric_limits<float>::epsilon(). So it's no
+	// longer meaningful.
 
 	// reshuffle values to a more cache friendly order
-	Impulses impulses = {};
-	for (int phase = 0; phase < BLIP_RES; ++phase) {
-		const int* imp_fwd = &imp[BLIP_RES - phase];
-		const int* imp_rev = &imp[phase];
-		int* p = impulses.a[phase];
-		for (int i = 0; i < BLIP_IMPULSE_WIDTH / 2; ++i) {
+	std::array<std::array<float, BLIP_IMPULSE_WIDTH>, BLIP_RES> result = {};
+	for (auto phase : xrange(BLIP_RES)) {
+		const auto* imp_fwd = &imp[BLIP_RES - phase];
+		const auto* imp_rev = &imp[phase];
+		auto* p = result[phase].data();
+		for (size_t i : xrange(BLIP_IMPULSE_WIDTH / 2)) {
 			*p++ = imp_fwd[BLIP_RES * i];
 		}
-		for (int i = BLIP_IMPULSE_WIDTH / 2 - 1; i >= 0; --i) {
+		for (ptrdiff_t i = BLIP_IMPULSE_WIDTH / 2 - 1; i >= 0; --i) {
 			*p++ = imp_rev[BLIP_RES * i];
 		}
 	}
-	return impulses;
-}
-static BLIP_CONSTEXPR Impulses impulses = calcImpulses();
+	return result;
+}();
 
 
 BlipBuffer::BlipBuffer()
 {
-	if (0) {
-		for (int i = 0; i < BLIP_RES; ++i) {
-			std::cout << "\t{ " << impulses.a[i][0];
-			for (int j = 1; j < BLIP_IMPULSE_WIDTH; ++j) {
-				std::cout << ", " << impulses.a[i][j];
+	if (false) {
+		for (auto i : xrange(BLIP_RES)) {
+			std::cout << "\t{ " << impulses[i][0];
+			for (auto j : xrange(1, BLIP_IMPULSE_WIDTH)) {
+				std::cout << ", " << impulses[i][j];
 			}
 			std::cout << " },\n";
 		}
 	}
 
-	offset = 0;
-	accum = 0;
-	availSamp = 0;
-	memset(buffer, 0, sizeof(buffer));
+	ranges::fill(buffer, 0);
 }
 
-void BlipBuffer::addDelta(TimeIndex time, int delta)
+void BlipBuffer::addDelta(TimeIndex time, float delta)
 {
 	unsigned tmp = time.toInt() + BLIP_IMPULSE_WIDTH;
 	assert(tmp < BUFFER_SIZE);
-	availSamp = std::max<int>(availSamp, tmp);
+	availSamp = std::max(availSamp, narrow<ptrdiff_t>(tmp));
 
-	unsigned phase = time.fractAsInt();
-	unsigned ofst = time.toInt() + offset;
-	if (likely((ofst + BLIP_IMPULSE_WIDTH) <= BUFFER_SIZE)) {
-		for (int i = 0; i < BLIP_IMPULSE_WIDTH; ++i) {
-			buffer[ofst + i] += impulses.a[phase][i] * delta;
+	auto phase = time.fractAsInt();
+	auto ofst = time.toInt() + offset;
+	const float* __restrict impulse = impulses[phase].data();
+	if ((ofst + BLIP_IMPULSE_WIDTH) <= BUFFER_SIZE) [[likely]] {
+		float* __restrict result = &buffer[ofst];
+		for (auto i : xrange(BLIP_IMPULSE_WIDTH)) {
+			result[i] += impulse[i] * delta;
 		}
 	} else {
-		for (int i = 0; i < BLIP_IMPULSE_WIDTH; ++i) {
-			buffer[(ofst + i) & BUFFER_MASK] += impulses.a[phase][i] * delta;
+		for (auto i : xrange(BLIP_IMPULSE_WIDTH)) {
+			buffer[(ofst + i) & BUFFER_MASK] += impulse[i] * delta;
 		}
 	}
 }
 
-static const int SAMPLE_SHIFT = BLIP_SAMPLE_BITS - 16;
-static const int BASS_SHIFT = 9;
+static constexpr float BASS_FACTOR = 511.0f / 512.0f;
 
-template<unsigned PITCH>
-void BlipBuffer::readSamplesHelper(int* __restrict out, unsigned samples) __restrict
+template<size_t PITCH>
+void BlipBuffer::readSamplesHelper(float* __restrict out, size_t samples)
 {
 	assert((offset + samples) <= BUFFER_SIZE);
-	int acc = accum;
-	unsigned ofst = offset;
-	for (unsigned i = 0; i < samples; ++i) {
-		out[i * PITCH] = acc >> SAMPLE_SHIFT;
-		// Note: the following has different rounding behaviour
-		//  for positive and negative numbers! The original
-		//  code used 'acc / (1<< BASS_SHIFT)' to avoid this,
-		//  but it generates less efficient code.
-		acc -= (acc >> BASS_SHIFT);
+	auto acc = accum;
+	auto ofst = offset;
+	for (auto i : xrange(samples)) {
+		out[i * PITCH] = acc;
+		acc *= BASS_FACTOR;
 		acc += buffer[ofst];
-		buffer[ofst] = 0;
+		buffer[ofst] = 0.0f;
 		++ofst;
 	}
 	accum = acc;
 	offset = ofst & BUFFER_MASK;
 }
 
-template <unsigned PITCH>
-bool BlipBuffer::readSamples(int* __restrict out, unsigned samples)
+static bool isSilent(float x)
+{
+	// 'accum' falls away slowly (via BASS_FACTOR). Because it's a float it
+	// takes a long time before it's really zero. But much sooner we can
+	// already say it's practically silent. This check is safe when the
+	// input is in range [-1..+1] (does not say silent too soon). When the
+	// input is in range [-32768..+32767] it takes longer before we switch
+	// to silent mode (but still less than a second).
+	constexpr float threshold = 1.0f / 32768;
+	return std::abs(x) < threshold;
+}
+
+// TODO replace 'out + samples + PITCH' with 'stride_view' ???
+template<size_t PITCH>
+bool BlipBuffer::readSamples(float* __restrict out, size_t samples)
 {
 	if (availSamp <= 0) {
 		#ifdef DEBUG
 		// buffer contains all zeros (only check this in debug mode)
-		for (unsigned i = 0; i < BUFFER_SIZE; ++i) {
-			assert(buffer[i] == 0);
-		}
+		assert(ranges::all_of(buffer, [](const auto& b) { return b == 0.0f; }));
 		#endif
-		if (accum == 0) {
-			// muted
-			return false;
+		if (isSilent(accum)) {
+			return false; // muted
 		}
-		int acc = accum;
-		for (unsigned i = 0; i < samples; ++i) {
-			out[i * PITCH] = acc >> SAMPLE_SHIFT;
-			// See note about rounding above.
-			acc -= (acc >> BASS_SHIFT);
-			acc -= (acc > 0) ? 1 : 0; // make sure acc eventually goes to zero
+		auto acc = accum;
+		for (auto i : xrange(samples)) {
+			out[i * PITCH] = acc;
+			acc *= BASS_FACTOR;
 		}
 		accum = acc;
 	} else {
-		availSamp -= samples;
-		unsigned t1 = std::min(samples, BUFFER_SIZE - offset);
+		availSamp -= narrow<ptrdiff_t>(samples);
+		auto t1 = std::min(samples, BUFFER_SIZE - offset);
 		readSamplesHelper<PITCH>(out, t1);
 		if (t1 < samples) {
 			assert(offset == 0);
-			unsigned t2 = samples - t1;
+			auto t2 = samples - t1;
 			assert(t2 < BUFFER_SIZE);
 			readSamplesHelper<PITCH>(&out[t1 * PITCH], t2);
 		}
@@ -203,7 +180,7 @@ bool BlipBuffer::readSamples(int* __restrict out, unsigned samples)
 	return true;
 }
 
-template bool BlipBuffer::readSamples<1>(int*, unsigned);
-template bool BlipBuffer::readSamples<2>(int*, unsigned);
+template bool BlipBuffer::readSamples<1>(float*, size_t);
+template bool BlipBuffer::readSamples<2>(float*, size_t);
 
 } // namespace openmsx

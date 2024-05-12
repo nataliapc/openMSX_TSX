@@ -6,11 +6,11 @@ namespace openmsx {
 class VideoSystemChangeListener
 {
 public:
-	virtual void preVideoSystemChange() = 0;
-	virtual void postVideoSystemChange() = 0;
+	virtual void preVideoSystemChange() noexcept = 0;
+	virtual void postVideoSystemChange() noexcept = 0;
 
 protected:
-	~VideoSystemChangeListener() {}
+	~VideoSystemChangeListener() = default;
 };
 
 } // namespace openmsx

@@ -3,38 +3,39 @@
 #include "FileOperations.hh"
 #include "IntegerSetting.hh"
 #include "MSXMotherBoard.hh"
-#include "CliComm.hh"
+#include "MSXCliComm.hh"
 #include "MSXException.hh"
 #include "Math.hh"
-#include "MemBuffer.hh"
 #include "serialize.hh"
 #include "vla.hh"
+#include "xrange.hh"
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
-#include <cstring>
 #include <memory>
 #include <vector>
-
-using std::max;
-using std::min;
-using std::string;
 
 namespace openmsx {
 
 class Paper
 {
 public:
+	static constexpr std::string_view PRINT_DIR = "prints";
+	static constexpr std::string_view PRINT_EXTENSION = ".png";
+
+public:
 	Paper(unsigned x, unsigned y, double dotSizeX, double dotSizeY);
 
-	std::string save() const;
+	[[nodiscard]] std::string save() const;
 	void setDotSize(double sizeX, double sizeY);
 	void plot(double x, double y);
 
 private:
-	byte& dot(unsigned x, unsigned y);
+	uint8_t& dot(unsigned x, unsigned y);
 
-	MemBuffer<byte> buf;
+private:
+	std::vector<uint8_t> buf;
 	std::vector<int> table;
 
 	double radiusX;
@@ -60,7 +61,7 @@ void PrinterCore::setStrobe(bool strobe, EmuTime::param /*time*/)
 	prevStrobe = strobe;
 }
 
-void PrinterCore::writeData(byte data, EmuTime::param /*time*/)
+void PrinterCore::writeData(uint8_t data, EmuTime::param /*time*/)
 {
 	toPrint = data;
 }
@@ -76,78 +77,17 @@ void PrinterCore::unplugHelper(EmuTime::param /*time*/)
 }
 
 
-/*
-// class RawPrinter
-
-RawPrinter::RawPrinter()
-{
-	Properties* properties = propGetGlobalProperties();
-	hFile = CreateFile(properties->ports.Lpt.portName, GENERIC_WRITE,
-	                   0, nullptr, OPEN_EXISTING, FILE_FLAG_WRITE_THROUGH, nullptr);
-	if (hFile == INVALID_HANDLE_VALUE) {
-		throw MSXException();
-	}
-}
-
-void RawPrinter::~RawPrinter()
-{
-	CloseHandle(hFile);
-}
-
-void RawPrinter::write(byte value)
-{
-	unsigned dwWritten;
-	WriteFile(hFile, &value, 1, &dwWritten, nullptr);
-}
-
-void RawPrinter::forceFormFeed()
-{
-}
-*/
-
-
 // class ImagePrinter
 
 ImagePrinter::ImagePrinter(MSXMotherBoard& motherBoard_, bool graphicsHiLo_)
 	: motherBoard(motherBoard_)
-	, graphicsHiLo(graphicsHiLo_)
-{
-	dpiSetting = motherBoard.getSharedStuff<IntegerSetting>(
+	, dpiSetting(motherBoard.getSharedStuff<IntegerSetting>(
 		"print-resolution",
 		motherBoard.getCommandController(), "print-resolution",
 		"resolution of the output image of emulated dot matrix printer in DPI",
-		300, 72, 1200);
-
-	letterQuality = false;
-	bold = false;
-	proportional = false;
-	italic = false;
-	superscript = false;
-	subscript = false;
-	doubleWidth = false;
-	underline = false;
-	doubleStrike = false;
-	escSequence = false;
-	alternateChar = false;
-	detectPaperOut = false;
-	japanese = false;
-	normalAfterLine = false;
-	ninePinGraphics = false;
-	leftToRight = false;
-	elite = false;
-	compressed = false;
-	noHighEscapeCodes = false;
-	eightBit = 0;
-	perforationSkip = 0;
-	remainingCommandBytes = 0;
-	sizeEscPos = 0;
-	sizeRemainingDataBytes = 0;
-	ramLoadOffset = 0;
-	ramLoadEnd = 0;
-	countryCode = CC_USA;
-
-	printAreaTop = -1.0;
-	printAreaBottom = 0.0;
+		300, 72, 1200))
+	, graphicsHiLo(graphicsHiLo_)
+{
 }
 
 ImagePrinter::~ImagePrinter()
@@ -155,7 +95,7 @@ ImagePrinter::~ImagePrinter()
 	flushEmulatedPrinter();
 }
 
-void ImagePrinter::write(byte data)
+void ImagePrinter::write(uint8_t data)
 {
 	if (ramLoadOffset < ramLoadEnd) {
 		fontInfo.ram[ramLoadOffset++] = data;
@@ -170,8 +110,8 @@ void ImagePrinter::write(byte data)
 	} else if (escSequence) {
 		escSequence = false;
 
-		memset(&(abEscSeq), 0, sizeof(abEscSeq));
-		*(abEscSeq) = data;
+		ranges::fill(abEscSeq, 0);
+		abEscSeq[0] = data;
 		sizeEscPos = 1;
 
 		remainingCommandBytes = calcEscSequenceLength(data);
@@ -206,14 +146,14 @@ void ImagePrinter::resetEmulatedPrinter()
 
 void ImagePrinter::plot9Dots(double x, double y, unsigned pattern)
 {
-	for (int i = 0; i < 9; ++i) {
+	for (auto i : xrange(9)) {
 		if (pattern & (1 << i)) {
 			paper->plot(x, y + (8 - i) * pixelSizeY);
 		}
 	}
 }
 
-void ImagePrinter::printGraphicByte(byte data)
+void ImagePrinter::printGraphicByte(uint8_t data)
 {
 	ensurePrintPage();
 
@@ -223,8 +163,8 @@ void ImagePrinter::printGraphicByte(byte data)
 	// Print Data to high 8 bits
 	unsigned charBits = (graphicsHiLo ? Math::reverseByte(data) : data) << 1;
 
-	printAreaTop    = min(printAreaTop, destY);
-	printAreaBottom = max(printAreaBottom, destY + destHeight);
+	printAreaTop    = std::min(printAreaTop, destY);
+	printAreaBottom = std::max(printAreaBottom, destY + destHeight);
 
 	// Print bit-mask
 	plot9Dots(hpos * pixelSizeX, destY, charBits);
@@ -255,8 +195,7 @@ void ImagePrinter::ensurePrintPage()
 		auto paperSizeX = unsigned((210 / 25.4) * dpi);
 		auto paperSizeY = unsigned((297 / 25.4) * dpi);
 
-		unsigned dotsX, dotsY;
-		getNumberOfDots(dotsX, dotsY);
+		auto [dotsX, dotsY] = getNumberOfDots();
 		pixelSizeX = double(paperSizeX) / dotsX;
 		pixelSizeY = double(paperSizeY) / dotsY;
 
@@ -270,7 +209,7 @@ void ImagePrinter::flushEmulatedPrinter()
 	if (paper) {
 		if (printAreaBottom > printAreaTop) {
 			try {
-				string filename = paper->save();
+				auto filename = paper->save();
 				motherBoard.getMSXCliComm().printInfo(
 					"Printed to ", filename);
 			} catch (MSXException& e) {
@@ -286,24 +225,24 @@ void ImagePrinter::flushEmulatedPrinter()
 	vpos = pageTop;
 }
 
-static unsigned compress9(unsigned a)
+static constexpr unsigned compress9(unsigned a)
 {
 	unsigned result = 0;
-	for (unsigned i = 0; i < 9; ++i) {
+	for (auto i : xrange(9)) {
 		if (a & (1 << i)) {
 			result |= 1 << (i / 2);
 		}
 	}
 	return result;
 }
-void ImagePrinter::printVisibleCharacter(byte data)
+void ImagePrinter::printVisibleCharacter(uint8_t data)
 {
 	ensurePrintPage();
 
 	double iYPos = 0;
-	byte* charBitmap = (fontInfo.useRam ? fontInfo.ram : fontInfo.rom)
-	                 + fontInfo.charWidth * data;
-	byte attribute = charBitmap[0];
+	std::span mem = fontInfo.useRam ? fontInfo.ram : fontInfo.rom;
+	std::span charBitmap = subspan(mem, fontInfo.charWidth * data, fontInfo.charWidth);
+	uint8_t attribute = charBitmap[0];
 	unsigned start = (attribute >> 4) & 0x07;
 	unsigned end = attribute & 0x0f;
 	unsigned topBits = attribute >> 7;
@@ -326,11 +265,11 @@ void ImagePrinter::printVisibleCharacter(byte data)
 
 	double destY = vpos * pixelSizeY + iYPos;
 	double destHeight = pixelSizeY * 9.0;
-	double dblStrikeOffset = doubleStrike ? (pixelSizeY / 2.5) : 0.0;
-	printAreaTop    = min(printAreaTop, destY);
-	printAreaBottom = max(printAreaBottom, destY + destHeight + dblStrikeOffset);
+	double dblStrikeOffset = doubleStrike ? (pixelSizeY * (1.0 / 2.5)) : 0.0;
+	printAreaTop    = std::min(printAreaTop, destY);
+	printAreaBottom = std::max(printAreaBottom, destY + destHeight + dblStrikeOffset);
 
-	for (unsigned i = start; i < end; ++i) {
+	for (auto i : xrange(start, end)) {
 		unsigned charBits = unsigned(charBitmap[i + 1]) << topBits;
 
 		if (underline) {
@@ -340,10 +279,10 @@ void ImagePrinter::printVisibleCharacter(byte data)
 			charBits = compress9(charBits);
 		}
 
-		for (int d = 0; d <= (doubleWidth?1:0); d++) {
-			for (int b = 0; b <= (bold?1:0); ++b) {
-				for (int y = 0; y <= (doubleStrike?1:0); ++y) {
-					double destX = (hPos + (d + b / 2.0) / fontDensity) * pixelSizeX;
+		for (auto d : xrange(doubleWidth ? 2 : 1)) {
+			for (auto b : xrange(bold ? 2 : 1)) {
+				for (auto y : xrange(doubleStrike ? 2: 1)) {
+					double destX = (hPos + (d + b * 0.5) / fontDensity) * pixelSizeX;
 					plot9Dots(destX, destY + y * dblStrikeOffset, charBits);
 				}
 			}
@@ -357,7 +296,7 @@ void ImagePrinter::printVisibleCharacter(byte data)
 // class ImagePrinterMSX
 
 // MSX-Font taken from NMS8250 BIOS ROM
-static const byte MSXFontRaw[256 * 8] = {
+static constexpr std::array<uint8_t, 256 * 8> MSXFontRaw = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // 0
 	0x3C, 0x42, 0xA5, 0x81, 0xA5, 0x99, 0x42, 0x3C,  // 1
 	0x3C, 0x7E, 0xDB, 0xFF, 0xFF, 0xDB, 0x66, 0x3C,  // 2
@@ -616,65 +555,57 @@ static const byte MSXFontRaw[256 * 8] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // 255
 };
 
-static byte MSXFont[256 * 9];
-
-ImagePrinterMSX::ImagePrinterMSX(MSXMotherBoard& motherBoard_)
-	: ImagePrinter(motherBoard_, true)
-{
-	msxPrnSetFont(MSXFontRaw);
-	resetEmulatedPrinter();
-}
-
-const string& ImagePrinterMSX::getName() const
-{
-	static const string name("msx-printer");
-	return name;
-}
-
-string_view ImagePrinterMSX::getDescription() const
-{
-	// TODO which printer type
-	return "Emulate MSX printer, prints to image.";
-}
-
-void ImagePrinterMSX::msxPrnSetFont(const byte* msxBits)
-{
-	// Convert MSX printer font to Epson printer font
-	byte* font = MSXFont;
-
-	for (int i = 0; i < 256; ++i) {
-		byte oneBits = 0;
+// Convert MSX printer font to Epson printer font
+static constexpr auto MSXFont = []{
+	std::array<uint8_t, 256 * 9> result = {};
+	for (auto i : xrange(256)) {
+		uint8_t oneBits = 0;
 		int start = -1;
 		int end = 0;
 
 		// Rotate MSX character
-		for (int j = 0; j < 8; ++j) {
-			byte charBits = 0;
-			for (int k = 0; k < 8; ++k) {
-				charBits |= ((msxBits[7 - k] >> (7 - j)) & 1) << k;
+		for (auto j : xrange(8)) {
+			uint8_t charBits = 0;
+			for (auto k : xrange(8)) {
+				charBits |= uint8_t(((MSXFontRaw[8 * i + 7 - k] >> (7 - j)) & 1) << k);
 			}
 
 			oneBits |= charBits;
 			if (oneBits  != 0 && start < 0) start = j;
 			if (charBits != 0) end = j;
-			font[j + 1] = charBits;
+			result[9 * i + j + 1] = charBits;
 		}
 
 		end = end + 1;
 		if (start < 0 || start >= 7) start = 0;
 		if (end == 1) end = 5;
 		if (end >= 7) end = 7;
-		font[0] = (start << 4) | end;
-
-		font    += 9;
-		msxBits += 8;
+		result[9 * i] = uint8_t((start << 4) | end);
 	}
+	return result;
+}();
+
+
+ImagePrinterMSX::ImagePrinterMSX(MSXMotherBoard& motherBoard_)
+	: ImagePrinter(motherBoard_, true)
+{
+	resetEmulatedPrinter();
 }
 
-void ImagePrinterMSX::getNumberOfDots(unsigned& dotsX, unsigned& dotsY)
+std::string_view ImagePrinterMSX::getName() const
 {
-	dotsX = 825;
-	dotsY = 825;
+	return "msx-printer";
+}
+
+std::string_view ImagePrinterMSX::getDescription() const
+{
+	// TODO which printer type
+	return "Emulate MSX printer, prints to image.";
+}
+
+std::pair<unsigned, unsigned> ImagePrinterMSX::getNumberOfDots()
+{
+	return {825, 825};
 }
 
 void ImagePrinterMSX::resetSettings()
@@ -690,14 +621,14 @@ void ImagePrinterMSX::resetSettings()
 	eightBit     = -1;
 
 	// note: this only overwrites 9/12 of the fontInfo.rom array.
-	memcpy(fontInfo.rom, MSXFont, sizeof(MSXFont));
+	ranges::copy(MSXFont, fontInfo.rom);
 	fontInfo.charWidth = 9;
 	fontInfo.pixelDelta = 1.0;
 	fontInfo.useRam = false;
 }
 
 
-unsigned ImagePrinterMSX::calcEscSequenceLength(byte character)
+unsigned ImagePrinterMSX::calcEscSequenceLength(uint8_t character)
 {
 	switch (character) {
 		case 'C':
@@ -720,7 +651,7 @@ unsigned ImagePrinterMSX::parseNumber(unsigned sizeStart, unsigned sizeChars)
 	unsigned Value = 0;
 	while (sizeChars--) {
 		Value = Value * 10;
-		byte data = abEscSeq[sizeStart++];
+		uint8_t data = abEscSeq[sizeStart++];
 		if (data >= '0' && data <= '9') {
 			Value += unsigned(data - '0');
 		}
@@ -816,10 +747,10 @@ void ImagePrinterMSX::processEscSequence()
 			lineFeed = 8.0;
 			break;
 		case 'T': // ???: Line-feed nn/144"
-			lineFeed = parseNumber(1, 2) / 2.0;
+			lineFeed = parseNumber(1, 2) * (1.0 / 2.0);
 			break;
 		case 'Z': // ???: Line-feed nn/216"
-			lineFeed = parseNumber(1, 2) / 3.0;
+			lineFeed = parseNumber(1, 2) * (1.0 / 3.0);
 			break;
 		case '[': // ???: Uni-directional printing
 			break;
@@ -840,7 +771,7 @@ void ImagePrinterMSX::processEscSequence()
 			rightBorder = parseNumber(1, 3);
 			break;
 		case 'G':
-			graphDensity = parseNumber(1, 3) / 100.0;
+			graphDensity = parseNumber(1, 3) * (1.0 / 100.0);
 			if (graphDensity < 0.1) {
 				graphDensity = 0.1;
 			}
@@ -866,7 +797,7 @@ void ImagePrinterMSX::processEscSequence()
 	}
 }
 
-void ImagePrinterMSX::processCharacter(byte data)
+void ImagePrinterMSX::processCharacter(uint8_t data)
 {
 	if (alternateChar) {
 		// Print SOH-preceded character
@@ -874,7 +805,7 @@ void ImagePrinterMSX::processCharacter(byte data)
 		alternateChar = false;
 	} else {
 		switch (data) {
-			case 1: // SOH: A symbolcode preceding code
+			case 1: // SOH: A symbol code preceding code
 				alternateChar = true;
 				break;
 			case 7: // BEL: Audible beep (buzzer, 0.3s)
@@ -894,7 +825,7 @@ void ImagePrinterMSX::processCharacter(byte data)
 					break;
 				}
 				hpos = leftBorder;
-				// fall-through
+				[[fallthrough]];
 			case 10: // LF: Carriage return + Line feed
 			case 11: // VT: Vertical tabulator (like LF)
 				//hpos = leftBorder;
@@ -940,7 +871,7 @@ REGISTER_POLYMORPHIC_INITIALIZER(Pluggable, ImagePrinterMSX, "ImagePrinterMSX");
 
 // class ImagePrinterEpson
 
-static const byte EpsonFontRom[] = {
+static constexpr std::array<uint8_t, 12 * 256> EpsonFontRom = {
 	0x8b, 0x04, 0x0a, 0x20, 0x8a, 0x60, 0x0a, 0x20, 0x1c, 0x02, 0x00, 0x00, //   0
 	0x8b, 0x1c, 0x22, 0x08, 0xa2, 0x48, 0x22, 0x08, 0x22, 0x18, 0x00, 0x00, //   1
 	0x9b, 0x00, 0x3c, 0x00, 0x82, 0x40, 0x02, 0x00, 0x3c, 0x02, 0x00, 0x00, //   2
@@ -1205,21 +1136,19 @@ ImagePrinterEpson::ImagePrinterEpson(MSXMotherBoard& motherBoard_)
 	resetEmulatedPrinter();
 }
 
-const string& ImagePrinterEpson::getName() const
+std::string_view ImagePrinterEpson::getName() const
 {
-	static const string name("epson-printer");
-	return name;
+	return "epson-printer";
 }
 
-string_view ImagePrinterEpson::getDescription() const
+std::string_view ImagePrinterEpson::getDescription() const
 {
 	return "Emulate Epson FX80 printer, prints to image.";
 }
 
-void ImagePrinterEpson::getNumberOfDots(unsigned& dotsX, unsigned& dotsY)
+std::pair<unsigned, unsigned> ImagePrinterEpson::getNumberOfDots()
 {
-	dotsX = 610;
-	dotsY = 825;
+	return {610, 825};
 }
 
 void ImagePrinterEpson::resetSettings()
@@ -1234,13 +1163,13 @@ void ImagePrinterEpson::resetSettings()
 	fontWidth    = 6;
 	eightBit     = -1;
 
-	memcpy(fontInfo.rom, EpsonFontRom, sizeof(EpsonFontRom));
+	ranges::copy(EpsonFontRom, fontInfo.rom);
 	fontInfo.charWidth = 12;
 	fontInfo.pixelDelta = 0.5;
 	fontInfo.useRam = false;
 }
 
-unsigned ImagePrinterEpson::calcEscSequenceLength(byte character)
+unsigned ImagePrinterEpson::calcEscSequenceLength(uint8_t character)
 {
 	switch (character & 127) {
 		case '!': case '-': case '/': case '3': case 'A': case 'J':
@@ -1274,7 +1203,7 @@ unsigned ImagePrinterEpson::parseNumber(unsigned sizeStart, unsigned sizeChars)
 
 void ImagePrinterEpson::processEscSequence()
 {
-	byte character = abEscSeq[0] & 127;
+	uint8_t character = abEscSeq[0] & 127;
 
 	switch (character) {
 		case '!': { // Master Print Mode Select
@@ -1346,7 +1275,7 @@ void ImagePrinterEpson::processEscSequence()
 			lineFeed = 12.0;
 			break;
 		case '3': // Sets Line Spacing to n/216 inch
-			lineFeed = (parseNumber(1, 1) & 127) / 3.0;
+			lineFeed = (parseNumber(1, 1) & 127) * (1.0 / 3.0);
 			break;
 		case '4': // Turn Italic Mode ON
 			italic = true;
@@ -1367,7 +1296,7 @@ void ImagePrinterEpson::processEscSequence()
 			detectPaperOut = false;
 			break;
 		case ':': // Copies Rom Character set to RAM
-			memcpy(fontInfo.ram, fontInfo.rom, sizeof(fontInfo.ram));
+			ranges::copy(fontInfo.rom, fontInfo.ram);
 			break;
 		case '<': // Turn Uni-directional printing ON (left to right)
 			leftToRight = true;
@@ -1429,7 +1358,7 @@ void ImagePrinterEpson::processEscSequence()
 			alternateChar = parseNumber(1, 1) & 1;
 			break;
 		case 'J': // Forces Line Feed with n/216 inch
-			vpos += (parseNumber(1, 1) & 127) / 3.0;
+			vpos += (parseNumber(1, 1) & 127) * (1.0 / 3.0);
 			if (vpos >= pageHeight) {
 				flushEmulatedPrinter();
 			}
@@ -1457,7 +1386,7 @@ void ImagePrinterEpson::processEscSequence()
 			fontDensity = compressed ? 1.72 : 1.00;
 			break;
 		case 'Q': { // Set Right Margin
-			int width = parseNumber(1, 2);
+			auto width = parseNumber(1, 2);
 			if (width > 78) width = 78; // FIXME Font dependent !!
 			rightBorder = 6 * width;
 			break;
@@ -1469,7 +1398,7 @@ void ImagePrinterEpson::processEscSequence()
 			}
 			break;
 		case 'S': { // Turn Script Mode ON
-			int script = parseNumber(1, 1) & 1;
+			auto script = parseNumber(1, 1) & 1;
 			superscript = script == 0;
 			subscript   = script == 1;
 			break;
@@ -1502,7 +1431,7 @@ void ImagePrinterEpson::processEscSequence()
 		case 'i': // Turn Immediate Mode ON/OFF
 			break;
 		case 'j': // Immediate Reverse Line Feed
-			vpos -= (parseNumber(1, 1) & 127) / 3.0;
+			vpos -= (parseNumber(1, 1) & 127) * (1.0 / 3.0);
 			if (vpos < pageTop) {
 				vpos = pageTop;
 			}
@@ -1520,21 +1449,21 @@ void ImagePrinterEpson::processEscSequence()
 }
 
 // International character code translation for the Epson FX-80 printer
-//                              US   FR   DE   GB   DK   SE   IT   SP   JP
-static byte intlChar35 [9] = {  35,  35,  35,   6,  35,  35,  35,  12,  35 };
-static byte intlChar36 [9] = {  36,  36,  36,  36,  36,  11,  36,  36,  36 };
-static byte intlChar64 [9] = {  64,   0,  16,  64,  64,  29,  64,  64,  64 };
-static byte intlChar91 [9] = {  91,   5,  23,  91,  18,  23,   5,   7,  91 };
-static byte intlChar92 [9] = {  92,  15,  24,  92,  20,  24,  92,   9,  31 };
-static byte intlChar93 [9] = {  93,  16,  25,  93,  13,  13,  30,   8,  93 };
-static byte intlChar94 [9] = {  94,  94,  94,  94,  94,  25,  94,  94,  94 };
-static byte intlChar96 [9] = {  96,  96,  96,  96,  96,  30,   2,  96,  96 };
-static byte intlChar123[9] = { 123,  30,  26, 123,  19,  26,   0,  22, 123 };
-static byte intlChar124[9] = { 124,   2,  27, 124,  21,  27,   3,  10, 124 };
-static byte intlChar125[9] = { 125,   1,  28, 125,  14,  14,   1, 125, 125 };
-static byte intlChar126[9] = { 126,  22,  17, 126, 126,  28,   4, 126, 126 };
+//                                                   US   FR   DE   GB   DK   SE   IT   SP   JP
+static constexpr std::array<uint8_t, 9> intlChar35  = { 35,  35,  35,   6,  35,  35,  35,  12,  35};
+static constexpr std::array<uint8_t, 9> intlChar36  = { 36,  36,  36,  36,  36,  11,  36,  36,  36};
+static constexpr std::array<uint8_t, 9> intlChar64  = { 64,   0,  16,  64,  64,  29,  64,  64,  64};
+static constexpr std::array<uint8_t, 9> intlChar91  = { 91,   5,  23,  91,  18,  23,   5,   7,  91};
+static constexpr std::array<uint8_t, 9> intlChar92  = { 92,  15,  24,  92,  20,  24,  92,   9,  31};
+static constexpr std::array<uint8_t, 9> intlChar93  = { 93,  16,  25,  93,  13,  13,  30,   8,  93};
+static constexpr std::array<uint8_t, 9> intlChar94  = { 94,  94,  94,  94,  94,  25,  94,  94,  94};
+static constexpr std::array<uint8_t, 9> intlChar96  = { 96,  96,  96,  96,  96,  30,   2,  96,  96};
+static constexpr std::array<uint8_t, 9> intlChar123 = {123,  30,  26, 123,  19,  26,   0,  22, 123};
+static constexpr std::array<uint8_t, 9> intlChar124 = {124,   2,  27, 124,  21,  27,   3,  10, 124};
+static constexpr std::array<uint8_t, 9> intlChar125 = {125,   1,  28, 125,  14,  14,   1, 125, 125};
+static constexpr std::array<uint8_t, 9> intlChar126 = {126,  22,  17, 126, 126,  28,   4, 126, 126};
 
-void ImagePrinterEpson::processCharacter(byte data)
+void ImagePrinterEpson::processCharacter(uint8_t data)
 {
 	if (data >= 32) {
 		if (italic) {
@@ -1589,7 +1518,7 @@ void ImagePrinterEpson::processCharacter(byte data)
 				break;
 			}
 			hpos = leftBorder;
-			// fall-through
+			[[fallthrough]];
 		case 10: // Line Feed
 		case 11: // Vertical TAB
 			vpos += lineFeed;
@@ -1608,7 +1537,7 @@ void ImagePrinterEpson::processCharacter(byte data)
 			doubleWidth = true;
 			normalAfterLine = true;
 			break;
-		case 15: // Shift in. Emties buffer, turns compressed mode ON (17.16 cpi)
+		case 15: // Shift in. Empties buffer, turns compressed mode ON (17.16 cpi)
 			compressed = true;
 			if (!elite) {
 				fontDensity = 1.72;
@@ -1650,32 +1579,32 @@ REGISTER_POLYMORPHIC_INITIALIZER(Pluggable, ImagePrinterEpson, "ImagePrinterEpso
 // class Paper
 
 Paper::Paper(unsigned x, unsigned y, double dotSizeX, double dotSizeY)
-	: buf(x * y)
+	: buf(size_t(x) * size_t(y))
 	, sizeX(x), sizeY(y)
 {
-	memset(buf.data(), 255, x * y);
+	ranges::fill(buf, 255);
 	setDotSize(dotSizeX, dotSizeY);
 }
 
-string Paper::save() const
+std::string Paper::save() const
 {
-	string filename = FileOperations::getNextNumberedFileName(
-		"prints", "page", ".png");
-	VLA(const void*, rowPointers, sizeY);
-	for (unsigned y = 0; y < sizeY; ++y) {
+	auto filename = FileOperations::getNextNumberedFileName(
+		PRINT_DIR, "page", PRINT_EXTENSION);
+	VLA(const uint8_t*, rowPointers, sizeY);
+	for (size_t y : xrange(sizeY)) {
 		rowPointers[y] = &buf[sizeX * y];
 	}
-	PNG::saveGrayscale(sizeX, sizeY, rowPointers, filename);
+	PNG::saveGrayscale(sizeX, rowPointers, filename);
 	return filename;
 }
 
 void Paper::setDotSize(double dotSizeX, double dotSizeY)
 {
-	radiusX = dotSizeX / 2.0;
-	radiusY = dotSizeY / 2.0;
+	radiusX = dotSizeX * 0.5;
+	radiusY = dotSizeY * 0.5;
 
-	int rx = int(16 * radiusX);
-	int ry = int(16 * radiusY);
+	auto rx = int(16 * radiusX);
+	auto ry = int(16 * radiusY);
 	radius16 = ry;
 
 	table.clear();
@@ -1732,38 +1661,38 @@ void Paper::setDotSize(double dotSizeX, double dotSizeY)
 
 void Paper::plot(double xPos, double yPos)
 {
-	unsigned xx1 = max<int>(int(floor(xPos - radiusX)), 0);
-	unsigned xx2 = min<int>(int(ceil (xPos + radiusX)), sizeX);
-	unsigned yy1 = max<int>(int(floor(yPos - radiusY)), 0);
-	unsigned yy2 = min<int>(int(ceil (yPos + radiusY)), sizeY);
+	int xx1 = std::max(int(floor(xPos - radiusX)), 0);
+	int xx2 = std::min(int(ceil (xPos + radiusX)), int(sizeX));
+	int yy1 = std::max(int(floor(yPos - radiusY)), 0);
+	int yy2 = std::min(int(ceil (yPos + radiusY)), int(sizeY));
 
 	int y = 16 * yy1 - int(16 * yPos) + 16 + radius16;
-	for (unsigned yy = yy1; yy < yy2; ++yy) {
+	for (auto yy : xrange(yy1, yy2)) {
 		int x = 16 * xx1 - int(16 * xPos);
-		for (unsigned xx = xx1; xx < xx2; ++xx) {
+		for (auto xx : xrange(xx1, xx2)) {
 			int sum = 0;
-			for (int i = 0; i < 16; ++i) {
+			for (auto i : xrange(16)) {
 				int a = table[y + i];
 				if (x < -a) {
 					int t = 16 + a + x;
 					if (t > 0) {
-						sum += min(t, 2 * a);
+						sum += std::min(t, 2 * a);
 					}
 				} else {
 					int t = a - x;
 					if (t > 0) {
-						sum += min(16, t);
+						sum += std::min(16, t);
 					}
 				}
 			}
-			dot(xx, yy) = max(0, dot(xx, yy) - sum);
+			dot(xx, yy) = narrow<uint8_t>(std::max(0, dot(xx, yy) - sum));
 			x += 16;
 		}
 		y += 16;
 	}
 }
 
-byte& Paper::dot(unsigned x, unsigned y)
+uint8_t& Paper::dot(unsigned x, unsigned y)
 {
 	assert(x < sizeX);
 	assert(y < sizeY);

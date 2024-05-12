@@ -16,7 +16,7 @@ namespace openmsx {
 RomAscii16kB::RomAscii16kB(const DeviceConfig& config, Rom&& rom_)
 	: Rom16kBBlocks(config, std::move(rom_))
 {
-	reset(EmuTime::dummy());
+	RomAscii16kB::reset(EmuTime::dummy());
 }
 
 void RomAscii16kB::reset(EmuTime::param /*time*/)
@@ -40,7 +40,7 @@ byte* RomAscii16kB::getWriteCacheLine(word address) const
 	if ((0x6000 <= address) && (address < 0x7800) && !(address & 0x0800)) {
 		return nullptr;
 	} else {
-		return unmappedWrite;
+		return unmappedWrite.data();
 	}
 }
 

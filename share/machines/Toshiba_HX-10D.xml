@@ -6,8 +6,9 @@
     <manufacturer>Toshiba</manufacturer>
     <code>HX-10D</code>
     <release_year></release_year>
-    <description/>
+    <description>First Toshiba MSX, with 64kB RAM.</description>
     <type>MSX</type>
+    <region>jp</region>
   </info>
 
   <!-- Thanks to Ricardo Jurczyk Pinheiro for the information.
@@ -48,15 +49,15 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
       <keyboardlayout>JIS</keyboardlayout>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <primary slot="0">
       <ROM id="MSX BIOS with BASIC ROM">
         <rom>
-          <filename>hx-10_basic-bios1.rom</filename>
+          <filename>hx-10d_basic-bios1.rom</filename>
           <sha1>302afb5d8be26c758309ca3df611ae69cced2821</sha1>
         </rom>
         <mem base="0x0000" size="0x8000"/>

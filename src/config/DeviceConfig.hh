@@ -1,16 +1,17 @@
 #ifndef DEVICECONFIG_HH
 #define DEVICECONFIG_HH
 
-#include "string_view.hh"
 #include <cassert>
+#include <string_view>
 
 namespace openmsx {
 
 class XMLElement;
+class XMLDocument;
 class HardwareConfig;
 class FileContext;
 class MSXMotherBoard;
-class CliComm;
+class MSXCliComm;
 class CommandController;
 class Scheduler;
 class Reactor;
@@ -19,14 +20,9 @@ class GlobalSettings;
 class DeviceConfig
 {
 public:
-	DeviceConfig()
-		: hwConf(nullptr), devConf(nullptr)
-		, primary(nullptr), secondary(nullptr)
-	{
-	}
+	DeviceConfig() = default;
 	DeviceConfig(const HardwareConfig& hwConf_, const XMLElement& devConf_)
 		: hwConf(&hwConf_), devConf(&devConf_)
-		, primary(nullptr), secondary(nullptr)
 	{
 	}
 	DeviceConfig(const HardwareConfig& hwConf_, const XMLElement& devConf_,
@@ -37,59 +33,58 @@ public:
 	}
 	DeviceConfig(const DeviceConfig& other, const XMLElement& devConf_)
 		: hwConf(other.hwConf), devConf(&devConf_)
-		, primary(nullptr), secondary(nullptr)
 	{
 	}
 	DeviceConfig(const DeviceConfig& other, const XMLElement* devConf_)
 		: hwConf(other.hwConf), devConf(devConf_)
-		, primary(nullptr), secondary(nullptr)
 	{
 	}
 
-	const HardwareConfig& getHardwareConfig() const
+	[[nodiscard]] const HardwareConfig& getHardwareConfig() const
 	{
 		assert(hwConf);
 		return *hwConf;
 	}
-	const XMLElement* getXML() const
+	[[nodiscard]] const XMLElement* getXML() const
 	{
 		return devConf;
 	}
-	XMLElement* getPrimary() const
+	[[nodiscard]] XMLElement* getPrimary() const
 	{
 		return const_cast<XMLElement*>(primary);
 	}
-	XMLElement* getSecondary() const
+	[[nodiscard]] XMLElement* getSecondary() const
 	{
 		return const_cast<XMLElement*>(secondary);
 	}
 
 	// convenience methods:
 	//  methods below simply delegate to HardwareConfig or XMLElement
-	const FileContext& getFileContext() const;
-	MSXMotherBoard& getMotherBoard() const;
-	CliComm& getCliComm() const;
-	CommandController& getCommandController() const;
-	Scheduler& getScheduler() const;
-	Reactor& getReactor() const;
-	GlobalSettings& getGlobalSettings() const;
+	[[nodiscard]] const FileContext& getFileContext() const;
+	[[nodiscard]] MSXMotherBoard& getMotherBoard() const;
+	[[nodiscard]] MSXCliComm& getCliComm() const;
+	[[nodiscard]] CommandController& getCommandController() const;
+	[[nodiscard]] Scheduler& getScheduler() const;
+	[[nodiscard]] Reactor& getReactor() const;
+	[[nodiscard]] GlobalSettings& getGlobalSettings() const;
+	[[nodiscard]] XMLDocument& getXMLDocument();
 
-	const XMLElement& getChild(string_view name) const;
-	const std::string& getChildData(string_view name) const;
-	string_view getChildData(string_view name,
-	                        string_view defaultValue) const;
-	int getChildDataAsInt(string_view name, int defaultValue = 0) const;
-	bool getChildDataAsBool(string_view name,
-	                        bool defaultValue = false) const;
-	const XMLElement* findChild(string_view name) const;
-	const std::string& getAttribute(string_view attName) const;
-	int getAttributeAsInt(string_view attName, int defaultValue = 0) const;
+	[[nodiscard]] const XMLElement& getChild(std::string_view name) const;
+	[[nodiscard]] std::string_view getChildData(std::string_view name) const;
+	[[nodiscard]] std::string_view getChildData(std::string_view name,
+	                                            std::string_view defaultValue) const;
+	[[nodiscard]] int getChildDataAsInt(std::string_view name, int defaultValue) const;
+	[[nodiscard]] bool getChildDataAsBool(std::string_view name,
+	                                      bool defaultValue = false) const;
+	[[nodiscard]] const XMLElement* findChild(std::string_view name) const;
+	[[nodiscard]] std::string_view getAttributeValue(std::string_view attName) const;
+	[[nodiscard]] int getAttributeValueAsInt(std::string_view attName, int defaultValue) const;
 
 private:
-	const HardwareConfig* hwConf;
-	const XMLElement* devConf;
-	const XMLElement* primary;
-	const XMLElement* secondary;
+	const HardwareConfig* hwConf = nullptr;
+	const XMLElement* devConf = nullptr;
+	const XMLElement* primary = nullptr;
+	const XMLElement* secondary = nullptr;
 };
 
 } // namespace openmsx

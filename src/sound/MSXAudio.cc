@@ -5,8 +5,6 @@
 #include "serialize.hh"
 #include <memory>
 
-using std::string;
-
 namespace openmsx {
 
 // MSXAudio
@@ -16,10 +14,9 @@ MSXAudio::MSXAudio(const DeviceConfig& config)
 	, y8950(getName(), config,
 	        config.getChildDataAsInt("sampleram", 256) * 1024,
 	        getCurrentTime(), *this)
-	, dacValue(0x80), dacEnabled(false)
 {
-	string type(StringOp::toLower(config.getChildData("type", "philips")));
-	if (type == "philips") {
+	auto type = config.getChildData("type", "philips");
+	if (StringOp::casecmp cmp; cmp(type, "philips")) {
 		dac = std::make_unique<DACSound8U>(
 			getName() + " 8-bit DAC", "MSX-AUDIO 8-bit DAC",
 			config);
@@ -34,7 +31,7 @@ MSXAudio::~MSXAudio()
 	periphery.reset();
 }
 
-Y8950Periphery& MSXAudio::createPeriphery(const string& soundDeviceName)
+Y8950Periphery& MSXAudio::createPeriphery(const std::string& soundDeviceName)
 {
 	periphery = Y8950PeripheryFactory::create(
 		*this, getDeviceConfig2(), soundDeviceName);
@@ -56,15 +53,13 @@ void MSXAudio::reset(EmuTime::param time)
 
 byte MSXAudio::readIO(word port, EmuTime::param time)
 {
-	byte result;
 	if ((port & 0xE8) == 0x08) {
 		// read DAC
-		result = 0xFF;
+		return 0xFF;
 	} else {
-		result = (port & 1) ? y8950.readReg(registerLatch, time)
-		                    : y8950.readStatus(time);
+		return (port & 1) ? y8950.readReg(registerLatch, time)
+		                  : y8950.readStatus(time);
 	}
-	return result;
 }
 
 byte MSXAudio::peekIO(word port, EmuTime::param time) const
@@ -129,13 +124,12 @@ template<typename Archive>
 void MSXAudio::serialize(Archive& ar, unsigned /*version*/)
 {
 	ar.serializePolymorphic("periphery", *periphery);
-	ar.serialize("Y8950", y8950);
+	ar.serialize("Y8950",         y8950,
+	             "registerLatch", registerLatch,
+	             "dacValue",      dacValue,
+	             "dacEnabled",    dacEnabled);
 
-	ar.serialize("registerLatch", registerLatch);
-	ar.serialize("dacValue", dacValue);
-	ar.serialize("dacEnabled", dacEnabled);
-
-	if (ar.isLoader()) {
+	if constexpr (Archive::IS_LOADER) {
 		// restore dac status
 		if (dacEnabled) {
 			assert(dac);

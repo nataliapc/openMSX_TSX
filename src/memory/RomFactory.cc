@@ -1,4 +1,5 @@
 #include "RomFactory.hh"
+
 #include "RomTypes.hh"
 #include "RomInfo.hh"
 #include "RomPageNN.hh"
@@ -25,12 +26,15 @@
 #include "RomHarryFox.hh"
 #include "RomPanasonic.hh"
 #include "RomNational.hh"
+#include "RomNeo8.hh"
+#include "RomNeo16.hh"
 #include "RomMajutsushi.hh"
 #include "RomSynthesizer.hh"
 #include "RomPlayBall.hh"
 #include "RomNettouYakyuu.hh"
 #include "RomGameMaster2.hh"
 #include "RomHalnote.hh"
+#include "RomZemina25in1.hh"
 #include "RomZemina80in1.hh"
 #include "RomZemina90in1.hh"
 #include "RomZemina126in1.hh"
@@ -39,8 +43,14 @@
 #include "RomFSA1FM.hh"
 #include "RomManbow2.hh"
 #include "RomMatraInk.hh"
+#include "RomMatraCompilation.hh"
 #include "RomArc.hh"
+#include "RomAlAlamiah30in1.hh"
+#include "RomRetroHard31in1.hh"
+#include "ROMHunterMk2.hh"
 #include "MegaFlashRomSCCPlus.hh"
+#include "ReproCartridgeV1.hh"
+#include "ReproCartridgeV2.hh"
 #include "KonamiUltimateCollection.hh"
 #include "RomDooly.hh"
 #include "RomMSXtra.hh"
@@ -54,29 +64,37 @@
 #include "DeviceConfig.hh"
 #include "XMLElement.hh"
 #include "MSXException.hh"
+
+#include "enumerate.hh"
+#include "one_of.hh"
+#include "xrange.hh"
+
+#include <bit>
 #include <memory>
 
 using std::make_unique;
-using std::move;
-using std::string;
-using std::unique_ptr;
 
-namespace openmsx {
-namespace RomFactory {
+namespace openmsx::RomFactory {
 
-static RomType guessRomType(const Rom& rom)
+[[nodiscard]] static RomType guessRomType(const Rom& rom)
 {
-	int size = rom.getSize();
+	auto size = rom.size();
 	if (size == 0) {
 		return ROM_NORMAL;
 	}
-	const byte* data = &rom[0];
+	//std::span data = rom; // TODO error with clang-13/libc++
+	std::span data{std::to_address(rom.begin()), size};
 
+	if (const size_t signatureOffset = 16, signatureSize = 8; size >= (signatureOffset + signatureSize)) {
+		auto signature = std::string_view(std::bit_cast<const char*>(data.data()) + signatureOffset, signatureSize);
+		if (signature == std::string_view("ROM_NEO8")) return ROM_NEO8;
+		if (signature == std::string_view("ROM_NE16")) return ROM_NEO16;
+	}
 	if (size < 0x10000) {
 		if ((size <= 0x4000) &&
 		           (data[0] == 'A') && (data[1] == 'B')) {
-			word initAddr = data[2] + 256 * data[3];
-			word textAddr = data[8] + 256 * data[9];
+			auto initAddr = word(data[2] + 256 * data[3]);
+			auto textAddr = word(data[8] + 256 * data[9]);
 			if ((textAddr & 0xC000) == 0x8000) {
 				if ((initAddr == 0) ||
 				    (((initAddr & 0xC000) == 0x8000) &&
@@ -94,17 +112,17 @@ static RomType guessRomType(const Rom& rom)
 		// (thanks for the hint, hap)
 		return ROM_MIRRORED;
 	} else {
-		//  GameCartridges do their bankswitching by using the Z80
+		//  GameCartridges do their bank switching by using the Z80
 		//  instruction ld(nn),a in the middle of program code. The
-		//  adress nn depends upon the GameCartridge mappertype used.
+		//  address nn depends upon the GameCartridge mapper type used.
 		//  To guess which mapper it is, we will look how much writes
 		//  with this instruction to the mapper-registers-addresses
 		//  occur.
 
-		unsigned typeGuess[ROM_END_OF_UNORDERED_LIST] = {}; // 0-initialized
-		for (int i = 0; i < size - 3; ++i) {
+		std::array<unsigned, ROM_LAST> typeGuess = {}; // 0-initialized
+		for (auto i : xrange(size - 3)) {
 			if (data[i] == 0x32) {
-				word value = data[i + 1] + (data[i + 2] << 8);
+				auto value = word(data[i + 1] + (data[i + 2] << 8));
 				switch (value) {
 				case 0x5000:
 				case 0x9000:
@@ -112,8 +130,6 @@ static RomType guessRomType(const Rom& rom)
 					typeGuess[ROM_KONAMI_SCC]++;
 					break;
 				case 0x4000:
-					typeGuess[ROM_KONAMI]++;
-					break;
 				case 0x8000:
 				case 0xa000:
 					typeGuess[ROM_KONAMI]++;
@@ -140,60 +156,55 @@ static RomType guessRomType(const Rom& rom)
 		}
 		if (typeGuess[ROM_ASCII8]) typeGuess[ROM_ASCII8]--; // -1 -> max_int
 		RomType type = ROM_GENERIC_8KB;
-		for (int i = 0; i < ROM_END_OF_UNORDERED_LIST; ++i) {
-			// debug: fprintf(stderr, "%d: %d\n", i, typeGuess[i]);
-			if (typeGuess[i] && (typeGuess[i] >= typeGuess[type])) {
+		for (auto [i, tg] : enumerate(typeGuess)) {
+			if (tg && (tg >= typeGuess[type])) {
 				type = static_cast<RomType>(i);
 			}
-		}
-		// in case of doubt we go for type ROM_GENERIC_8KB
-		// in case of even type ROM_ASCII16 and ROM_ASCII8 we would
-		// prefer ROM_ASCII16 but we would still prefer ROM_GENERIC_8KB
-		// above ROM_ASCII8 or ROM_ASCII16
-		if ((type == ROM_ASCII16) &&
-		    (typeGuess[ROM_GENERIC_8KB] == typeGuess[ROM_ASCII16])) {
-			type = ROM_GENERIC_8KB;
 		}
 		return type;
 	}
 }
 
-unique_ptr<MSXDevice> create(const DeviceConfig& config)
+std::unique_ptr<MSXDevice> create(const DeviceConfig& config)
 {
-	Rom rom(config.getAttribute("id"), "rom", config);
+	Rom rom(std::string(config.getAttributeValue("id")), "rom", config);
 
 	// Get specified mapper type from the config.
-	RomType type;
-	// if no type is mentioned, we assume 'mirrored' which works for most
-	// plain ROMs...
-	string_view typestr = config.getChildData("mappertype", "Mirrored");
-	if (typestr == "auto") {
-		// Guess mapper type, if it was not in DB.
-		const RomInfo* romInfo = config.getReactor().getSoftwareDatabase().fetchRomInfo(rom.getOriginalSHA1());
-		if (!romInfo) {
-			auto machineType = config.getMotherBoard().getMachineType();
-			if (machineType == "Coleco") {
-				unsigned size = rom.getSize();
-				if ((size == 128*1024) || (size == 256*1024) ||
-				    (size == 512*1024) || (size == 1024*1024)) {
-					type = ROM_COLECOMEGACART;
-				}
-				else {
-					type = ROM_PAGE23;
+	RomType type = [&] {
+		// if no type is mentioned, we assume 'mirrored' which works for most
+		// plain ROMs...
+		std::string_view typeStr = config.getChildData("mappertype", "Mirrored");
+		if (typeStr == "auto") {
+			// First check whether the (possibly patched) SHA1 is in the DB
+			const RomInfo* romInfo = config.getReactor().getSoftwareDatabase().fetchRomInfo(rom.getSHA1());
+			// If not found, try the original SHA1 in the DB
+			if (!romInfo) {
+				romInfo = config.getReactor().getSoftwareDatabase().fetchRomInfo(rom.getOriginalSHA1());
+			}
+			// If still not found, guess the mapper type
+			if (!romInfo) {
+				auto machineType = config.getMotherBoard().getMachineType();
+				if (machineType == "Coleco") {
+					if (rom.size() == one_of(128*1024u, 256*1024u, 512*1024u, 1024*1024u)) {
+						return ROM_COLECOMEGACART;
+					} else {
+						return ROM_PAGE23;
+					}
+				} else {
+					return guessRomType(rom);
 				}
 			} else {
-				type = guessRomType(rom);
+				return romInfo->getRomType();
 			}
 		} else {
-			type = romInfo->getRomType();
+			// Use mapper type from config, even if this overrides DB.
+			auto t = RomInfo::nameToRomType(typeStr);
+			if (t == ROM_UNKNOWN) {
+				throw MSXException("Unknown mappertype: ", typeStr);
+			}
+			return t;
 		}
-	} else {
-		// Use mapper type from config, even if this overrides DB.
-		type = RomInfo::nameToRomType(typestr);
-		if (type == ROM_UNKNOWN) {
-			throw MSXException("Unknown mappertype: ", typestr);
-		}
-	}
+	}();
 
 	// Store actual detected mapper type in config (override the possible
 	// 'auto' value). This way we're sure that on savestate/loadstate we're
@@ -201,34 +212,23 @@ unique_ptr<MSXDevice> create(const DeviceConfig& config)
 	// was updated).
 	// We do it at this point so that constructors used below can use this
 	// information for warning messages etc.
-	auto& writableConfig = const_cast<XMLElement&>(*config.getXML());
-	writableConfig.setChildData("mappertype", RomInfo::romTypeToName(type));
+	auto& doc = const_cast<DeviceConfig&>(config).getXMLDocument();
+	doc.setChildData(const_cast<XMLElement&>(*config.getXML()),
+	                 "mappertype", RomInfo::romTypeToName(type).data());
 
-	unique_ptr<MSXRom> result;
+	std::unique_ptr<MSXRom> result;
 	switch (type) {
 	case ROM_MIRRORED:
-		result = make_unique<RomPlain>(
-			config, move(rom), RomPlain::MIRRORED);
-		break;
-	case ROM_NORMAL:
-		result = make_unique<RomPlain>(
-			config, move(rom), RomPlain::NOT_MIRRORED);
-		break;
 	case ROM_MIRRORED0000:
 	case ROM_MIRRORED4000:
 	case ROM_MIRRORED8000:
 	case ROM_MIRROREDC000:
-		result = make_unique<RomPlain>(
-			config, move(rom), RomPlain::MIRRORED,
-			(type & 7) * 0x2000);
-		break;
+	case ROM_NORMAL:
 	case ROM_NORMAL0000:
 	case ROM_NORMAL4000:
 	case ROM_NORMAL8000:
 	case ROM_NORMALC000:
-		result = make_unique<RomPlain>(
-			config, move(rom), RomPlain::NOT_MIRRORED,
-			(type & 7) * 0x2000);
+		result = make_unique<RomPlain>(config, std::move(rom), type);
 		break;
 	case ROM_PAGE0:
 	case ROM_PAGE1:
@@ -240,176 +240,203 @@ unique_ptr<MSXDevice> create(const DeviceConfig& config)
 	case ROM_PAGE23:
 	case ROM_PAGE123:
 	case ROM_PAGE0123:
-		result = make_unique<RomPageNN>(config, move(rom), type & 0xF);
+		result = make_unique<RomPageNN>(config, std::move(rom), type);
 		break;
 	case ROM_DRAM:
-		result = make_unique<RomDRAM>(config, move(rom));
+		result = make_unique<RomDRAM>(config, std::move(rom));
 		break;
 	case ROM_GENERIC_8KB:
-		result = make_unique<RomGeneric8kB>(config, move(rom));
+		result = make_unique<RomGeneric8kB>(config, std::move(rom));
 		break;
 	case ROM_GENERIC_16KB:
-		result = make_unique<RomGeneric16kB>(config, move(rom));
+		result = make_unique<RomGeneric16kB>(config, std::move(rom));
 		break;
 	case ROM_KONAMI_SCC:
-		result = make_unique<RomKonamiSCC>(config, move(rom));
+		result = make_unique<RomKonamiSCC>(config, std::move(rom));
 		break;
 	case ROM_KONAMI:
-		result = make_unique<RomKonami>(config, move(rom));
+		result = make_unique<RomKonami>(config, std::move(rom));
 		break;
 	case ROM_KBDMASTER:
-		result = make_unique<RomKonamiKeyboardMaster>(config, move(rom));
+		result = make_unique<RomKonamiKeyboardMaster>(config, std::move(rom));
 		break;
 	case ROM_ASCII8:
-		result = make_unique<RomAscii8kB>(config, move(rom));
+		result = make_unique<RomAscii8kB>(config, std::move(rom));
 		break;
 	case ROM_ASCII16:
-		result = make_unique<RomAscii16kB>(config, move(rom));
+		result = make_unique<RomAscii16kB>(config, std::move(rom));
 		break;
 	case ROM_MSXWRITE:
-		result = make_unique<RomMSXWrite>(config, move(rom));
+		result = make_unique<RomMSXWrite>(config, std::move(rom));
 		break;
 	case ROM_PADIAL8:
-		result = make_unique<RomPadial8kB>(config, move(rom));
+		result = make_unique<RomPadial8kB>(config, std::move(rom));
 		break;
 	case ROM_PADIAL16:
-		result = make_unique<RomPadial16kB>(config, move(rom));
+		result = make_unique<RomPadial16kB>(config, std::move(rom));
 		break;
 	case ROM_SUPERLODERUNNER:
-		result = make_unique<RomSuperLodeRunner>(config, move(rom));
+		result = make_unique<RomSuperLodeRunner>(config, std::move(rom));
 		break;
 	case ROM_SUPERSWANGI:
-		result = make_unique<RomSuperSwangi>(config, move(rom));
+		result = make_unique<RomSuperSwangi>(config, std::move(rom));
 		break;
 	case ROM_MITSUBISHIMLTS2:
-		result = make_unique<RomMitsubishiMLTS2>(config, move(rom));
+		result = make_unique<RomMitsubishiMLTS2>(config, std::move(rom));
 		break;
 	case ROM_MSXDOS2:
-		result = make_unique<RomMSXDOS2>(config, move(rom));
+		result = make_unique<RomMSXDOS2>(config, std::move(rom));
 		break;
 	case ROM_R_TYPE:
-		result = make_unique<RomRType>(config, move(rom));
+		result = make_unique<RomRType>(config, std::move(rom));
 		break;
 	case ROM_CROSS_BLAIM:
-		result = make_unique<RomCrossBlaim>(config, move(rom));
+		result = make_unique<RomCrossBlaim>(config, std::move(rom));
 		break;
 	case ROM_HARRY_FOX:
-		result = make_unique<RomHarryFox>(config, move(rom));
+		result = make_unique<RomHarryFox>(config, std::move(rom));
 		break;
 	case ROM_ASCII8_8:
 		result = make_unique<RomAscii8_8>(
-			config, move(rom), RomAscii8_8::ASCII8_8);
+			config, std::move(rom), RomAscii8_8::ASCII8_8);
 		break;
 	case ROM_ASCII8_32:
 		result = make_unique<RomAscii8_8>(
-			config, move(rom), RomAscii8_8::ASCII8_32);
+			config, std::move(rom), RomAscii8_8::ASCII8_32);
 		break;
 	case ROM_ASCII8_2:
 		result = make_unique<RomAscii8_8>(
-			config, move(rom), RomAscii8_8::ASCII8_2);
+			config, std::move(rom), RomAscii8_8::ASCII8_2);
 		break;
 	case ROM_KOEI_8:
 		result = make_unique<RomAscii8_8>(
-			config, move(rom), RomAscii8_8::KOEI_8);
+			config, std::move(rom), RomAscii8_8::KOEI_8);
 		break;
 	case ROM_KOEI_32:
 		result = make_unique<RomAscii8_8>(
-			config, move(rom), RomAscii8_8::KOEI_32);
+			config, std::move(rom), RomAscii8_8::KOEI_32);
 		break;
 	case ROM_WIZARDRY:
 		result = make_unique<RomAscii8_8>(
-			config, move(rom), RomAscii8_8::WIZARDRY);
+			config, std::move(rom), RomAscii8_8::WIZARDRY);
 		break;
 	case ROM_ASCII16_2:
-		result = make_unique<RomAscii16_2>(config, move(rom), RomAscii16_2::ASCII16_2);
+		result = make_unique<RomAscii16_2>(config, std::move(rom), RomAscii16_2::ASCII16_2);
 		break;
 	case ROM_ASCII16_8:
-		result = make_unique<RomAscii16_2>(config, move(rom), RomAscii16_2::ASCII16_8);
+		result = make_unique<RomAscii16_2>(config, std::move(rom), RomAscii16_2::ASCII16_8);
 		break;
 	case ROM_GAME_MASTER2:
-		result = make_unique<RomGameMaster2>(config, move(rom));
+		result = make_unique<RomGameMaster2>(config, std::move(rom));
 		break;
 	case ROM_PANASONIC:
-		result = make_unique<RomPanasonic>(config, move(rom));
+		result = make_unique<RomPanasonic>(config, std::move(rom));
 		break;
 	case ROM_NATIONAL:
-		result = make_unique<RomNational>(config, move(rom));
+		result = make_unique<RomNational>(config, std::move(rom));
+		break;
+	case ROM_NEO8:
+		result = make_unique<RomNeo8>(config, std::move(rom));
+		break;
+	case ROM_NEO16:
+		result = make_unique<RomNeo16>(config, std::move(rom));
 		break;
 	case ROM_MAJUTSUSHI:
-		result = make_unique<RomMajutsushi>(config, move(rom));
+		result = make_unique<RomMajutsushi>(config, std::move(rom));
 		break;
 	case ROM_SYNTHESIZER:
-		result = make_unique<RomSynthesizer>(config, move(rom));
+		result = make_unique<RomSynthesizer>(config, std::move(rom));
 		break;
 	case ROM_PLAYBALL:
-		result = make_unique<RomPlayBall>(config, move(rom));
+		result = make_unique<RomPlayBall>(config, std::move(rom));
 		break;
 	case ROM_NETTOU_YAKYUU:
-		result = make_unique<RomNettouYakyuu>(config, move(rom));
+		result = make_unique<RomNettouYakyuu>(config, std::move(rom));
 		break;
 	case ROM_HALNOTE:
-		result = make_unique<RomHalnote>(config, move(rom));
+		result = make_unique<RomHalnote>(config, std::move(rom));
+		break;
+	case ROM_ZEMINA25IN1:
+		result = make_unique<RomZemina25in1>(config, std::move(rom));
 		break;
 	case ROM_ZEMINA80IN1:
-		result = make_unique<RomZemina80in1>(config, move(rom));
+		result = make_unique<RomZemina80in1>(config, std::move(rom));
 		break;
 	case ROM_ZEMINA90IN1:
-		result = make_unique<RomZemina90in1>(config, move(rom));
+		result = make_unique<RomZemina90in1>(config, std::move(rom));
 		break;
 	case ROM_ZEMINA126IN1:
-		result = make_unique<RomZemina126in1>(config, move(rom));
+		result = make_unique<RomZemina126in1>(config, std::move(rom));
 		break;
 	case ROM_HOLY_QURAN:
-		result = make_unique<RomHolyQuran>(config, move(rom));
+		result = make_unique<RomHolyQuran>(config, std::move(rom));
 		break;
 	case ROM_HOLY_QURAN2:
-		result = make_unique<RomHolyQuran2>(config, move(rom));
+		result = make_unique<RomHolyQuran2>(config, std::move(rom));
 		break;
 	case ROM_FSA1FM1:
-		result = make_unique<RomFSA1FM1>(config, move(rom));
+		result = make_unique<RomFSA1FM1>(config, std::move(rom));
 		break;
 	case ROM_FSA1FM2:
-		result = make_unique<RomFSA1FM2>(config, move(rom));
+		result = make_unique<RomFSA1FM2>(config, std::move(rom));
 		break;
 	case ROM_MANBOW2:
 	case ROM_MANBOW2_2:
 	case ROM_HAMARAJANIGHT:
 	case ROM_MEGAFLASHROMSCC:
-		result = make_unique<RomManbow2>(config, move(rom), type);
+	case ROM_RBSC_FLASH_KONAMI_SCC:
+		result = make_unique<RomManbow2>(config, std::move(rom), type);
 		break;
 	case ROM_MATRAINK:
-		result = make_unique<RomMatraInk>(config, move(rom));
+		result = make_unique<RomMatraInk>(config, std::move(rom));
+		break;
+	case ROM_MATRACOMPILATION:
+		result = make_unique<RomMatraCompilation>(config, std::move(rom));
 		break;
 	case ROM_ARC:
-		result = make_unique<RomArc>(config, move(rom));
+		result = make_unique<RomArc>(config, std::move(rom));
+		break;
+	case ROM_ALALAMIAH30IN1:
+		result = make_unique<RomAlAlamiah30in1>(config, std::move(rom));
+		break;
+	case ROM_RETROHARD31IN1:
+		result = make_unique<RomRetroHard31in1>(config, std::move(rom));
+		break;
+	case ROM_ROMHUNTERMK2:
+		result = make_unique<ROMHunterMk2>(config, std::move(rom));
 		break;
 	case ROM_MEGAFLASHROMSCCPLUS:
-		result = make_unique<MegaFlashRomSCCPlus>(config, move(rom));
+		result = make_unique<MegaFlashRomSCCPlus>(config, std::move(rom));
+		break;
+	case ROM_REPRO_CARTRIDGE1:
+		result = make_unique<ReproCartridgeV1>(config, std::move(rom));
+		break;
+	case ROM_REPRO_CARTRIDGE2:
+		result = make_unique<ReproCartridgeV2>(config, std::move(rom));
 		break;
 	case ROM_KONAMI_ULTIMATE_COLLECTION:
-		result = make_unique<KonamiUltimateCollection>(config, move(rom));
+		result = make_unique<KonamiUltimateCollection>(config, std::move(rom));
 		break;
 	case ROM_DOOLY:
-		result = make_unique<RomDooly>(config, move(rom));
+		result = make_unique<RomDooly>(config, std::move(rom));
 		break;
 	case ROM_MSXTRA:
-		result = make_unique<RomMSXtra>(config, move(rom));
+		result = make_unique<RomMSXtra>(config, std::move(rom));
 		break;
 	case ROM_MULTIROM:
-		result = make_unique<RomMultiRom>(config, move(rom));
+		result = make_unique<RomMultiRom>(config, std::move(rom));
 		break;
 	case ROM_RAMFILE:
-		result = make_unique<RomRamFile>(config, move(rom));
+		result = make_unique<RomRamFile>(config, std::move(rom));
 		break;
 	case ROM_COLECOMEGACART:
-		result = make_unique<RomColecoMegaCart>(config, move(rom));
+		result = make_unique<RomColecoMegaCart>(config, std::move(rom));
 		break;
 	default:
 		throw MSXException("Unknown ROM type");
 	}
 
-	return move(result);
+	return result;
 }
 
-} // namespace RomFactory
-} // namespace openmsx
+} // namespace openmsx::RomFactory

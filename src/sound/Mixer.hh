@@ -15,10 +15,15 @@ class Reactor;
 class CommandController;
 class MSXMixer;
 
+struct StereoFloat {
+	float left  = 0.0f;
+	float right = 0.0f;
+};
+
 class Mixer final : private Observer<Setting>
 {
 public:
-	enum SoundDriverType { SND_NULL, SND_SDL, SND_DIRECTX };
+	enum SoundDriverType { SND_NULL, SND_SDL };
 
 	Mixer(Reactor& reactor, CommandController& commandController);
 	~Mixer();
@@ -43,17 +48,19 @@ public:
 
 	/** Upload new sample data
 	 */
-	void uploadBuffer(MSXMixer& msxMixer, int16_t* buffer, unsigned len);
+	void uploadBuffer(MSXMixer& msxMixer, std::span<const StereoFloat> buffer);
 
-	IntegerSetting& getMasterVolume() { return masterVolume; }
+	[[nodiscard]] IntegerSetting& getMasterVolume() { return masterVolume; }
+	[[nodiscard]] BooleanSetting& getMuteSetting() { return muteSetting; }
 
 private:
 	void reloadDriver();
 	void muteHelper();
 
 	// Observer<Setting>
-	void update(const Setting& setting) override;
+	void update(const Setting& setting) noexcept override;
 
+private:
 	std::vector<MSXMixer*> msxMixers; // unordered
 
 	std::unique_ptr<SoundDriver> driver;
@@ -66,7 +73,7 @@ private:
 	IntegerSetting frequencySetting;
 	IntegerSetting samplesSetting;
 
-	int muteCount;
+	int muteCount = 0;
 };
 
 } // namespace openmsx

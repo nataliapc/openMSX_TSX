@@ -4,10 +4,11 @@
 
   <info>
     <manufacturer>Panasonic</manufacturer>
-    <code>CF-2700</code>
-    <release_year>?</release_year>
-    <description>One of the few European MSX machines by Panasonic. German version; one of the most common MSX machines in Germany.</description>
+    <code>CF-2700 (DE)</code>
+    <release_year>1985</release_year>
+    <description>Basic MSX1 achine for the German market with 64kB RAM. One of the few European MSX machines by Panasonic. One of the most common MSX machines in Germany.</description>
     <type>MSX</type>
+    <region>de</region>
   </info>
 
 <!-- hap:
@@ -46,8 +47,8 @@ crystal: same for cpu/vdp/psg
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <PrinterPort id="Printer Port">

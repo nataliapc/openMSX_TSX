@@ -1,34 +1,33 @@
+#include "dmk-common.hh"
+
+#include <array>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
-
-typedef unsigned char byte;
-
-struct DmkHeader {
-	byte writeProtected;
-	byte numTracks;
-	byte trackLen[2];
-	byte flags;
-	byte reserved[7];
-	byte format[4];
-};
+#include <span>
 
 static const int RAW_TRACK_SIZE = 6250; // 250kbps, 300rpm
 
-int main(int argc, char** argv)
+int main(int argc, const char** argv)
 {
-	if (argc != 2) {
+	std::span arg(argv, argc);
+	if (arg.size() != 2) {
 		printf("empty-dmk\n"
 		       "\n"
 		       "Utility to create an empty DMK disk image.\n"
 		       "The disk image is double sided and contains\n"
 		       "80 unformatted tracks.\n"
 		       "\n"
-		       "usage: %s <filename>\n", argv[0]);
+		       "usage: %s <filename>\n", arg[0]);
 		exit(1);
 	}
 
-	FILE* f = fopen(argv[1], "wb");
+	FILE* f = fopen(arg[1], "wb");
+	if (!f) {
+		printf("Error opening file '%s' for writing.\n", arg[1]);
+		exit(1);
+	}
 
 	DmkHeader header;
 	memset(&header, 0, sizeof(header));
@@ -37,11 +36,11 @@ int main(int argc, char** argv)
 	header.trackLen[1] = (128 + RAW_TRACK_SIZE) >> 8;
 	fwrite(&header, sizeof(header), 1, f);
 
-	byte buf[128 + RAW_TRACK_SIZE];
+	std::array<uint8_t, 128 + RAW_TRACK_SIZE> buf;
 	memset(&buf[  0],    0,  128);
 	memset(&buf[128], 0x4e, RAW_TRACK_SIZE);
 	for (int i = 0; i < 2 * 80; ++i) {
-		fwrite(buf, sizeof(buf), 1, f);
+		fwrite(buf.data(), buf.size(), 1, f);
 	}
 
 	fclose(f);

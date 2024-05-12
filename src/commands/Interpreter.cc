@@ -1,5 +1,5 @@
 #include "Interpreter.hh"
-#include "EventDistributor.hh"
+
 #include "Command.hh"
 #include "TclObject.hh"
 #include "CommandException.hh"
@@ -9,24 +9,30 @@
 #include "InterpreterOutput.hh"
 #include "MSXCPUInterface.hh"
 #include "FileOperations.hh"
-#include "array_ref.hh"
+
+#include "narrow.hh"
+#include "ranges.hh"
 #include "stl.hh"
 #include "unreachable.hh"
-#include "xrange.hh"
+
+#include <bit>
+#include <cstdint>
 #include <iostream>
+#include <span>
 #include <utility>
 #include <vector>
-#include <cstdint>
 //#include <tk.h>
-#include "openmsx.hh"
-
-using std::string;
-using std::vector;
 
 namespace openmsx {
 
 // See comments in traceProc()
-static std::vector<std::pair<uintptr_t, BaseSetting*>> traces; // sorted on first
+namespace {
+	struct Trace {
+		uintptr_t id;
+		BaseSetting* setting;
+	};
+}
+static std::vector<Trace> traces; // sorted on id
 static uintptr_t traceCount = 0;
 
 
@@ -67,27 +73,26 @@ Tcl_ChannelType Interpreter::channelType = {
 	nullptr,		 // Tcl_DriverTruncateProc
 };
 
-void Interpreter::init(const char* programName)
+void Interpreter::init(const char* programName) const
 {
 	Tcl_FindExecutable(programName);
 }
 
-Interpreter::Interpreter(EventDistributor& eventDistributor_)
-	: eventDistributor(eventDistributor_)
+Interpreter::Interpreter()
+	: interp(Tcl_CreateInterp())
 {
-	interp = Tcl_CreateInterp();
 	Tcl_Preserve(interp);
 
 	// TODO need to investigate this: doesn't work on windows
 	/*
 	if (Tcl_Init(interp) != TCL_OK) {
-		std::cout << "Tcl_Init: " << interp->result << std::endl;
+		std::cout << "Tcl_Init: " << interp->result << '\n';
 	}
 	if (Tk_Init(interp) != TCL_OK) {
-		std::cout << "Tk_Init error: " << interp->result << std::endl;
+		std::cout << "Tk_Init error: " << interp->result << '\n';
 	}
 	if (Tcl_Eval(interp, "wm withdraw .") != TCL_OK) {
-		std::cout << "wm withdraw error: " << interp->result << std::endl;
+		std::cout << "wm withdraw error: " << interp->result << '\n';
 	}
 	*/
 
@@ -116,7 +121,18 @@ Interpreter::~Interpreter()
 	}
 	Tcl_Release(interp);
 
-	Tcl_Finalize();
+	// Tcl_Finalize() should only be called once for the whole application
+	// tcl8.6 checks for this (tcl8.5 did not).
+	// Normally we only create/destroy exactly one Interpreter object for
+	// openMSX, and then simply calling Tcl_Finalize() here is fine. Though
+	// when running unittest we do create/destroy multiple Interpreter's.
+	// Another option is to not call Tcl_Finalize(), but that leaves some
+	// memory allocated, and makes memory-leak checkers report more errors.
+	static bool scheduled = false;
+	if (!scheduled) {
+		scheduled = true;
+		atexit(Tcl_Finalize);
+	}
 }
 
 int Interpreter::outputProc(ClientData clientData, const char* buf,
@@ -124,7 +140,7 @@ int Interpreter::outputProc(ClientData clientData, const char* buf,
 {
 	try {
 		auto* output = static_cast<Interpreter*>(clientData)->output;
-		string_view text(buf, toWrite);
+		std::string_view text(buf, toWrite);
 		if (!text.empty() && output) {
 			output->output(text);
 		}
@@ -134,7 +150,14 @@ int Interpreter::outputProc(ClientData clientData, const char* buf,
 	return toWrite;
 }
 
-void Interpreter::registerCommand(const string& name, Command& command)
+bool Interpreter::hasCommand(zstring_view name) const
+{
+	// Note: these are not only the commands registered via
+	// registerCommand(), but all commands know to this Tcl-interpreter.
+	return Tcl_FindCommand(interp, name.c_str(), nullptr, 0);
+}
+
+void Interpreter::registerCommand(zstring_view name, Command& command)
 {
 	auto token = Tcl_CreateObjCommand(
 		interp, name.c_str(), commandProc,
@@ -148,18 +171,18 @@ void Interpreter::unregisterCommand(Command& command)
 }
 
 int Interpreter::commandProc(ClientData clientData, Tcl_Interp* interp,
-                           int objc, Tcl_Obj* const objv[])
+                             int objc, Tcl_Obj* const* objv)
 {
 	try {
 		auto& command = *static_cast<Command*>(clientData);
-		auto tokens = make_array_ref(
-			reinterpret_cast<TclObject*>(const_cast<Tcl_Obj**>(objv)),
+		std::span<const TclObject> tokens(
+			std::bit_cast<TclObject*>(const_cast<Tcl_Obj**>(objv)),
 			objc);
 		int res = TCL_OK;
 		TclObject result;
 		try {
 			if (!command.isAllowedInEmptyMachine()) {
-				if (auto controller =
+				if (auto* controller =
 					dynamic_cast<MSXCommandController*>(
 						&command.getCommandController())) {
 					if (!controller->getMSXMotherBoard().getMachineConfig()) {
@@ -170,14 +193,13 @@ int Interpreter::commandProc(ClientData clientData, Tcl_Interp* interp,
 			}
 			command.execute(tokens, result);
 		} catch (MSXException& e) {
-			result.setString(e.getMessage());
+			result = e.getMessage();
 			res = TCL_ERROR;
 		}
 		Tcl_SetObjResult(interp, result.getTclObject());
 		return res;
 	} catch (...) {
 		UNREACHABLE; // we cannot let exceptions pass through Tcl
-		return TCL_ERROR;
 	}
 }
 
@@ -190,24 +212,22 @@ TclObject Interpreter::getCommandNames()
 	return execute("openmsx::all_command_names");
 }
 
-bool Interpreter::isComplete(const string& command) const
+bool Interpreter::isComplete(zstring_view command) const
 {
 	return Tcl_CommandComplete(command.c_str()) != 0;
 }
 
-TclObject Interpreter::execute(const string& command)
+TclObject Interpreter::execute(zstring_view command)
 {
-	int success = Tcl_Eval(interp, command.c_str());
-	if (success != TCL_OK) {
+	if (Tcl_Eval(interp, command.c_str()) != TCL_OK) {
 		throw CommandException(Tcl_GetStringResult(interp));
 	}
 	return TclObject(Tcl_GetObjResult(interp));
 }
 
-TclObject Interpreter::executeFile(const string& filename)
+TclObject Interpreter::executeFile(zstring_view filename)
 {
-	int success = Tcl_EvalFile(interp, filename.c_str());
-	if (success != TCL_OK) {
+	if (Tcl_EvalFile(interp, filename.c_str()) != TCL_OK) {
 		throw CommandException(Tcl_GetStringResult(interp));
 	}
 	return TclObject(Tcl_GetObjResult(interp));
@@ -219,7 +239,7 @@ static void setVar(Tcl_Interp* interp, const TclObject& name, const TclObject& v
 		            value.getTclObjectNonConst(),
 		            TCL_GLOBAL_ONLY | TCL_LEAVE_ERR_MSG)) {
 		// might contain error message of a trace proc
-		std::cerr << Tcl_GetStringResult(interp) << std::endl;
+		std::cerr << Tcl_GetStringResult(interp) << '\n';
 	}
 }
 static Tcl_Obj* getVar(Tcl_Interp* interp, const TclObject& name)
@@ -237,18 +257,27 @@ void Interpreter::setVariable(const TclObject& name, const TclObject& value)
 	}
 }
 
+void Interpreter::setVariable(const TclObject& arrayName, const TclObject& arrayIndex, const TclObject& value)
+{
+	if (!Tcl_ObjSetVar2(interp, arrayName.getTclObjectNonConst(), arrayIndex.getTclObjectNonConst(),
+		            value.getTclObjectNonConst(),
+		            TCL_GLOBAL_ONLY | TCL_LEAVE_ERR_MSG)) {
+		throw CommandException(Tcl_GetStringResult(interp));
+	}
+}
+
 void Interpreter::unsetVariable(const char* name)
 {
 	Tcl_UnsetVar(interp, name, TCL_GLOBAL_ONLY);
 }
 
-static TclObject getSafeValue(BaseSetting& setting)
+static TclObject getSafeValue(const BaseSetting& setting)
 {
-	try {
-		return setting.getValue();
-	} catch (MSXException&) {
-		return TclObject(0); // 'safe' value, see comment in registerSetting()
+	// TODO use c++23 std::optional<T>::or_else()
+	if (auto val = setting.getOptionalValue()) {
+		return *val;
 	}
+	return TclObject(0); // 'safe' value, see comment in registerSetting()
 }
 void Interpreter::registerSetting(BaseSetting& variable)
 {
@@ -296,35 +325,33 @@ void Interpreter::registerSetting(BaseSetting& variable)
 	// problems. TODO investigate this further.
 
 	uintptr_t traceID = traceCount++;
-	traces.emplace_back(traceID, &variable); // still in sorted order
+	traces.emplace_back(Trace{traceID, &variable}); // still in sorted order
 	Tcl_TraceVar(interp, name.getString().data(), // 0-terminated
 	             TCL_TRACE_READS | TCL_TRACE_WRITES | TCL_TRACE_UNSETS,
-	             traceProc, reinterpret_cast<ClientData>(traceID));
+	             traceProc, std::bit_cast<ClientData>(traceID));
 }
 
 void Interpreter::unregisterSetting(BaseSetting& variable)
 {
-	auto it = rfind_if_unguarded(traces, EqualTupleValue<1>(&variable));
-	uintptr_t traceID = it->first;
+	auto it = rfind_unguarded(traces, &variable, &Trace::setting);
+	uintptr_t traceID = it->id;
 	traces.erase(it);
 
 	const char* name = variable.getFullName().data(); // 0-terminated
 	Tcl_UntraceVar(interp, name,
 	               TCL_TRACE_READS | TCL_TRACE_WRITES | TCL_TRACE_UNSETS,
-	               traceProc, reinterpret_cast<ClientData>(traceID));
+	               traceProc, std::bit_cast<ClientData>(traceID));
 	unsetVariable(name);
 }
 
 static BaseSetting* getTraceSetting(uintptr_t traceID)
 {
-	auto it = lower_bound(begin(traces), end(traces), traceID,
-	                      LessTupleElement<0>());
-	return ((it != end(traces)) && (it->first == traceID))
-		? it->second : nullptr;
+	auto t = binary_find(traces, traceID, {}, &Trace::id);
+	return t ? t->setting : nullptr;
 }
 
 #ifndef NDEBUG
-static string_view removeColonColon(string_view s)
+static std::string_view removeColonColon(std::string_view s)
 {
 	if (s.starts_with("::")) s.remove_prefix(2);
 	return s;
@@ -332,7 +359,7 @@ static string_view removeColonColon(string_view s)
 #endif
 
 char* Interpreter::traceProc(ClientData clientData, Tcl_Interp* interp,
-                           const char* part1, const char* /*part2*/, int flags)
+                             const char* part1, const char* /*part2*/, int flags)
 {
 	try {
 		// Lookup Setting object that belongs to this Tcl variable.
@@ -347,7 +374,7 @@ char* Interpreter::traceProc(ClientData clientData, Tcl_Interp* interp,
 		//
 		// The problem is that when a SCC cartridge is removed, we
 		// delete several settings (e.g. SCC_ch1_mute). While deleting
-		// a setting we unset the corresponsing Tcl variable (see
+		// a setting we unset the corresponding Tcl variable (see
 		// unregisterSetting() above), this in turn triggers a
 		// TCL_TRACE_UNSET callback (this function). To prevent this
 		// callback from triggering we first remove the trace before
@@ -365,14 +392,14 @@ char* Interpreter::traceProc(ClientData clientData, Tcl_Interp* interp,
 		// a map. If the Setting was deleted, we won't find it anymore
 		// in the map and return.
 
-		auto traceID = reinterpret_cast<uintptr_t>(clientData);
+		auto traceID = std::bit_cast<uintptr_t>(clientData);
 		auto* variable = getTraceSetting(traceID);
 		if (!variable) return nullptr;
 
 		const TclObject& part1Obj = variable->getFullNameObj();
 		assert(removeColonColon(part1) == removeColonColon(part1Obj.getString()));
 
-		static string static_string;
+		static std::string static_string;
 		if (flags & TCL_TRACE_READS) {
 			try {
 				setVar(interp, part1Obj, variable->getValue());
@@ -402,7 +429,7 @@ char* Interpreter::traceProc(ClientData clientData, Tcl_Interp* interp,
 				// that goes via Tcl and the Tcl variable
 				// doesn't exist at this point
 				variable->setValueDirect(TclObject(
-					variable->getRestoreValue()));
+					variable->getDefaultValue()));
 			} catch (MSXException&) {
 				// for some reason default value is not valid ATM,
 				// keep current value (happened for videosource
@@ -413,7 +440,7 @@ char* Interpreter::traceProc(ClientData clientData, Tcl_Interp* interp,
 			Tcl_TraceVar(interp, part1, TCL_TRACE_READS |
 			                TCL_TRACE_WRITES | TCL_TRACE_UNSETS,
 			             traceProc,
-			             reinterpret_cast<ClientData>(traceID));
+			             std::bit_cast<ClientData>(traceID));
 		}
 	} catch (...) {
 		UNREACHABLE; // we cannot let exceptions pass through Tcl
@@ -423,23 +450,47 @@ char* Interpreter::traceProc(ClientData clientData, Tcl_Interp* interp,
 
 void Interpreter::createNamespace(const std::string& name)
 {
-	execute(strCat("namespace eval ", name, " {}"));
+	execute(tmpStrCat("namespace eval ", name, " {}"));
 }
 
 void Interpreter::deleteNamespace(const std::string& name)
 {
-	execute("namespace delete " + name);
+	execute(tmpStrCat("namespace delete ", name));
 }
 
-void Interpreter::poll()
+void Interpreter::poll() const
 {
 	//Tcl_ServiceAll();
 	Tcl_DoOneEvent(TCL_DONT_WAIT);
 }
 
-TclParser Interpreter::parse(string_view command)
+TclParser Interpreter::parse(std::string_view command)
 {
-	return TclParser(interp, command);
+	return {interp, command};
+}
+
+bool Interpreter::validCommand(std::string_view command)
+{
+	Tcl_Parse parseInfo;
+	int result = Tcl_ParseCommand(interp, command.data(), narrow<int>(command.size()), 0, &parseInfo);
+	Tcl_FreeParse(&parseInfo);
+	return result == TCL_OK;
+}
+
+bool Interpreter::validExpression(std::string_view expression)
+{
+	Tcl_Parse parseInfo;
+	int result = Tcl_ParseExpr(interp, expression.data(), narrow<int>(expression.size()), &parseInfo);
+	Tcl_FreeParse(&parseInfo);
+	return result == TCL_OK;
+}
+
+void Interpreter::wrongNumArgs(unsigned argc, std::span<const TclObject> tokens, const char* message)
+{
+	assert(argc <= tokens.size());
+	Tcl_WrongNumArgs(interp, narrow<int>(argc), std::bit_cast<Tcl_Obj* const*>(tokens.data()), message);
+	// not efficient, but anyway on an error path
+	throw CommandException(Tcl_GetStringResult(interp));
 }
 
 } // namespace openmsx

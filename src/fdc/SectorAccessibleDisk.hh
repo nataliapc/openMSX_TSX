@@ -3,9 +3,12 @@
 
 #include "DiskImageUtils.hh"
 #include "Filename.hh"
+
 #include "sha1.hh"
-#include <vector>
+
 #include <memory>
+#include <span>
+#include <vector>
 
 namespace openmsx {
 
@@ -15,37 +18,37 @@ class PatchInterface;
 class SectorAccessibleDisk
 {
 public:
-	static const size_t SECTOR_SIZE = sizeof(SectorBuffer);
+	static constexpr size_t SECTOR_SIZE = sizeof(SectorBuffer);
 
 	// sector stuff
-	void readSector (size_t sector,       SectorBuffer& buf);
+	void readSector (size_t sector,       SectorBuffer& buf) const;
 	void writeSector(size_t sector, const SectorBuffer& buf);
-	size_t getNbSectors() const;
+	void readSectors (std::span<      SectorBuffer> buffers, size_t startSector) const;
+	void writeSectors(std::span<const SectorBuffer> buffers, size_t startSector);
+	[[nodiscard]] size_t getNbSectors() const;
 
 	// write protected stuff
-	bool isWriteProtected() const;
+	[[nodiscard]] bool isWriteProtected() const;
 	void forceWriteProtect();
 
-	virtual bool isDummyDisk() const;
+	[[nodiscard]] virtual bool isDummyDisk() const;
 
 	// patch stuff
 	void applyPatch(Filename patchFile);
-	std::vector<Filename> getPatches() const;
-	bool hasPatches() const;
+	[[nodiscard]] std::vector<Filename> getPatches() const;
+	[[nodiscard]] bool hasPatches() const;
 
 	/** Calculate SHA1 of the content of this disk.
 	 * This value is cached (and flushed on writes).
 	 */
-	Sha1Sum getSha1Sum(FilePool& filepool);
+	[[nodiscard]] Sha1Sum getSha1Sum(FilePool& filePool);
 
-	// For compatibility with nowind
-	//  - read/write multiple sectors instead of one-per-one
-	//  - use error codes instead of exceptions
-	//  - different order of parameters
-	int readSectors (      SectorBuffer* buffers, size_t startSector,
-	                 size_t nbSectors);
-	int writeSectors(const SectorBuffer* buffers, size_t startSector,
-	                 size_t nbSectors);
+	// should only be called by EmptyDiskPatch
+	virtual void readSectorsImpl(
+		std::span<SectorBuffer> buffers, size_t startSector);
+	// Default readSectorsImpl() implementation delegates to readSectorImpl.
+	// Subclasses should override exactly one of these two.
+	virtual void readSectorImpl(size_t sector, SectorBuffer& buf);
 
 protected:
 	SectorAccessibleDisk();
@@ -55,24 +58,22 @@ protected:
 	// an effect on DirAsDSK. See comment in DirAsDSK::readSectorImpl()
 	// for more details.
 	void setPeekMode(bool peek) { peekMode = peek; }
-	bool isPeekMode() const { return peekMode; }
+	[[nodiscard]] bool isPeekMode() const { return peekMode; }
 
 	virtual void checkCaches();
 	virtual void flushCaches();
-	virtual Sha1Sum getSha1SumImpl(FilePool& filepool);
+	virtual Sha1Sum getSha1SumImpl(FilePool& filePool);
 
 private:
-	virtual void readSectorImpl (size_t sector,       SectorBuffer& buf) = 0;
 	virtual void writeSectorImpl(size_t sector, const SectorBuffer& buf) = 0;
-	virtual size_t getNbSectorsImpl() const = 0;
-	virtual bool isWriteProtectedImpl() const = 0;
+	[[nodiscard]] virtual size_t getNbSectorsImpl() const = 0;
+	[[nodiscard]] virtual bool isWriteProtectedImpl() const = 0;
 
+private:
 	std::unique_ptr<const PatchInterface> patch;
 	Sha1Sum sha1cache;
-	bool forcedWriteProtect;
-	bool peekMode;
-
-	friend class EmptyDiskPatch;
+	bool forcedWriteProtect = false;
+	bool peekMode = false;
 };
 
 } // namespace openmsx

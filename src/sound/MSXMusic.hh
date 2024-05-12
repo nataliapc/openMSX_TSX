@@ -13,30 +13,27 @@ class MSXMusicBase : public MSXDevice
 public:
 	void reset(EmuTime::param time) override;
 	void writeIO(word port, byte value, EmuTime::param time) override;
-	byte peekMem(word address, EmuTime::param time) const override;
-	byte readMem(word address, EmuTime::param time) override;
-	const byte* getReadCacheLine(word start) const override;
+	[[nodiscard]] byte peekMem(word address, EmuTime::param time) const override;
+	[[nodiscard]] byte readMem(word address, EmuTime::param time) override;
+	[[nodiscard]] const byte* getReadCacheLine(word start) const override;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 protected:
 	explicit MSXMusicBase(const DeviceConfig& config);
-	~MSXMusicBase() {}
+	~MSXMusicBase() override = default;
 
-	void writeRegisterPort(byte value, EmuTime::param time);
-	void writeDataPort(byte value, EmuTime::param time);
+	void writePort(bool port, byte value, EmuTime::param time);
 
+protected:
 	Rom rom;
 	YM2413 ym2413;
-
-private:
-	int registerLatch;
 };
-SERIALIZE_CLASS_VERSION(MSXMusicBase, 2);
+SERIALIZE_CLASS_VERSION(MSXMusicBase, 3);
 
 
-class MSXMusic : public MSXMusicBase
+class MSXMusic final : public MSXMusicBase
 {
 public:
 	explicit MSXMusic(const DeviceConfig& config);
@@ -44,21 +41,21 @@ public:
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 };
-SERIALIZE_CLASS_VERSION(MSXMusic, 2); // must be same as MSXMusicBase
+SERIALIZE_CLASS_VERSION(MSXMusic, 3); // must be same as MSXMusicBase
 
 
 // Variant used in Panasonic_FS-A1WX and Panasonic_FS-A1WSX
-class MSXMusicWX : public MSXMusicBase
+class MSXMusicWX final : public MSXMusicBase
 {
 public:
 	explicit MSXMusicWX(const DeviceConfig& config);
 
 	void reset(EmuTime::param time) override;
-	byte peekMem(word address, EmuTime::param time) const override;
-	byte readMem(word address, EmuTime::param time) override;
-	const byte* getReadCacheLine(word start) const override;
+	[[nodiscard]] byte peekMem(word address, EmuTime::param time) const override;
+	[[nodiscard]] byte readMem(word address, EmuTime::param time) override;
+	[[nodiscard]] const byte* getReadCacheLine(word start) const override;
 	void writeMem(word address, byte value, EmuTime::param time) override;
-	byte* getWriteCacheLine(word start) const override;
+	[[nodiscard]] byte* getWriteCacheLine(word start) const override;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
@@ -66,7 +63,7 @@ public:
 private:
 	byte control;
 };
-SERIALIZE_CLASS_VERSION(MSXMusicWX, 2); // must be same as MSXMusicBase
+SERIALIZE_CLASS_VERSION(MSXMusicWX, 3); // must be same as MSXMusicBase
 
 } // namespace openmsx
 

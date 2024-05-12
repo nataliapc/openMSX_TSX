@@ -11,10 +11,10 @@ public:
 	void mute() override;
 	void unmute() override;
 
-	unsigned getFrequency() const override;
-	unsigned getSamples() const override;
+	[[nodiscard]] unsigned getFrequency() const override;
+	[[nodiscard]] unsigned getSamples() const override;
 
-	void uploadBuffer(int16_t* buffer, unsigned len) override;
+	void uploadBuffer(std::span<const StereoFloat> buffer) override;
 };
 
 } // namespace openmsx

@@ -21,39 +21,31 @@ void MSXOPL3Cartridge::reset(EmuTime::param time)
 
 byte MSXOPL3Cartridge::readIO(word port, EmuTime::param /*time*/)
 {
-	byte result;
 	// FM part  0xC4-0xC7 (in MoonSound)
 	switch (port & 0x03) {
 		case 0: // read status
 		case 2:
-			result = ymf262.readStatus();
-			break;
+			return ymf262.readStatus();
 		case 1:
 		case 3: // read fm register
-			result = ymf262.readReg(opl3latch);
-			break;
-		default: // unreachable, avoid warning
-			UNREACHABLE; result = 255;
-		}
-	return result;
+			return ymf262.readReg(opl3latch);
+		default:
+			UNREACHABLE;
+	}
 }
 
 byte MSXOPL3Cartridge::peekIO(word port, EmuTime::param /*time*/) const
 {
-	byte result;
 	switch (port & 0x03) {
 		case 0: // read status
 		case 2:
-			result = ymf262.peekStatus();
-			break;
+			return ymf262.peekStatus();
 		case 1:
 		case 3: // read fm register
-			result = ymf262.peekReg(opl3latch);
-			break;
-		default: // unreachable, avoid warning
-			UNREACHABLE; result = 255;
-		}
-	return result;
+			return ymf262.peekReg(opl3latch);
+		default:
+			UNREACHABLE;
+	}
 }
 
 void MSXOPL3Cartridge::writeIO(word port, byte value, EmuTime::param time)
@@ -78,8 +70,8 @@ template<typename Archive>
 void MSXOPL3Cartridge::serialize(Archive& ar, unsigned /*version*/)
 {
 	ar.template serializeBase<MSXDevice>(*this);
-	ar.serialize("ymf262", ymf262);
-	ar.serialize("opl3latch", opl3latch);
+	ar.serialize("ymf262",    ymf262,
+	             "opl3latch", opl3latch);
 }
 INSTANTIATE_SERIALIZE_METHODS(MSXOPL3Cartridge);
 REGISTER_MSXDEVICE(MSXOPL3Cartridge, "OPL3Cartridge");

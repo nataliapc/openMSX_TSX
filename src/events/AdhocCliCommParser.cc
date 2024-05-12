@@ -1,16 +1,18 @@
 #include "AdhocCliCommParser.hh"
 #include "utf8_unchecked.hh"
+#include "xrange.hh"
 
 
 AdhocCliCommParser::AdhocCliCommParser(std::function<void(const std::string&)> callback_)
 	: callback(std::move(callback_))
-	, state(O0)
 {
 }
 
-void AdhocCliCommParser::parse(const char* buf, size_t n)
+void AdhocCliCommParser::parse(std::span<const char> buf)
 {
-	for (size_t i = 0; i < n; ++i) parse(buf[i]);
+	for (auto c : buf) {
+		parse(c);
+	}
 }
 
 void AdhocCliCommParser::parse(char c)

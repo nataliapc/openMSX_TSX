@@ -5,9 +5,10 @@
   <info>
     <manufacturer>Philips</manufacturer>
     <code>VG 8020/00</code>
-    <release_year>?</release_year>
-    <description/>
+    <release_year>1985</release_year>
+    <description>First version of this basic European MSX1 with 64kB RAM. Very popular machine in the Netherlands.</description>
     <type>MSX</type>
+    <region>eu</region>
   </info>
 
   <CassettePort/>
@@ -38,8 +39,8 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <PrinterPort id="Printer Port">
@@ -63,6 +64,7 @@
     <primary slot="3">
        <RAM id="Main RAM">
          <mem base="0x0000" size="0x10000"/>
+         <initialContent encoding="gz-base64">eJz7/5+B4f8IxgPvgoHFAJBx/wE=</initialContent> <!-- 64*FFFF0000 + 64*0000FFFF, as found on the machine of Peter Hanraets with serial FF05 532012109 -->
        </RAM>
     </primary>
 

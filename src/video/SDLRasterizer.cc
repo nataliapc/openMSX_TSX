@@ -2,18 +2,17 @@
 #include "VDP.hh"
 #include "VDPVRAM.hh"
 #include "RawFrame.hh"
-#include "MSXMotherBoard.hh"
 #include "Display.hh"
 #include "Renderer.hh"
 #include "RenderSettings.hh"
 #include "PostProcessor.hh"
-#include "FloatSetting.hh"
-#include "StringSetting.hh"
 #include "MemoryOps.hh"
-#include "VisibleSurface.hh"
-#include "build-info.hh"
-#include "components.hh"
+#include "OutputSurface.hh"
+#include "enumerate.hh"
+#include "one_of.hh"
+#include "xrange.hh"
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <memory>
@@ -22,15 +21,17 @@ using namespace gl;
 
 namespace openmsx {
 
+using Pixel = SDLRasterizer::Pixel;
+
 /** VDP ticks between start of line and start of left border.
   */
-static const int TICKS_LEFT_BORDER = 100 + 102;
+static constexpr int TICKS_LEFT_BORDER = 100 + 102;
 
 /** The middle of the visible (display + borders) part of a line,
   * expressed in VDP ticks since the start of the line.
   * TODO: Move this to a central location?
   */
-static const int TICKS_VISIBLE_MIDDLE =
+static constexpr int TICKS_VISIBLE_MIDDLE =
 	TICKS_LEFT_BORDER + (VDP::TICKS_PER_LINE - TICKS_LEFT_BORDER - 27) / 2;
 
 /** Translate from absolute VDP coordinates to screen coordinates:
@@ -39,7 +40,7 @@ static const int TICKS_VISIBLE_MIDDLE =
   * @param absoluteX Absolute VDP coordinate.
   * @param narrow Is this a narrow (512 pixels wide) display mode?
   */
-static inline int translateX(int absoluteX, bool narrow)
+static constexpr int translateX(int absoluteX, bool narrow)
 {
 	int maxX = narrow ? 640 : 320;
 	if (absoluteX == VDP::TICKS_PER_LINE) return maxX;
@@ -54,41 +55,37 @@ static inline int translateX(int absoluteX, bool narrow)
 	return std::max(screenX, 0);
 }
 
-template <class Pixel>
-inline void SDLRasterizer<Pixel>::renderBitmapLine(Pixel* buf, unsigned vramLine)
+inline void SDLRasterizer::renderBitmapLine(std::span<Pixel> buf, unsigned vramLine)
 {
 	if (vdp.getDisplayMode().isPlanar()) {
-		const byte* vramPtr0;
-		const byte* vramPtr1;
-		vram.bitmapCacheWindow.getReadAreaPlanar(
-			vramLine * 256, 256, vramPtr0, vramPtr1);
+		auto [vramPtr0, vramPtr1] =
+			vram.bitmapCacheWindow.getReadAreaPlanar<256>(vramLine * 256);
 		bitmapConverter.convertLinePlanar(buf, vramPtr0, vramPtr1);
 	} else {
-		const byte* vramPtr =
-			vram.bitmapCacheWindow.getReadArea(vramLine * 128, 128);
+		auto vramPtr =
+			vram.bitmapCacheWindow.getReadArea<128>(vramLine * 128);
 		bitmapConverter.convertLine(buf, vramPtr);
 	}
 }
 
-template <class Pixel>
-SDLRasterizer<Pixel>::SDLRasterizer(
-		VDP& vdp_, Display& display, VisibleSurface& screen_,
+SDLRasterizer::SDLRasterizer(
+		VDP& vdp_, Display& display, OutputSurface& screen_,
 		std::unique_ptr<PostProcessor> postProcessor_)
 	: vdp(vdp_), vram(vdp.getVRAM())
 	, screen(screen_)
 	, postProcessor(std::move(postProcessor_))
-	, workFrame(std::make_unique<RawFrame>(screen.getSDLFormat(), 640, 240))
+	, workFrame(std::make_unique<RawFrame>(640, 240))
 	, renderSettings(display.getRenderSettings())
-	, characterConverter(vdp, palFg, palBg)
+	, characterConverter(vdp, subspan<16>(palFg), palBg)
 	, bitmapConverter(palFg, PALETTE256, V9958_COLORS)
-	, spriteConverter(vdp.getSpriteChecker())
+	, spriteConverter(vdp.getSpriteChecker(), palBg)
 {
 	// Init the palette.
 	precalcPalette();
 
 	// Initialize palette (avoid UMR)
 	if (!vdp.isMSX1VDP()) {
-		for (int i = 0; i < 16; ++i) {
+		for (auto i : xrange(16)) {
 			palFg[i] = palFg[i + 16] = palBg[i] =
 				V9938_COLORS[0][0][0];
 		}
@@ -100,8 +97,7 @@ SDLRasterizer<Pixel>::SDLRasterizer(
 	renderSettings.getColorMatrixSetting().attach(*this);
 }
 
-template <class Pixel>
-SDLRasterizer<Pixel>::~SDLRasterizer()
+SDLRasterizer::~SDLRasterizer()
 {
 	renderSettings.getColorMatrixSetting().detach(*this);
 	renderSettings.getGammaSetting()      .detach(*this);
@@ -109,22 +105,19 @@ SDLRasterizer<Pixel>::~SDLRasterizer()
 	renderSettings.getContrastSetting()   .detach(*this);
 }
 
-template <class Pixel>
-PostProcessor* SDLRasterizer<Pixel>::getPostProcessor() const
+PostProcessor* SDLRasterizer::getPostProcessor() const
 {
 	return postProcessor.get();
 }
 
-template <class Pixel>
-bool SDLRasterizer<Pixel>::isActive()
+bool SDLRasterizer::isActive()
 {
 	return postProcessor->needRender() &&
 	       vdp.getMotherBoard().isActive() &&
 	       !vdp.getMotherBoard().isFastForwarding();
 }
 
-template <class Pixel>
-void SDLRasterizer<Pixel>::reset()
+void SDLRasterizer::reset()
 {
 	// Init renderer state.
 	setDisplayMode(vdp.getDisplayMode());
@@ -133,27 +126,24 @@ void SDLRasterizer<Pixel>::reset()
 	resetPalette();
 }
 
-template <class Pixel>
-void SDLRasterizer<Pixel>::resetPalette()
+void SDLRasterizer::resetPalette()
 {
 	if (!vdp.isMSX1VDP()) {
 		// Reset the palette.
-		for (int i = 0; i < 16; i++) {
+		for (auto i : xrange(16)) {
 			setPalette(i, vdp.getPalette(i));
 		}
 	}
 }
 
-template<class Pixel>
-void SDLRasterizer<Pixel>::setSuperimposeVideoFrame(const RawFrame* videoSource)
+void SDLRasterizer::setSuperimposeVideoFrame(const RawFrame* videoSource)
 {
 	postProcessor->setSuperimposeVideoFrame(videoSource);
 	precalcColorIndex0(vdp.getDisplayMode(), vdp.getTransparency(),
 	                   videoSource, vdp.getBackgroundColor());
 }
 
-template <class Pixel>
-void SDLRasterizer<Pixel>::frameStart(EmuTime::param time)
+void SDLRasterizer::frameStart(EmuTime::param time)
 {
 	workFrame = postProcessor->rotateFrames(std::move(workFrame), time);
 	workFrame->init(
@@ -167,61 +157,13 @@ void SDLRasterizer<Pixel>::frameStart(EmuTime::param time)
 	// NTSC: display at [32..244),
 	// PAL:  display at [59..271).
 	lineRenderTop = vdp.isPalTiming() ? 59 - 14 : 32 - 14;
-
-
-	// We haven't drawn any left/right borders yet this frame, thus so far
-	// all is still consistent (same settings for all left/right borders).
-	mixedLeftRightBorders = false;
-
-	auto& borderInfo = workFrame->getBorderInfo();
-	Pixel color0, color1;
-	getBorderColors(color0, color1);
-	canSkipLeftRightBorders =
-		(borderInfo.mode   == vdp.getDisplayMode().getByte()) &&
-		(borderInfo.color0 == color0)                         &&
-		(borderInfo.color1 == color1)                         &&
-		(borderInfo.adjust == vdp.getHorizontalAdjust())      &&
-		(borderInfo.scroll == vdp.getHorizontalScrollLow())   &&
-		(borderInfo.masked == vdp.isBorderMasked());
 }
 
-template <class Pixel>
-void SDLRasterizer<Pixel>::frameEnd()
+void SDLRasterizer::frameEnd()
 {
-	auto& borderInfo = workFrame->getBorderInfo();
-	if (mixedLeftRightBorders) {
-		// This frame contains left/right borders drawn with different
-		// settings. So don't use it as a starting point for future
-		// border drawing optimizations.
-		borderInfo.mode = 0xff; // invalid mode, other fields don't matter
-	} else {
-		// All left/right borders in this frame are uniform (drawn with
-		// the same settings). If in a later frame the border-related
-		// settings are still the same, we can skip drawing borders.
-		Pixel color0, color1;
-		getBorderColors(color0, color1);
-		borderInfo.mode   = vdp.getDisplayMode().getByte();
-		borderInfo.color0 = color0;
-		borderInfo.color1 = color1;
-		borderInfo.adjust = vdp.getHorizontalAdjust();
-		borderInfo.scroll = vdp.getHorizontalScrollLow();
-		borderInfo.masked = vdp.isBorderMasked();
-	}
 }
 
-template <class Pixel>
-void SDLRasterizer<Pixel>::borderSettingChanged()
-{
-	// Can no longer use the skip-border drawing optimization this frame.
-	canSkipLeftRightBorders = false;
-
-	// Cannot use this frame as a starting point for future skip-border
-	// optimizations.
-	mixedLeftRightBorders = true;
-}
-
-template <class Pixel>
-void SDLRasterizer<Pixel>::setDisplayMode(DisplayMode mode)
+void SDLRasterizer::setDisplayMode(DisplayMode mode)
 {
 	if (mode.isBitmapMode()) {
 		bitmapConverter.setDisplayMode(mode);
@@ -234,11 +176,9 @@ void SDLRasterizer<Pixel>::setDisplayMode(DisplayMode mode)
 	spriteConverter.setPalette(mode.getByte() == DisplayMode::GRAPHIC7
 	                           ? palGraphic7Sprites : palBg);
 
-	borderSettingChanged();
 }
 
-template <class Pixel>
-void SDLRasterizer<Pixel>::setPalette(int index, int grb)
+void SDLRasterizer::setPalette(unsigned index, int grb)
 {
 	// Update SDL colors in palette.
 	Pixel newColor = V9938_COLORS[(grb >> 4) & 7][grb >> 8][grb & 7];
@@ -249,57 +189,46 @@ void SDLRasterizer<Pixel>::setPalette(int index, int grb)
 
 	precalcColorIndex0(vdp.getDisplayMode(), vdp.getTransparency(),
 	                   vdp.isSuperimposing(), vdp.getBackgroundColor());
-	borderSettingChanged();
 }
 
-template <class Pixel>
-void SDLRasterizer<Pixel>::setBackgroundColor(int index)
+void SDLRasterizer::setBackgroundColor(byte index)
 {
 	if (vdp.getDisplayMode().getByte() != DisplayMode::GRAPHIC7) {
 		precalcColorIndex0(vdp.getDisplayMode(), vdp.getTransparency(),
 				   vdp.isSuperimposing(), index);
 	}
-	borderSettingChanged();
 }
 
-template <class Pixel>
-void SDLRasterizer<Pixel>::setHorizontalAdjust(int /*adjust*/)
+void SDLRasterizer::setHorizontalAdjust(int /*adjust*/)
 {
-	borderSettingChanged();
 }
 
-template <class Pixel>
-void SDLRasterizer<Pixel>::setHorizontalScrollLow(byte /*scroll*/)
+void SDLRasterizer::setHorizontalScrollLow(byte /*scroll*/)
 {
-	borderSettingChanged();
 }
 
-template <class Pixel>
-void SDLRasterizer<Pixel>::setBorderMask(bool /*masked*/)
+void SDLRasterizer::setBorderMask(bool /*masked*/)
 {
-	borderSettingChanged();
 }
 
-template <class Pixel>
-void SDLRasterizer<Pixel>::setTransparency(bool enabled)
+void SDLRasterizer::setTransparency(bool enabled)
 {
 	spriteConverter.setTransparency(enabled);
 	precalcColorIndex0(vdp.getDisplayMode(), enabled,
 	                   vdp.isSuperimposing(), vdp.getBackgroundColor());
 }
 
-template <class Pixel>
-void SDLRasterizer<Pixel>::precalcPalette()
+void SDLRasterizer::precalcPalette()
 {
 	if (vdp.isMSX1VDP()) {
 		// Fixed palette.
 		const auto palette = vdp.getMSX1Palette();
-		for (int i = 0; i < 16; ++i) {
+		for (auto i : xrange(16)) {
 			const auto rgb = palette[i];
 			palFg[i] = palFg[i + 16] = palBg[i] =
-				screen.mapKeyedRGB<Pixel>(
+				screen.mapRGB(
 					renderSettings.transformRGB(
-						vec3(rgb[0], rgb[1], rgb[2]) / 255.0f));
+						vec3(rgb[0], rgb[1], rgb[2]) * (1.0f / 255.0f)));
 		}
 	} else {
 		if (vdp.hasYJK()) {
@@ -307,25 +236,26 @@ void SDLRasterizer<Pixel>::precalcPalette()
 			if (renderSettings.isColorMatrixIdentity()) {
 				// Most users use the "normal" monitor type; making this a
 				// special case speeds up palette precalculation a lot.
-				int intensity[32];
-				for (int i = 0; i < 32; ++i) {
-					intensity[i] =
-						int(255 * renderSettings.transformComponent(i / 31.0));
+				std::array<int, 32> intensity;
+				for (auto [i, r] : enumerate(intensity)) {
+					r = narrow_cast<int>(255.0f * renderSettings.transformComponent(narrow<float>(i) * (1.0f / 31.0f)));
 				}
-				for (int rgb = 0; rgb < (1 << 15); ++rgb) {
-					V9958_COLORS[rgb] = screen.mapKeyedRGB255<Pixel>(ivec3(
+				for (auto [rgb, col] : enumerate(V9958_COLORS)) {
+					col = screen.mapRGB255(ivec3(
 						intensity[(rgb >> 10) & 31],
 						intensity[(rgb >>  5) & 31],
 						intensity[(rgb >>  0) & 31]));
 				}
 			} else {
-				for (int r = 0; r < 32; ++r) {
-					for (int g = 0; g < 32; ++g) {
-						for (int b = 0; b < 32; ++b) {
+				for (auto r : xrange(32)) {
+					for (auto g : xrange(32)) {
+						for (auto b : xrange(32)) {
+							vec3 rgb{narrow<float>(r),
+							         narrow<float>(g),
+							         narrow<float>(b)};
 							V9958_COLORS[(r << 10) + (g << 5) + b] =
-								screen.mapKeyedRGB<Pixel>(
-									renderSettings.transformRGB(
-										vec3(r, g, b) / 31.0f));
+								screen.mapRGB(
+									renderSettings.transformRGB(rgb * (1.0f / 31.0f)));
 						}
 					}
 				}
@@ -333,11 +263,11 @@ void SDLRasterizer<Pixel>::precalcPalette()
 			// Precalculate palette for V9938 colors.
 			// Based on comparing red and green gradients, using palette and
 			// YJK, in SCREEN11 on a real turbo R.
-			for (int r3 = 0; r3 < 8; ++r3) {
+			for (auto r3 : xrange(8)) {
 				int r5 = (r3 << 2) | (r3 >> 1);
-				for (int g3 = 0; g3 < 8; ++g3) {
+				for (auto g3 : xrange(8)) {
 					int g5 = (g3 << 2) | (g3 >> 1);
-					for (int b3 = 0; b3 < 8; ++b3) {
+					for (auto b3 : xrange(8)) {
 						int b5 = (b3 << 2) | (b3 >> 1);
 						V9938_COLORS[r3][g3][b3] =
 							V9958_COLORS[(r5 << 10) + (g5 << 5) + b5];
@@ -347,16 +277,15 @@ void SDLRasterizer<Pixel>::precalcPalette()
 		} else {
 			// Precalculate palette for V9938 colors.
 			if (renderSettings.isColorMatrixIdentity()) {
-				int intensity[8];
-				for (int i = 0; i < 8; ++i) {
-					intensity[i] =
-						int(255 * renderSettings.transformComponent(i / 7.0f));
+				std::array<int, 8> intensity;
+				for (auto [i, r] : enumerate(intensity)) {
+					r = narrow_cast<int>(255.0f * renderSettings.transformComponent(narrow<float>(i) * (1.0f / 7.0f)));
 				}
-				for (int r = 0; r < 8; ++r) {
-					for (int g = 0; g < 8; ++g) {
-						for (int b = 0; b < 8; ++b) {
+				for (auto r : xrange(8)) {
+					for (auto g : xrange(8)) {
+						for (auto b : xrange(8)) {
 							V9938_COLORS[r][g][b] =
-								screen.mapKeyedRGB255<Pixel>(ivec3(
+								screen.mapRGB255(ivec3(
 									intensity[r],
 									intensity[g],
 									intensity[b]));
@@ -364,27 +293,29 @@ void SDLRasterizer<Pixel>::precalcPalette()
 					}
 				}
 			} else {
-				for (int r = 0; r < 8; ++r) {
-					for (int g = 0; g < 8; ++g) {
-						for (int b = 0; b < 8; ++b) {
+				for (auto r : xrange(8)) {
+					for (auto g : xrange(8)) {
+						for (auto b : xrange(8)) {
+							vec3 rgb{narrow<float>(r),
+							         narrow<float>(g),
+							         narrow<float>(b)};
 							V9938_COLORS[r][g][b] =
-								screen.mapKeyedRGB<Pixel>(
-									renderSettings.transformRGB(
-										vec3(r, g, b) / 7.0f));;
+								screen.mapRGB(
+									renderSettings.transformRGB(rgb * (1.0f / 7.0f)));
 						}
 					}
 				}
 			}
 		}
 		// Precalculate Graphic 7 bitmap palette.
-		for (int i = 0; i < 256; ++i) {
+		for (auto i : xrange(256)) {
 			PALETTE256[i] = V9938_COLORS
 				[(i & 0x1C) >> 2]
 				[(i & 0xE0) >> 5]
 				[(i & 0x03) == 3 ? 7 : (i & 0x03) * 2];
 		}
 		// Precalculate Graphic 7 sprite palette.
-		for (int i = 0; i < 16; ++i) {
+		for (auto i : xrange(16)) {
 			uint16_t grb = Renderer::GRAPHIC7_SPRITE_PALETTE[i];
 			palGraphic7Sprites[i] =
 				V9938_COLORS[(grb >> 4) & 7][grb >> 8][grb & 7];
@@ -392,19 +323,18 @@ void SDLRasterizer<Pixel>::precalcPalette()
 	}
 }
 
-template <class Pixel>
-void SDLRasterizer<Pixel>::precalcColorIndex0(DisplayMode mode,
-		bool transparency, const RawFrame* superimposing, byte bgcolorIndex)
+void SDLRasterizer::precalcColorIndex0(DisplayMode mode,
+		bool transparency, const RawFrame* superimposing, byte bgColorIndex)
 {
 	// Graphic7 mode doesn't use transparency.
 	if (mode.getByte() == DisplayMode::GRAPHIC7) {
 		transparency = false;
 	}
 
-	int tpIndex = transparency ? bgcolorIndex : 0;
+	int tpIndex = transparency ? bgColorIndex : 0;
 	if (mode.getBase() != DisplayMode::GRAPHIC5) {
-		Pixel c = (superimposing && (bgcolorIndex == 0))
-		        ? screen.getKeyColor<Pixel>()
+		Pixel c = (superimposing && (bgColorIndex == 0))
+		        ? screen.getKeyColor()
 		        : palBg[tpIndex];
 
 		if (palFg[0] != c) {
@@ -422,40 +352,41 @@ void SDLRasterizer<Pixel>::precalcColorIndex0(DisplayMode mode,
 	}
 }
 
-template <class Pixel>
-void SDLRasterizer<Pixel>::getBorderColors(Pixel& border0, Pixel& border1)
+std::pair<Pixel, Pixel> SDLRasterizer::getBorderColors()
 {
 	DisplayMode mode = vdp.getDisplayMode();
 	int bgColor = vdp.getBackgroundColor();
 	if (mode.getBase() == DisplayMode::GRAPHIC5) {
 		// border in SCREEN6 has separate color for even and odd pixels.
 		// TODO odd/even swapped?
-		border0 = palBg[(bgColor & 0x0C) >> 2];
-		border1 = palBg[(bgColor & 0x03) >> 0];
-	} else if (mode.getByte() == DisplayMode::GRAPHIC7) {
-		border0 = border1 = PALETTE256[bgColor];
-	} else {
-		if (!bgColor && vdp.isSuperimposing()) {
-			border0 = border1 = screen.getKeyColor<Pixel>();
-		} else {
-			border0 = border1 = palBg[bgColor];
-		}
+		return {palBg[(bgColor & 0x0C) >> 2],
+		        palBg[(bgColor & 0x03) >> 0]};
 	}
+	Pixel col = [&] { // other modes only have a single border color
+		if (mode.getByte() == DisplayMode::GRAPHIC7) {
+			return PALETTE256[bgColor];
+		} else {
+			if (!bgColor && vdp.isSuperimposing()) {
+				return screen.getKeyColor();
+			} else {
+				return palBg[bgColor];
+			}
+		}
+	}();
+	return {col, col};
 }
 
-template <class Pixel>
-void SDLRasterizer<Pixel>::drawBorder(
+void SDLRasterizer::drawBorder(
 	int fromX, int fromY, int limitX, int limitY)
 {
-	Pixel border0, border1;
-	getBorderColors(border0, border1);
+	auto [border0, border1] = getBorderColors();
 
 	int startY = std::max(fromY - lineRenderTop, 0);
 	int endY = std::min(limitY - lineRenderTop, 240);
 	if ((fromX == 0) && (limitX == VDP::TICKS_PER_LINE) &&
 	    (border0 == border1)) {
 		// complete lines, non striped
-		for (int y = startY; y < endY; y++) {
+		for (auto y : xrange(startY, endY)) {
 			workFrame->setBlank(y, border0);
 			// setBlank() implies this line is not suitable
 			// for left/right border optimization in a later
@@ -467,13 +398,9 @@ void SDLRasterizer<Pixel>::drawBorder(
 		unsigned num = translateX(limitX, (lineWidth == 512)) - x;
 		unsigned width = (lineWidth == 512) ? 640 : 320;
 		MemoryOps::MemSet2<Pixel> memset;
-		for (int y = startY; y < endY; ++y) {
-			// workFrame->linewidth != 1 means the line has
-			// left/right borders.
-			if (canSkipLeftRightBorders &&
-			    (workFrame->getLineWidthDirect(y) != 1)) continue;
-			memset(workFrame->getLinePtrDirect<Pixel>(y) + x,
-			       num, border0, border1);
+		for (auto y : xrange(startY, endY)) {
+			memset(workFrame->getLineDirect(y).subspan(x, num),
+			       border0, border1);
 			if (limitX == VDP::TICKS_PER_LINE) {
 				// Only set line width at the end (right
 				// border) of the line. This ensures we can
@@ -486,8 +413,7 @@ void SDLRasterizer<Pixel>::drawBorder(
 	}
 }
 
-template <class Pixel>
-void SDLRasterizer<Pixel>::drawDisplay(
+void SDLRasterizer::drawDisplay(
 	int /*fromX*/, int fromY,
 	int displayX, int displayY,
 	int displayWidth, int displayHeight)
@@ -510,7 +436,7 @@ void SDLRasterizer<Pixel>::drawDisplay(
 	int screenY = fromY - lineRenderTop;
 	if (screenY < 0) {
 		displayY -= screenY;
-		fromY = lineRenderTop;
+		//fromY = lineRenderTop;
 		screenY = 0;
 	}
 	displayHeight = screenLimitY - screenY;
@@ -520,7 +446,7 @@ void SDLRasterizer<Pixel>::drawDisplay(
 		translateX(vdp.getLeftBackground(), lineWidth == 512);
 	// TODO: Find out why this causes 1-pixel jitter:
 	//dest.x = translateX(fromX);
-	int hScroll =
+	unsigned hScroll =
 		  mode.isTextMode()
 		? 0
 		: 8 * (lineWidth / 256) * (vdp.getHorizontalScrollHigh() & 0x1F);
@@ -531,48 +457,55 @@ void SDLRasterizer<Pixel>::drawDisplay(
 	// Note that it is possible for pageBorder to be to the left of displayX,
 	// in that case only the second page should be drawn.
 	int pageBorder = displayX + displayWidth;
-	int scrollPage1, scrollPage2;
-	if (vdp.isMultiPageScrolling()) {
-		scrollPage1 = vdp.getHorizontalScrollHigh() >> 5;
-		scrollPage2 = scrollPage1 ^ 1;
-	} else {
-		scrollPage1 = 0;
-		scrollPage2 = 0;
-	}
+	auto [scrollPage1, scrollPage2] = [&]() -> std::pair<int, int> {
+		if (vdp.isMultiPageScrolling()) {
+			int p1 = vdp.getHorizontalScrollHigh() >> 5;
+			int p2 = p1 ^ 1;
+			return {p1, p2};
+		} else {
+			return {0, 0};
+		}
+	}();
 	// Because SDL blits do not wrap, unlike GL textures, the pageBorder is
 	// also used if multi page is disabled.
-	int pageSplit = lineWidth - hScroll;
-	if (pageSplit < pageBorder) {
+	if (int pageSplit = narrow<int>(lineWidth - hScroll);
+	    pageSplit < pageBorder) {
 		pageBorder = pageSplit;
 	}
 
 	if (mode.isBitmapMode()) {
-		// Which bits in the name mask determine the page?
-		int pageMaskOdd = (mode.isPlanar() ? 0x000 : 0x200) |
-		                  vdp.getEvenOddMask();
-		int pageMaskEven = vdp.isMultiPageScrolling()
-		                 ? (pageMaskOdd & ~0x100)
-		                 : pageMaskOdd;
-
-		for (int y = screenY; y < screenLimitY; y++) {
-			const int vramLine[2] = {
+		for (auto y : xrange(screenY, screenLimitY)) {
+			// Which bits in the name mask determine the page?
+			// TODO optimize this?
+			//   Calculating pageMaskOdd/Even is a non-trivial amount
+			//   of work. We used to do this per frame (more or less)
+			//   but now do it per line. Per-line is actually only
+			//   needed when vdp.isFastBlinkEnabled() is true.
+			//   Idea: can be cheaply calculated incrementally.
+			unsigned pageMaskOdd = (mode.isPlanar() ? 0x000 : 0x200) |
+				vdp.getEvenOddMask(y);
+			unsigned pageMaskEven = vdp.isMultiPageScrolling()
+				? (pageMaskOdd & ~0x100)
+				: pageMaskOdd;
+			const std::array<unsigned, 2> vramLine = {
 				(vram.nameTable.getMask() >> 7) & (pageMaskEven | displayY),
 				(vram.nameTable.getMask() >> 7) & (pageMaskOdd  | displayY)
 			};
 
-			Pixel buf[512];
-			int lineInBuf = -1; // buffer data not valid
-			Pixel* dst = workFrame->getLinePtrDirect<Pixel>(y)
-			           + leftBackground + displayX;
+			std::array<Pixel, 512> buf;
+			auto lineInBuf = unsigned(-1); // buffer data not valid
+			auto dst = workFrame->getLineDirect(y).subspan(leftBackground + displayX);
 			int firstPageWidth = pageBorder - displayX;
 			if (firstPageWidth > 0) {
-				if ((displayX + hScroll) == 0) {
+				if (((displayX + hScroll) == 0) &&
+				    (firstPageWidth == narrow<int>(lineWidth))) {
+					// fast-path, directly render to destination
 					renderBitmapLine(dst, vramLine[scrollPage1]);
 				} else {
 					lineInBuf = vramLine[scrollPage1];
 					renderBitmapLine(buf, vramLine[scrollPage1]);
-					const Pixel* src = buf + displayX + hScroll;
-					memcpy(dst, src, firstPageWidth * sizeof(Pixel));
+					auto src = subspan(buf, displayX + hScroll, firstPageWidth);
+					ranges::copy(src, dst);
 				}
 			} else {
 				firstPageWidth = 0;
@@ -583,27 +516,25 @@ void SDLRasterizer<Pixel>::drawDisplay(
 				}
 				unsigned x = displayX < pageBorder
 					   ? 0 : displayX + hScroll - lineWidth;
-				memcpy(dst + firstPageWidth,
-				       buf + x,
-				       (displayWidth - firstPageWidth) * sizeof(Pixel));
+				ranges::copy(subspan(buf, x, displayWidth - firstPageWidth),
+				             subspan(dst, firstPageWidth));
 			}
 
 			displayY = (displayY + 1) & 255;
 		}
 	} else {
 		// horizontal scroll (high) is implemented in CharacterConverter
-		for (int y = screenY; y < screenLimitY; y++) {
+		for (auto y : xrange(screenY, screenLimitY)) {
 			assert(!vdp.isMSX1VDP() || displayY < 192);
 
-			Pixel* dst = workFrame->getLinePtrDirect<Pixel>(y)
-			           + leftBackground + displayX;
-			if (displayX == 0) {
+			auto dst = workFrame->getLineDirect(y).subspan(leftBackground + displayX);
+			if ((displayX == 0) && (displayWidth == narrow<int>(lineWidth))){
 				characterConverter.convertLine(dst, displayY);
 			} else {
-				Pixel buf[512];
+				std::array<Pixel, 512> buf;
 				characterConverter.convertLine(buf, displayY);
-				const Pixel* src = buf + displayX;
-				memcpy(dst, src, displayWidth * sizeof(Pixel));
+				auto src = subspan(buf, displayX, displayWidth);
+				ranges::copy(src, dst);
 			}
 
 			displayY = (displayY + 1) & 255;
@@ -611,10 +542,9 @@ void SDLRasterizer<Pixel>::drawDisplay(
 	}
 }
 
-template <class Pixel>
-void SDLRasterizer<Pixel>::drawSprites(
+void SDLRasterizer::drawSprites(
 	int /*fromX*/, int fromY,
-	int displayX, int displayY,
+	int displayX, int /*displayY*/,
 	int displayWidth, int displayHeight)
 {
 	// Clip to screen area.
@@ -624,7 +554,6 @@ void SDLRasterizer<Pixel>::drawSprites(
 		240);
 	int screenY = fromY - lineRenderTop;
 	if (screenY < 0) {
-		displayY -= screenY;
 		fromY = lineRenderTop;
 		screenY = 0;
 	}
@@ -642,58 +571,47 @@ void SDLRasterizer<Pixel>::drawSprites(
 		vdp.getDisplayMode().getLineWidth() == 512);
 	if (spriteMode == 1) {
 		for (int y = fromY; y < limitY; y++, screenY++) {
-			Pixel* pixelPtr = workFrame->getLinePtrDirect<Pixel>(screenY) + screenX;
-			spriteConverter.drawMode1(y, displayX, displayLimitX, pixelPtr);
+			auto dst = workFrame->getLineDirect(screenY).subspan(screenX);
+			spriteConverter.drawMode1(y, displayX, displayLimitX, dst);
 		}
 	} else {
 		byte mode = vdp.getDisplayMode().getByte();
 		if (mode == DisplayMode::GRAPHIC5) {
 			for (int y = fromY; y < limitY; y++, screenY++) {
-				Pixel* pixelPtr = workFrame->getLinePtrDirect<Pixel>(screenY) + screenX;
+				auto dst = workFrame->getLineDirect(screenY).subspan(screenX);
 				spriteConverter.template drawMode2<DisplayMode::GRAPHIC5>(
-					y, displayX, displayLimitX, pixelPtr);
+					y, displayX, displayLimitX, dst);
 			}
 		} else if (mode == DisplayMode::GRAPHIC6) {
 			for (int y = fromY; y < limitY; y++, screenY++) {
-				Pixel* pixelPtr = workFrame->getLinePtrDirect<Pixel>(screenY) + screenX;
+				auto dst = workFrame->getLineDirect(screenY).subspan(screenX);
 				spriteConverter.template drawMode2<DisplayMode::GRAPHIC6>(
-					y, displayX, displayLimitX, pixelPtr);
+					y, displayX, displayLimitX, dst);
 			}
 		} else {
 			for (int y = fromY; y < limitY; y++, screenY++) {
-				Pixel* pixelPtr = workFrame->getLinePtrDirect<Pixel>(screenY) + screenX;
+				auto dst = workFrame->getLineDirect(screenY).subspan(screenX);
 				spriteConverter.template drawMode2<DisplayMode::GRAPHIC4>(
-					y, displayX, displayLimitX, pixelPtr);
+					y, displayX, displayLimitX, dst);
 			}
 		}
 	}
 }
 
-template <class Pixel>
-bool SDLRasterizer<Pixel>::isRecording() const
+bool SDLRasterizer::isRecording() const
 {
 	return postProcessor->isRecording();
 }
 
-template <class Pixel>
-void SDLRasterizer<Pixel>::update(const Setting& setting)
+void SDLRasterizer::update(const Setting& setting) noexcept
 {
-	if ((&setting == &renderSettings.getGammaSetting()) ||
-	    (&setting == &renderSettings.getBrightnessSetting()) ||
-	    (&setting == &renderSettings.getContrastSetting()) ||
-	    (&setting == &renderSettings.getColorMatrixSetting())) {
+	if (&setting == one_of(&renderSettings.getGammaSetting(),
+	                       &renderSettings.getBrightnessSetting(),
+	                       &renderSettings.getContrastSetting(),
+	                       &renderSettings.getColorMatrixSetting())) {
 		precalcPalette();
 		resetPalette();
 	}
 }
-
-
-// Force template instantiation.
-#if HAVE_16BPP
-template class SDLRasterizer<uint16_t>;
-#endif
-#if HAVE_32BPP || COMPONENT_GL
-template class SDLRasterizer<uint32_t>;
-#endif
 
 } // namespace openmsx

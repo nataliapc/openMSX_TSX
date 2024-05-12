@@ -1,12 +1,14 @@
 #include "MemoryOps.hh"
-#include "likely.hh"
+
 #include "build-info.hh"
 #include "systemfuncs.hh"
-#include "Math.hh"
+
+#include "endian.hh"
+#include "narrow.hh"
 #include "stl.hh"
 #include "unreachable.hh"
-#include <utility>
-#include <vector>
+
+#include <bit>
 #include <cassert>
 #include <cstdlib>
 #include <cstdint>
@@ -18,8 +20,7 @@
 #include <emmintrin.h>
 #endif
 
-namespace openmsx {
-namespace MemoryOps {
+namespace openmsx::MemoryOps {
 
 #ifdef __SSE2__
 #if ASM_X86_32 && defined _MSC_VER
@@ -27,7 +28,7 @@ namespace MemoryOps {
 // only has it for 64 bit. So we add it ourselves for vc++/32-bit. An
 // alternative would be to always use this routine, but this generates worse
 // code than the real _mm_set1_epi64x() function for gcc (both 32 and 64 bit).
-static inline __m128i _mm_set1_epi64x(uint64_t val)
+[[nodiscard]] static inline __m128i _mm_set1_epi64x(uint64_t val)
 {
 	uint32_t low  = val >> 32;
 	uint32_t high = val >>  0;
@@ -38,32 +39,32 @@ static inline __m128i _mm_set1_epi64x(uint64_t val)
 static inline void memset_64_SSE(
 	uint64_t* out, size_t num64, uint64_t val64)
 {
-	if (unlikely(num64 == 0)) return;
+	if (num64 == 0) [[unlikely]] return;
 
 	// Align at 16-byte boundary.
-	if (unlikely(size_t(out) & 8)) {
+	if (size_t(out) & 8) [[unlikely]] {
 		out[0] = val64;
 		++out; --num64;
 	}
 
-	__m128i val128 = _mm_set1_epi64x(val64);
+	__m128i val128 = _mm_set1_epi64x(narrow_cast<int64_t>(val64));
 	uint64_t* e = out + num64 - 3;
 	for (/**/; out < e; out += 4) {
-		_mm_store_si128(reinterpret_cast<__m128i*>(out + 0), val128);
-		_mm_store_si128(reinterpret_cast<__m128i*>(out + 2), val128);
+		_mm_store_si128(std::bit_cast<__m128i*>(out + 0), val128);
+		_mm_store_si128(std::bit_cast<__m128i*>(out + 2), val128);
 	}
-	if (unlikely(num64 & 2)) {
-		_mm_store_si128(reinterpret_cast<__m128i*>(out), val128);
+	if (num64 & 2) [[unlikely]] {
+		_mm_store_si128(std::bit_cast<__m128i*>(out), val128);
 		out += 2;
 	}
-	if (unlikely(num64 & 1)) {
+	if (num64 & 1) [[unlikely]] {
 		out[0] = val64;
 	}
 }
 #endif
 
 static inline void memset_64(
-        uint64_t* out, size_t num64, uint64_t val64)
+	uint64_t* out, size_t num64, uint64_t val64)
 {
 	assert((size_t(out) % 8) == 0); // must be 8-byte aligned
 
@@ -78,12 +79,12 @@ static inline void memset_64(
 		out[2] = val64;
 		out[3] = val64;
 	}
-	if (unlikely(num64 & 2)) {
+	if (num64 & 2) [[unlikely]] {
 		out[0] = val64;
 		out[1] = val64;
 		out += 2;
 	}
-	if (unlikely(num64 & 1)) {
+	if (num64 & 1) [[unlikely]] {
 		out[0] = val64;
 	}
 }
@@ -92,19 +93,19 @@ static inline void memset_32_2(
 	uint32_t* out, size_t num32, uint32_t val0, uint32_t val1)
 {
 	assert((size_t(out) % 4) == 0); // must be 4-byte aligned
-	if (unlikely(num32 == 0)) return;
+	if (num32 == 0) [[unlikely]] return;
 
 	// Align at 8-byte boundary.
-	if (unlikely(size_t(out) & 4)) {
+	if (size_t(out) & 4) [[unlikely]] {
 		out[0] = val1; // start at odd pixel
 		++out; --num32;
 	}
 
-	uint64_t val64 = OPENMSX_BIGENDIAN ? (uint64_t(val0) << 32) | val1
-	                                   : val0 | (uint64_t(val1) << 32);
-	memset_64(reinterpret_cast<uint64_t*>(out), num32 / 2, val64);
+	uint64_t val64 = Endian::BIG ? (uint64_t(val0) << 32) | val1
+	                             : val0 | (uint64_t(val1) << 32);
+	memset_64(std::bit_cast<uint64_t*>(out), num32 / 2, val64);
 
-	if (unlikely(num32 & 1)) {
+	if (num32 & 1) [[unlikely]] {
 		out[num32 - 1] = val0;
 	}
 }
@@ -118,7 +119,7 @@ static inline void memset_32(uint32_t* out, size_t num32, uint32_t val32)
 	// VC++'s __stosd intrinsic results in emulator benchmarks
 	// running about 7% faster than with memset_32_2, streaming or not,
 	// and about 3% faster than the C code below.
-	__stosd(reinterpret_cast<unsigned long*>(out), val32, num32);
+	__stosd(std::bit_cast<unsigned long*>(out), val32, num32);
 #else
 	memset_32_2(out, num32, val32, val32);
 #endif
@@ -134,77 +135,46 @@ static inline void memset_32(uint32_t* out, size_t num32, uint32_t val32)
 		out[6] = val32;
 		out[7] = val32;
 	}
-	if (unlikely(num32 & 4)) {
+	if (num32 & 4) [[unlikely]] {
 		out[0] = val32;
 		out[1] = val32;
 		out[2] = val32;
 		out[3] = val32;
 		out += 4;
 	}
-	if (unlikely(num32 & 2)) {
+	if (num32 & 2) [[unlikely]] {
 		out[0] = val32;
 		out[1] = val32;
 		out += 2;
 	}
-	if (unlikely(num32 & 1)) {
+	if (num32 & 1) [[unlikely]] {
 		out[0] = val32;
 	}
 #endif
 }
 
-static inline void memset_16_2(
-	uint16_t* out, size_t num16, uint16_t val0, uint16_t val1)
-{
-	if (unlikely(num16 == 0)) return;
-
-	// Align at 4-byte boundary.
-	if (unlikely(size_t(out) & 2)) {
-		out[0] = val1; // start at odd pixel
-		++out; --num16;
-	}
-
-	uint32_t val32 = OPENMSX_BIGENDIAN ? (uint32_t(val0) << 16) | val1
-	                                   : val0 | (uint32_t(val1) << 16);
-	memset_32(reinterpret_cast<uint32_t*>(out), num16 / 2, val32);
-
-	if (unlikely(num16 & 1)) {
-		out[num16 - 1] = val0;
-	}
-}
-
-static inline void memset_16(uint16_t* out, size_t num16, uint16_t val16)
-{
-	memset_16_2(out, num16, val16, val16);
-}
-
 template<typename Pixel> void MemSet<Pixel>::operator()(
-	Pixel* out, size_t num, Pixel val) const
+	std::span<Pixel> out, Pixel val) const
 {
-	if (sizeof(Pixel) == 2) {
-		memset_16(reinterpret_cast<uint16_t*>(out), num, val);
-	} else if (sizeof(Pixel) == 4) {
-		memset_32(reinterpret_cast<uint32_t*>(out), num, val);
+	if constexpr (sizeof(Pixel) == 4) {
+		memset_32(std::bit_cast<uint32_t*>(out.data()), out.size(), val);
 	} else {
 		UNREACHABLE;
 	}
 }
 
 template<typename Pixel> void MemSet2<Pixel>::operator()(
-	Pixel* out, size_t num, Pixel val0, Pixel val1) const
+	std::span<Pixel> out, Pixel val0, Pixel val1) const
 {
-	if (sizeof(Pixel) == 2) {
-		memset_16_2(reinterpret_cast<uint16_t*>(out), num, val0, val1);
-	} else if (sizeof(Pixel) == 4) {
-		memset_32_2(reinterpret_cast<uint32_t*>(out), num, val0, val1);
+	if constexpr (sizeof(Pixel) == 4) {
+		memset_32_2(std::bit_cast<uint32_t*>(out.data()), out.size(), val0, val1);
 	} else {
 		UNREACHABLE;
 	}
 }
 
 // Force template instantiation
-template struct MemSet <uint16_t>;
 template struct MemSet <uint32_t>;
-template struct MemSet2<uint16_t>;
 template struct MemSet2<uint32_t>;
 
 
@@ -216,6 +186,11 @@ template struct MemSet2<uint32_t>;
 class AllocMap
 {
 public:
+	AllocMap(const AllocMap&) = delete;
+	AllocMap(AllocMap&&) = delete;
+	AllocMap& operator=(const AllocMap&) = delete;
+	AllocMap& operator=(AllocMap&&) = delete;
+
 	static AllocMap& instance() {
 		static AllocMap oneInstance;
 		return oneInstance;
@@ -223,18 +198,16 @@ public:
 
 	void insert(void* aligned, void* unaligned) {
 		if (!aligned) return;
-		assert(none_of(begin(allocMap), end(allocMap),
-		               EqualTupleValue<0>(aligned)));
-		allocMap.emplace_back(aligned, unaligned);
+		assert(!contains(allocMap, aligned, &Entry::aligned));
+		allocMap.emplace_back(Entry{aligned, unaligned});
 	}
 
 	void* remove(void* aligned) {
 		if (!aligned) return nullptr;
 		// LIFO order is more likely than FIFO -> search backwards
-		auto it = rfind_if_unguarded(allocMap,
-		               EqualTupleValue<0>(aligned));
+		auto it = rfind_unguarded(allocMap, aligned, &Entry::aligned);
 		// return the associated unaligned value
-		void* unaligned = it->second;
+		void* unaligned = it->unaligned;
 		move_pop_back(allocMap, it);
 		return unaligned;
 	}
@@ -246,15 +219,19 @@ private:
 	}
 
 	// typically contains 5-10 items, so (unsorted) vector is fine
-	std::vector<std::pair<void*, void*>> allocMap;
+	struct Entry {
+		void* aligned;
+		void* unaligned;
+	};
+	std::vector<Entry> allocMap;
 };
 
 void* mallocAligned(size_t alignment, size_t size)
 {
-	assert("must be a power of 2" && Math::isPowerOfTwo(alignment));
+	assert("must be a power of 2" && std::has_single_bit(alignment));
 	assert(alignment >= sizeof(void*));
 #if HAVE_POSIX_MEMALIGN
-	void* aligned;
+	void* aligned = nullptr;
 	if (posix_memalign(&aligned, alignment, size)) {
 		throw std::bad_alloc();
 	}
@@ -272,8 +249,8 @@ void* mallocAligned(size_t alignment, size_t size)
 	if (!unaligned) {
 		throw std::bad_alloc();
 	}
-	auto aligned = reinterpret_cast<void*>(
-		(reinterpret_cast<size_t>(unaligned) + t) & ~t);
+	auto aligned = std::bit_cast<void*>(
+		(std::bit_cast<uintptr_t>(unaligned) + t) & ~t);
 	AllocMap::instance().insert(aligned, unaligned);
 	return aligned;
 #endif
@@ -294,5 +271,4 @@ void freeAligned(void* aligned)
 #endif
 }
 
-} // namespace MemoryOps
-} // namespace openmsx
+} // namespace openmsx::MemoryOps

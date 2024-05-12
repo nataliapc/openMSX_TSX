@@ -1,40 +1,41 @@
 #include "OSDWidget.hh"
-#include "OutputSurface.hh"
-#include "Display.hh"
-#include "CommandException.hh"
-#include "TclObject.hh"
-#include "GLUtil.hh"
-#include "stl.hh"
-#include <SDL.h>
-#include <algorithm>
-#include <limits>
-#include <memory>
 
-using std::string;
-using std::vector;
-using std::unique_ptr;
+#include "CommandException.hh"
+#include "Display.hh"
+#include "GLUtil.hh"
+#include "OutputSurface.hh"
+#include "TclObject.hh"
+#include "VideoSystem.hh"
+
+#include "narrow.hh"
+#include "stl.hh"
+
+#include <SDL.h>
+
+#include <array>
+#include <limits>
+#include <optional>
+
 using namespace gl;
 
 namespace openmsx {
 
 // intersect two rectangles
-static void intersect(int xa, int ya, int wa, int ha,
-                      int xb, int yb, int wb, int hb,
-                      int& x, int& y, int& w, int& h)
+struct Rectangle { int x, y, w, h; };
+static constexpr Rectangle intersect(const Rectangle& a, const Rectangle& b)
 {
-	int x1 = std::max<int>(xa, xb);
-	int y1 = std::max<int>(ya, yb);
-	int x2 = std::min<int>(xa + wa, xb + wb);
-	int y2 = std::min<int>(ya + ha, yb + hb);
-	x = x1;
-	y = y1;
-	w = std::max(0, x2 - x1);
-	h = std::max(0, y2 - y1);
+	int x1 = std::max<int>(a.x, b.x);
+	int y1 = std::max<int>(a.y, b.y);
+	int x2 = std::min<int>(a.x + a.w, b.x + b.w);
+	int y2 = std::min<int>(a.y + a.h, b.y + b.h);
+	int w = std::max(0, x2 - x1);
+	int h = std::max(0, y2 - y1);
+	return {x1, y1, w, h};
 }
 
 ////
-
-static void normalize(int& x, int& w)
+template<typename T>
+static constexpr void normalize(T& x, T& w)
 {
 	if (w < 0) {
 		w = -w;
@@ -42,102 +43,71 @@ static void normalize(int& x, int& w)
 	}
 }
 
-class SDLScopedClip
-{
-public:
-	SDLScopedClip(OutputSurface& output, int x, int y, int w, int h);
-	~SDLScopedClip();
-private:
-	SDL_Surface* surface;
-	SDL_Rect origClip;
-};
-
-
-SDLScopedClip::SDLScopedClip(OutputSurface& output, int x, int y, int w, int h)
-	: surface(output.getSDLSurface())
-{
-	normalize(x, w); normalize(y, h);
-	SDL_GetClipRect(surface, &origClip);
-
-	int xn, yn, wn, hn;
-	intersect(origClip.x, origClip.y, origClip.w, origClip.h,
-	          x,  y,  w,  h,
-	          xn, yn, wn, hn);
-	SDL_Rect newClip = { Sint16(xn), Sint16(yn), Uint16(wn), Uint16(hn) };
-	SDL_SetClipRect(surface, &newClip);
-}
-
-SDLScopedClip::~SDLScopedClip()
-{
-	SDL_SetClipRect(surface, &origClip);
-}
-
-////
-
-#if COMPONENT_GL
 
 class GLScopedClip
 {
 public:
-	GLScopedClip(OutputSurface& output, int x, int y, int w, int h);
+	GLScopedClip(const OutputSurface& output, vec2 xy, vec2 wh);
+	GLScopedClip(const GLScopedClip&) = delete;
+	GLScopedClip(GLScopedClip&&) = delete;
+	GLScopedClip& operator=(const GLScopedClip&) = delete;
+	GLScopedClip& operator=(GLScopedClip&&) = delete;
 	~GLScopedClip();
 private:
-	GLint box[4]; // x, y, w, h;
-	GLboolean wasEnabled;
+	std::optional<std::array<GLint, 4>> origClip; // x, y, w, h;
 };
 
 
-GLScopedClip::GLScopedClip(OutputSurface& output, int x, int y, int w, int h)
+GLScopedClip::GLScopedClip(const OutputSurface& output, vec2 xy, vec2 wh)
 {
+	auto& [x, y] = xy;
+	auto& [w, h] = wh;
 	normalize(x, w); normalize(y, h);
-	y = output.getHeight() - y - h; // openGL sets (0,0) in LOWER-left corner
+	y = narrow_cast<float>(output.getLogicalHeight()) - y - h; // openGL sets (0,0) in LOWER-left corner
 
-	wasEnabled = glIsEnabled(GL_SCISSOR_TEST);
-	if (wasEnabled == GL_TRUE) {
-		glGetIntegerv(GL_SCISSOR_BOX, box);
-		int xn, yn, wn, hn;
-		intersect(box[0], box[1], box[2], box[3],
-		          x,  y,  w,  h,
-		          xn, yn, wn, hn);
+	// transform view-space coordinates to clip-space coordinates
+	vec2 scale = output.getViewScale();
+	auto [ix, iy] = round(xy * scale) + output.getViewOffset();
+	auto [iw, ih] = round(wh * scale);
+
+	if (glIsEnabled(GL_SCISSOR_TEST) == GL_TRUE) {
+		origClip.emplace();
+		glGetIntegerv(GL_SCISSOR_BOX, origClip->data());
+		auto [xn, yn, wn, hn] = intersect(
+			Rectangle{(*origClip)[0], (*origClip)[1], (*origClip)[2], (*origClip)[3]},
+			Rectangle{ix, iy, iw, ih});
 		glScissor(xn, yn, wn, hn);
 	} else {
-		glScissor(x, y, w, h);
+		glScissor(ix, iy, iw, ih);
 		glEnable(GL_SCISSOR_TEST);
 	}
 }
 
 GLScopedClip::~GLScopedClip()
 {
-	if (wasEnabled == GL_TRUE) {
-		glScissor(box[0], box[1], box[2], box[3]);
+	if (origClip) {
+		glScissor((*origClip)[0], (*origClip)[1], (*origClip)[2], (*origClip)[3]);
 	} else {
 		glDisable(GL_SCISSOR_TEST);
 	}
 }
 
-#endif
-
 ////
 
-OSDWidget::OSDWidget(Display& display_, const TclObject& name_)
+OSDWidget::OSDWidget(Display& display_, TclObject name_)
 	: display(display_)
-	, parent(nullptr)
-	, name(name_)
-	, z(0.0)
-	, scaled(false)
-	, clip(false)
-	, suppressErrors(false)
+	, name(std::move(name_))
 {
 }
 
-void OSDWidget::addWidget(unique_ptr<OSDWidget> widget)
+void OSDWidget::addWidget(std::unique_ptr<OSDWidget> widget)
 {
 	widget->setParent(this);
 
 	// Insert the new widget in the correct place (sorted on ascending Z)
 	// heuristic: often we have either
 	//  - many widgets with all the same Z
-	//  - only a few total number of subwidgets (possibly with different Z)
+	//  - only a few total number of subWidgets (possibly with different Z)
 	// In the former case we can simply append at the end. In the latter
 	// case a linear search is probably faster than a binary search. Only
 	// when there are many sub-widgets with not all the same Z (and not
@@ -155,20 +125,12 @@ void OSDWidget::addWidget(unique_ptr<OSDWidget> widget)
 
 void OSDWidget::deleteWidget(OSDWidget& widget)
 {
-	auto it = rfind_if_unguarded(subWidgets,
-		[&](const std::unique_ptr<OSDWidget>& p) { return p.get() == &widget; });
+	auto it = rfind_unguarded(subWidgets, &widget,
+	                          [](const auto& p) { return p.get(); });
 	subWidgets.erase(it);
 }
 
-#ifdef DEBUG
-struct AscendingZ {
-	bool operator()(const unique_ptr<OSDWidget>& lhs,
-	                const unique_ptr<OSDWidget>& rhs) const {
-		return lhs->getZ() < rhs->getZ();
-	}
-};
-#endif
-void OSDWidget::resortUp(OSDWidget* elem)
+void OSDWidget::resortUp(const OSDWidget* elem)
 {
 	// z-coordinate was increased, first search for elements current position
 	auto it1 = begin(subWidgets);
@@ -181,10 +143,10 @@ void OSDWidget::resortUp(OSDWidget* elem)
 	// now move elements to correct position
 	rotate(it1, it1 + 1, it2);
 #ifdef DEBUG
-	assert(std::is_sorted(begin(subWidgets), end(subWidgets), AscendingZ()));
+	assert(ranges::is_sorted(subWidgets, {}, &OSDWidget::getZ));
 #endif
 }
-void OSDWidget::resortDown(OSDWidget* elem)
+void OSDWidget::resortDown(const OSDWidget* elem)
 {
 	// z-coordinate was decreased, first search for new position
 	auto it1 = begin(subWidgets);
@@ -200,32 +162,23 @@ void OSDWidget::resortDown(OSDWidget* elem)
 	// now move elements to correct position
 	rotate(it1, it2, it2 + 1);
 #ifdef DEBUG
-	assert(std::is_sorted(begin(subWidgets), end(subWidgets), AscendingZ()));
+	assert(ranges::is_sorted(subWidgets, {}, &OSDWidget::getZ));
 #endif
 }
 
-vector<string_view> OSDWidget::getProperties() const
-{
-	static const char* const vals[] = {
-		"-type", "-x", "-y", "-z", "-relx", "-rely", "-scaled",
-		"-clip", "-mousecoord", "-suppressErrors",
-	};
-	return vector<string_view>(std::begin(vals), std::end(vals));
-}
-
 void OSDWidget::setProperty(
-	Interpreter& interp, string_view propName, const TclObject& value)
+	Interpreter& interp, std::string_view propName, const TclObject& value)
 {
 	if (propName == "-type") {
 		throw CommandException("-type property is readonly");
 	} else if (propName == "-mousecoord") {
 		throw CommandException("-mousecoord property is readonly");
 	} else if (propName == "-x") {
-		pos[0] = value.getDouble(interp);
+		pos.x = value.getFloat(interp);
 	} else if (propName == "-y") {
-		pos[1] = value.getDouble(interp);
+		pos.y = value.getFloat(interp);
 	} else if (propName == "-z") {
-		float z2 = value.getDouble(interp);
+		float z2 = value.getFloat(interp);
 		if (z != z2) {
 			bool up = z2 > z; // was z increased?
 			z = z2;
@@ -239,9 +192,9 @@ void OSDWidget::setProperty(
 			}
 		}
 	} else if (propName == "-relx") {
-		relPos[0] = value.getDouble(interp);
+		relPos.x = value.getFloat(interp);
 	} else if (propName == "-rely") {
-		relPos[1] = value.getDouble(interp);
+		relPos.y = value.getFloat(interp);
 	} else if (propName == "-scaled") {
 		bool scaled2 = value.getBoolean(interp);
 		if (scaled != scaled2) {
@@ -257,30 +210,29 @@ void OSDWidget::setProperty(
 	}
 }
 
-void OSDWidget::getProperty(string_view propName, TclObject& result) const
+void OSDWidget::getProperty(std::string_view propName, TclObject& result) const
 {
 	if (propName == "-type") {
-		result.setString(getType());
+		result = getType();
 	} else if (propName == "-x") {
-		result.setDouble(pos[0]);
+		result = pos.x;
 	} else if (propName == "-y") {
-		result.setDouble(pos[1]);
+		result = pos.y;
 	} else if (propName == "-z") {
-		result.setDouble(z);
+		result = z;
 	} else if (propName == "-relx") {
-		result.setDouble(relPos[0]);
+		result = relPos.x;
 	} else if (propName == "-rely") {
-		result.setDouble(relPos[1]);
+		result = relPos.y;
 	} else if (propName == "-scaled") {
-		result.setBoolean(scaled);
+		result = scaled;
 	} else if (propName == "-clip") {
-		result.setBoolean(clip);
+		result = clip;
 	} else if (propName == "-mousecoord") {
-		vec2 coord = getMouseCoord();
-		result.addListElement(coord[0]);
-		result.addListElement(coord[1]);
+		auto [x, y] = getMouseCoord();
+		result.addListElement(x, y);
 	} else if (propName == "-suppressErrors") {
-		result.setBoolean(suppressErrors);
+		result = suppressErrors;
 	} else {
 		throw CommandException("No such property: ", propName);
 	}
@@ -297,7 +249,7 @@ void OSDWidget::invalidateRecursive()
 	invalidateChildren();
 }
 
-void OSDWidget::invalidateChildren()
+void OSDWidget::invalidateChildren() const
 {
 	for (auto& s : subWidgets) {
 		s->invalidateRecursive();
@@ -313,47 +265,25 @@ bool OSDWidget::needSuppressErrors() const
 	return false;
 }
 
-void OSDWidget::paintSDLRecursive(OutputSurface& output)
+void OSDWidget::paintRecursive(OutputSurface& output)
 {
-	paintSDL(output);
+	paint(output);
 
-	std::unique_ptr<SDLScopedClip> scopedClip;
+	std::optional<GLScopedClip> scopedClip;
 	if (clip) {
-		ivec2 clipPos, size;
-		getBoundingBox(output, clipPos, size);
-		scopedClip = std::make_unique<SDLScopedClip>(
-			output, clipPos[0], clipPos[1], size[0], size[1]);
+		auto [clipPos, size] = getBoundingBox(output);
+		scopedClip.emplace(output, clipPos, size);
 	}
 
 	for (auto& s : subWidgets) {
-		s->paintSDLRecursive(output);
+		s->paintRecursive(output);
 	}
 }
 
-void OSDWidget::paintGLRecursive (OutputSurface& output)
-{
-	(void)output;
-#if COMPONENT_GL
-	paintGL(output);
-
-	std::unique_ptr<GLScopedClip> scopedClip;
-	if (clip) {
-		ivec2 clipPos, size;
-		getBoundingBox(output, clipPos, size);
-		scopedClip = std::make_unique<GLScopedClip>(
-			output, clipPos[0], clipPos[1], size[0], size[1]);
-	}
-
-	for (auto& s : subWidgets) {
-		s->paintGLRecursive(output);
-	}
-#endif
-}
-
-int OSDWidget::getScaleFactor(const OutputRectangle& output) const
+int OSDWidget::getScaleFactor(const OutputSurface& output) const
 {
 	if (scaled) {
-		return output.getOutputSize()[0] / 320;;
+		return output.getLogicalWidth() / 320;
 	} else if (getParent()) {
 		return getParent()->getScaleFactor(output);
 	} else {
@@ -361,7 +291,7 @@ int OSDWidget::getScaleFactor(const OutputRectangle& output) const
 	}
 }
 
-vec2 OSDWidget::transformPos(const OutputRectangle& output,
+vec2 OSDWidget::transformPos(const OutputSurface& output,
                              vec2 trPos, vec2 trRelPos) const
 {
 	vec2 out = trPos
@@ -373,7 +303,7 @@ vec2 OSDWidget::transformPos(const OutputRectangle& output,
 	return out;
 }
 
-vec2 OSDWidget::transformReverse(const OutputRectangle& output, vec2 trPos) const
+vec2 OSDWidget::transformReverse(const OutputSurface& output, vec2 trPos) const
 {
 	if (const auto* p = getParent()) {
 		trPos = p->transformReverse(output, trPos);
@@ -387,12 +317,13 @@ vec2 OSDWidget::transformReverse(const OutputRectangle& output, vec2 trPos) cons
 
 vec2 OSDWidget::getMouseCoord() const
 {
-	if (SDL_ShowCursor(SDL_QUERY) == SDL_DISABLE) {
+	auto& videoSystem = getDisplay().getVideoSystem();
+	if (!videoSystem.getCursorEnabled()) {
 		// Host cursor is not visible. Return dummy mouse coords for
 		// the OSD cursor position.
 		// The reason for doing this is that otherwise (e.g. when using
 		// the mouse in an MSX program) it's possible to accidentally
-		// click on the reversebar. This will also block the OSD mouse
+		// click on the reverse bar. This will also block the OSD mouse
 		// in other Tcl scripts (e.g. vampier's nemesis script), but
 		// almost always those scripts will also not be useful when the
 		// host mouse cursor is not visible.
@@ -406,20 +337,15 @@ vec2 OSDWidget::getMouseCoord() const
 		return vec2(std::numeric_limits<float>::infinity());
 	}
 
-	auto resolution = getDisplay().getOutputScreenResolution();
-	if (resolution[0] < 0) {
+	auto* output = getDisplay().getOutputSurface();
+	if (!output) {
 		throw CommandException(
 			"Can't get mouse coordinates: no window visible");
 	}
-	DummyOutputRectangle output(resolution);
 
-	int mouseX, mouseY;
-	SDL_GetMouseState(&mouseX, &mouseY);
-
-	vec2 out = transformReverse(output, vec2(mouseX, mouseY));
-
-	vec2 size = getSize(output);
-	if ((size[0] == 0.0f) || (size[1] == 0.0f)) {
+	vec2 out = transformReverse(*output, vec2(videoSystem.getMouseCoord()));
+	vec2 size = getSize(*output);
+	if ((size.x == 0.0f) || (size.y == 0.0f)) {
 		throw CommandException(
 			"-can't get mouse coordinates: "
 			"widget has zero width or height");
@@ -427,13 +353,11 @@ vec2 OSDWidget::getMouseCoord() const
 	return out / size;
 }
 
-void OSDWidget::getBoundingBox(const OutputRectangle& output,
-                               ivec2& bbPos, ivec2& bbSize)
+OSDWidget::BoundingBox OSDWidget::getBoundingBox(const OutputSurface& output) const
 {
 	vec2 topLeft     = transformPos(output, vec2(), vec2(0.0f));
 	vec2 bottomRight = transformPos(output, vec2(), vec2(1.0f));
-	bbPos  = round(topLeft);
-	bbSize = round(bottomRight - topLeft);
+	return {topLeft, bottomRight - topLeft};
 }
 
 } // namespace openmsx

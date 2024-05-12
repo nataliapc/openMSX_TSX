@@ -10,10 +10,6 @@ MSXTurboRPause::MSXTurboRPause(const DeviceConfig& config)
 	, pauseSetting(
 		getCommandController(), "turborpause",
 		"status of the TurboR pause", false)
-	, status(255)
-	, pauseLed(false)
-	, turboLed(false)
-	, hwPause(false)
 {
 	pauseSetting.attach(*this);
 	reset(EmuTime::dummy());
@@ -49,23 +45,23 @@ byte MSXTurboRPause::peekIO(word /*port*/, EmuTime::param /*time*/) const
 void MSXTurboRPause::writeIO(word /*port*/, byte value, EmuTime::param /*time*/)
 {
 	status = value;
-	bool newTurboLed = (status & 0x80) != 0;
-	if (newTurboLed != turboLed) {
+	if (bool newTurboLed = (status & 0x80) != 0;
+	    newTurboLed != turboLed) {
 		turboLed = newTurboLed;
 		getLedStatus().setLed(LedStatus::TURBO, turboLed);
 	}
 	updatePause();
 }
 
-void MSXTurboRPause::update(const Setting& /*setting*/)
+void MSXTurboRPause::update(const Setting& /*setting*/) noexcept
 {
 	updatePause();
 }
 
 void MSXTurboRPause::updatePause()
 {
-	bool newHwPause = (status & 0x02) && pauseSetting.getBoolean();
-	if (newHwPause != hwPause) {
+	if (bool newHwPause = (status & 0x02) && pauseSetting.getBoolean();
+	    newHwPause != hwPause) {
 		hwPause = newHwPause;
 		if (hwPause) {
 			getMotherBoard().pause();
@@ -86,7 +82,7 @@ void MSXTurboRPause::serialize(Archive& ar, unsigned /*version*/)
 {
 	ar.template serializeBase<MSXDevice>(*this);
 	ar.serialize("status", status);
-	if (ar.isLoader()) {
+	if constexpr (Archive::IS_LOADER) {
 		writeIO(0, status, EmuTime::dummy());
 	}
 }

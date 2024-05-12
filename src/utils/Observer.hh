@@ -6,14 +6,20 @@ namespace openmsx {
 /**
  * Generic Gang-of-Four Observer class, templatized edition.
  */
-template <typename T> class Observer
+template<typename T> class Observer
 {
 public:
-	virtual void update(const T& subject) = 0;
+	Observer(const Observer&) = delete;
+	Observer(Observer&&) = delete;
+	Observer& operator=(const Observer&) = delete;
+	Observer& operator=(Observer&&) = delete;
+
+	virtual void update(const T& subject) noexcept = 0;
 	virtual void subjectDeleted(const T& /*subject*/) { /*nothing*/ }
 
 protected:
-	~Observer() {}
+	Observer() = default;
+	~Observer() = default;
 };
 
 } // namespace openmsx

@@ -4,57 +4,56 @@
 #define ZMBVENCODER_HH
 
 #include "MemBuffer.hh"
-#include <cstdint>
-#include <zlib.h>
+#include "aligned.hh"
 
-struct SDL_PixelFormat;
+#include <cstdint>
+#include <span>
+#include <string_view>
+
+#include <zlib.h>
 
 namespace openmsx {
 
 class FrameSource;
-template<class P> class PixelOperations;
 
 class ZMBVEncoder
 {
 public:
-	static const char* CODEC_4CC;
+	static constexpr std::string_view CODEC_4CC = "ZMBV";
+	using Pixel = uint32_t;
 
-	ZMBVEncoder(unsigned width, unsigned height, unsigned bpp);
+	ZMBVEncoder(unsigned width, unsigned height);
+	ZMBVEncoder(const ZMBVEncoder&) = delete;
+	ZMBVEncoder(ZMBVEncoder&&) = delete;
+	ZMBVEncoder& operator=(const ZMBVEncoder&) = delete;
+	ZMBVEncoder& operator=(ZMBVEncoder&&) = delete;
+	~ZMBVEncoder() = default;
 
-	void compressFrame(bool keyFrame, FrameSource* frame,
-	                   void*& buffer, unsigned& written);
+	[[nodiscard]] std::span<const uint8_t> compressFrame(bool keyFrame, const FrameSource* frame);
 
 private:
-	enum Format {
-		ZMBV_FORMAT_16BPP = 6,
-		ZMBV_FORMAT_32BPP = 8
-	};
+	void setupBuffers();
+	[[nodiscard]] unsigned neededSize() const;
+	void addFullFrame(unsigned& workUsed);
+	void addXorFrame (unsigned& workUsed);
+	[[nodiscard]] unsigned possibleBlock(int vx, int vy, size_t offset);
+	[[nodiscard]] unsigned compareBlock(int vx, int vy, size_t offset);
+	void addXorBlock(int vx, int vy, size_t offset, unsigned& workUsed);
+	[[nodiscard]] const Pixel* getScaledLine(const FrameSource* frame, unsigned y, Pixel* workBuf) const;
 
-	void setupBuffers(unsigned bpp);
-	unsigned neededSize();
-	template<class P> void addFullFrame(const SDL_PixelFormat& pixelFormat, unsigned& workUsed);
-	template<class P> void addXorFrame (const SDL_PixelFormat& pixelFormat, unsigned& workUsed);
-	template<class P> unsigned possibleBlock(int vx, int vy, unsigned offset);
-	template<class P> unsigned compareBlock(int vx, int vy, unsigned offset);
-	template<class P> void addXorBlock(
-		const PixelOperations<P>& pixelOps, int vx, int vy,
-		unsigned offset, unsigned& workUsed);
-	const void* getScaledLine(FrameSource* frame, unsigned y, void* workBuf);
-
-	MemBuffer<uint8_t, SSE2_ALIGNMENT> oldframe;
-	MemBuffer<uint8_t, SSE2_ALIGNMENT> newframe;
-	MemBuffer<uint8_t, SSE2_ALIGNMENT> work;
+private:
+	MemBuffer<uint8_t, SSE_ALIGNMENT> oldFrame;
+	MemBuffer<uint8_t, SSE_ALIGNMENT> newFrame;
+	MemBuffer<uint8_t, SSE_ALIGNMENT> work;
 	MemBuffer<uint8_t> output;
-	MemBuffer<unsigned> blockOffsets;
+	MemBuffer<size_t> blockOffsets;
 	unsigned outputSize;
 
 	z_stream zstream;
 
-	const unsigned width;
-	const unsigned height;
-	unsigned pitch;
-	unsigned pixelSize;
-	Format format;
+	unsigned width;
+	unsigned height;
+	size_t pitch;
 };
 
 } // namespace openmsx

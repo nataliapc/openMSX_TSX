@@ -1,6 +1,6 @@
 #include "RamDSKDiskImage.hh"
 #include "DiskImageUtils.hh"
-#include <cstring>
+#include "ranges.hh"
 
 namespace openmsx {
 
@@ -10,17 +10,18 @@ RamDSKDiskImage::RamDSKDiskImage(size_t size)
 {
 	setNbSectors(size / sizeof(SectorBuffer));
 
-	DiskImageUtils::format(*this);
+	DiskImageUtils::format(*this, MSXBootSectorType::DOS2);
 }
 
-void RamDSKDiskImage::readSectorImpl(size_t sector, SectorBuffer& buf)
+void RamDSKDiskImage::readSectorsImpl(
+	std::span<SectorBuffer> buffers, size_t startSector)
 {
-	memcpy(&buf, &data[sector], sizeof(buf));
+	ranges::copy(std::span{&data[startSector], buffers.size()}, buffers);
 }
 
 void RamDSKDiskImage::writeSectorImpl(size_t sector, const SectorBuffer& buf)
 {
-	memcpy(&data[sector], &buf, sizeof(buf));
+	data[sector] = buf;
 }
 
 bool RamDSKDiskImage::isWriteProtectedImpl() const

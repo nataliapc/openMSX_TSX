@@ -1,6 +1,6 @@
 #include "EEPROM_93C46.hh"
+
 #include "serialize.hh"
-#include "xrange.hh"
 
 namespace openmsx {
 
@@ -16,7 +16,7 @@ EEPROM_93C46::EEPROM_93C46(const std::string& name, const DeviceConfig& config)
 
 void EEPROM_93C46::reset()
 {
-	completionTime = EmuTime::zero;
+	completionTime = EmuTime::zero();
 	state = IN_RESET;
 	writeProtected = true;
 	bits = 0;
@@ -24,7 +24,7 @@ void EEPROM_93C46::reset()
 	shiftRegister = 0;
 }
 
-uint8_t EEPROM_93C46::read(unsigned addr)
+uint8_t EEPROM_93C46::read(unsigned addr) const
 {
 	return sram[addr];
 }
@@ -121,7 +121,7 @@ void EEPROM_93C46::clockEvent(EmuTime::param time)
 		break;
 
 	case WAIT_FOR_COMMAND:
-		shiftRegister = (shiftRegister << 1) | int(pinDI);
+		shiftRegister = narrow_cast<uint16_t>((shiftRegister << 1) | int(pinDI));
 		++bits;
 		if (bits == (2 + ADDRESS_BITS)) {
 			execute_command(time);
@@ -131,7 +131,7 @@ void EEPROM_93C46::clockEvent(EmuTime::param time)
 	case READING_DATA:
 		if ((bits % DATA_BITS) == 0) {
 			uint8_t value = read(address);
-			shiftRegister = value << (SHIFT_REG_BITS - DATA_BITS);
+			shiftRegister = uint16_t(value << (SHIFT_REG_BITS - DATA_BITS));
 			address = (address + 1) & ADDRESS_MASK;
 		} else {
 			shiftRegister <<= 1;
@@ -140,27 +140,27 @@ void EEPROM_93C46::clockEvent(EmuTime::param time)
 		break;
 
 	case WAIT_FOR_WRITE:
-		shiftRegister = (shiftRegister << 1) | int(pinDI);
+		shiftRegister = narrow_cast<uint16_t>((shiftRegister << 1) | int(pinDI));
 		++bits;
 		if (bits == DATA_BITS) {
 			if (writeProtected) {
 				state = IN_RESET;
 				break;
 			}
-			write(address, shiftRegister, time);
+			write(address, narrow_cast<uint8_t>(shiftRegister), time);
 			state = IN_RESET;
 		}
 		break;
 
-	case WAIT_FOR_WRITEALL:
-		shiftRegister = (shiftRegister << 1) | int(pinDI);
+	case WAIT_FOR_WRITE_ALL:
+		shiftRegister = narrow_cast<uint16_t>((shiftRegister << 1) | int(pinDI));
 		++bits;
 		if (bits == DATA_BITS) {
 			if (writeProtected) {
 				state = IN_RESET;
 				break;
 			}
-			writeAll(shiftRegister, time);
+			writeAll(narrow_cast<uint8_t>(shiftRegister), time);
 			state = IN_RESET;
 		}
 		break;
@@ -180,12 +180,12 @@ void EEPROM_93C46::execute_command(EmuTime::param time)
 			state = IN_RESET;
 			break;
 
-		case 1: // WRITEALL
+		case 1: // WRITE ALL
 			shiftRegister = 0;
-			state = WAIT_FOR_WRITEALL;
+			state = WAIT_FOR_WRITE_ALL;
 			break;
 
-		case 2: // ERASEALL
+		case 2: // ERASE ALL
 			if (writeProtected) {
 				state = IN_RESET;
 				break;
@@ -225,30 +225,30 @@ void EEPROM_93C46::execute_command(EmuTime::param time)
 	}
 }
 
-static std::initializer_list<enum_string<EEPROM_93C46::State>> stateInfo = {
+static constexpr std::initializer_list<enum_string<EEPROM_93C46::State>> stateInfo = {
 	{ "IN_RESET",           EEPROM_93C46::IN_RESET           },
 	{ "WAIT_FOR_START_BIT", EEPROM_93C46::WAIT_FOR_START_BIT },
 	{ "WAIT_FOR_COMMAND",   EEPROM_93C46::WAIT_FOR_COMMAND   },
 	{ "READING_DATA",       EEPROM_93C46::READING_DATA       },
 	{ "WAIT_FOR_WRITE",     EEPROM_93C46::WAIT_FOR_WRITE     },
-	{ "WAIT_FOR_WRITEALL",  EEPROM_93C46::WAIT_FOR_WRITEALL  },
+	{ "WAIT_FOR_WRITEALL",  EEPROM_93C46::WAIT_FOR_WRITE_ALL },
 };
 SERIALIZE_ENUM(EEPROM_93C46::State, stateInfo);
 
 template<typename Archive>
 void EEPROM_93C46::serialize(Archive& ar, unsigned /*version*/)
 {
-	ar.serialize("sram", sram);
-	ar.serialize("completionTime", completionTime);
-	ar.serialize("csTime", csTime);
-	ar.serialize("state", state);
-	ar.serialize("shiftRegister", shiftRegister);
-	ar.serialize("bits", bits);
-	ar.serialize("address", address);
-	ar.serialize("pinCS", pinCS);
-	ar.serialize("pinCLK", pinCLK);
-	ar.serialize("pinDI", pinDI);
-	ar.serialize("writeProtected", writeProtected);
+	ar.serialize("sram",           sram,
+	             "completionTime", completionTime,
+	             "csTime",         csTime,
+	             "state",          state,
+	             "shiftRegister",  shiftRegister,
+	             "bits",           bits,
+	             "address",        address,
+	             "pinCS",          pinCS,
+	             "pinCLK",         pinCLK,
+	             "pinDI",          pinDI,
+	             "writeProtected", writeProtected);
 }
 INSTANTIATE_SERIALIZE_METHODS(EEPROM_93C46);
 

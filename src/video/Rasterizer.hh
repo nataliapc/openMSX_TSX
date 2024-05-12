@@ -12,10 +12,10 @@ class RawFrame;
 class Rasterizer
 {
 public:
-	virtual ~Rasterizer() {}
+	virtual ~Rasterizer() = default;
 
 	/** See VDP::getPostProcessor(). */
-	virtual PostProcessor* getPostProcessor() const = 0;
+	[[nodiscard]] virtual PostProcessor* getPostProcessor() const = 0;
 
 	/** Will the output of this Rasterizer be displayed?
 	  * There is no point in producing a frame that will not be displayed.
@@ -49,12 +49,12 @@ public:
 	  *   bit 10..8 is green, bit 6..4 is red and bit 2..0 is blue;
 	  *   all other bits are zero.
 	  */
-	virtual void setPalette(int index, int grb) = 0;
+	virtual void setPalette(unsigned index, int grb) = 0;
 
 	/** Changes the background color.
 	  * @param index Palette index of the new background color.
 	  */
-	virtual void setBackgroundColor(int index) = 0;
+	virtual void setBackgroundColor(byte index) = 0;
 
 	virtual void setHorizontalAdjust(int adjust) = 0;
 	virtual void setHorizontalScrollLow(byte scroll) = 0;
@@ -63,7 +63,7 @@ public:
 	virtual void setSuperimposeVideoFrame(const RawFrame* videoSource) = 0;
 
 	/** Render a rectangle of border pixels on the host screen.
-	  * The units are absolute lines (Y) and VDP clockticks (X).
+	  * The units are absolute lines (Y) and VDP clock ticks (X).
 	  * @param fromX X coordinate of render start (inclusive).
 	  * @param fromY Y coordinate of render start (inclusive).
 	  * @param limitX X coordinate of render end (exclusive).
@@ -102,10 +102,10 @@ public:
 
 	/** Is video recording active?
 	  */
-	virtual bool isRecording() const = 0;
+	[[nodiscard]] virtual bool isRecording() const = 0;
 
 protected:
-	Rasterizer() {}
+	Rasterizer() = default;
 };
 
 } // namespace openmsx

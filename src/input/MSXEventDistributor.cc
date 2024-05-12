@@ -1,7 +1,6 @@
 #include "MSXEventDistributor.hh"
 #include "MSXEventListener.hh"
 #include "stl.hh"
-#include <algorithm>
 #include <cassert>
 
 namespace openmsx {
@@ -27,19 +26,21 @@ void MSXEventDistributor::unregisterEventListener(MSXEventListener& listener)
 	move_pop_back(listeners, rfind_unguarded(listeners, &listener));
 }
 
-void MSXEventDistributor::distributeEvent(const EventPtr& event, EmuTime::param time)
+void MSXEventDistributor::distributeEvent(const Event& event, EmuTime::param time)
 {
-	// Iterate over a copy because signalEvent() may indirect call back into
+	// Iterate over a copy because signalMSXEvent() may indirect call back into
 	// registerEventListener().
-	//   e.g. signalEvent() -> .. -> PlugCmd::execute() -> .. ->
+	//   e.g. signalMSXEvent() -> .. -> PlugCmd::execute() -> .. ->
 	//        Connector::plug() -> .. -> Joystick::plugHelper() ->
 	//        registerEventListener()
-	auto copy = listeners;
-	for (auto& l : copy) {
+	// 'listenersCopy' could be a local variable. But making it a member
+	// variable allows to reuse the allocated vector-capacity.
+	listenersCopy = listeners;
+	for (auto& l : listenersCopy) {
 		if (isRegistered(l)) {
 			// it's possible the listener unregistered itself
 			// (but is still present in the copy)
-			l->signalEvent(event, time);
+			l->signalMSXEvent(event, time);
 		}
 	}
 }

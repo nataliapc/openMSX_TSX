@@ -3,7 +3,7 @@
 
 #include "MSXDevice.hh"
 #include "Keyboard.hh"
-
+#include <array>
 
 namespace openmsx {
 
@@ -16,8 +16,8 @@ public:
 
 	// MSXDevice:
 	void reset(EmuTime::param time) override;
-	byte readIO(word port, EmuTime::param time) override;
-	byte peekIO(word port, EmuTime::param time) const override;
+	[[nodiscard]] byte readIO(word port, EmuTime::param time) override;
+	[[nodiscard]] byte peekIO(word port, EmuTime::param time) const override;
 	void writeIO(word port, byte value, EmuTime::param time) override;
 
 	template<typename Archive>
@@ -25,7 +25,7 @@ public:
 
 private:
 	byte joyMode;
-	JoystickPortIf* ports[2];
+	std::array<JoystickPortIf*, 2> ports;
 	Keyboard keyboard;
 };
 SERIALIZE_CLASS_VERSION(ColecoJoystickIO, 2);

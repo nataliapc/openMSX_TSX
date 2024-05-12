@@ -1,106 +1,94 @@
 #include "Ram.hh"
+
 #include "DeviceConfig.hh"
-#include "SimpleDebuggable.hh"
 #include "XMLElement.hh"
+#include "MSXException.hh"
+
 #include "Base64.hh"
 #include "HexDump.hh"
-#include "MSXException.hh"
+#include "narrow.hh"
+#include "one_of.hh"
 #include "serialize.hh"
-#include <zlib.h>
-#include <algorithm>
-#include <cstring>
-#include <memory>
 
-using std::string;
+#include <zlib.h>
+
+#include <algorithm>
+#include <bit>
+#include <memory>
 
 namespace openmsx {
 
-class RamDebuggable final : public SimpleDebuggable
-{
-public:
-	RamDebuggable(MSXMotherBoard& motherBoard, const string& name,
-	              const string& description, Ram& ram);
-	byte read(unsigned address) override;
-	void write(unsigned address, byte value) override;
-private:
-	Ram& ram;
-};
-
-
-Ram::Ram(const DeviceConfig& config, const string& name,
-         const string& description, unsigned size_)
+Ram::Ram(const DeviceConfig& config, const std::string& name,
+         static_string_view description, size_t size)
 	: xml(*config.getXML())
-	, ram(size_)
-	, size(size_)
-	, debuggable(std::make_unique<RamDebuggable>(
-		config.getMotherBoard(), name, description, *this))
+	, ram(size)
+	, sz(size)
+	, debuggable(std::in_place,
+		config.getMotherBoard(), name, description, *this)
 {
 	clear();
 }
 
-Ram::Ram(const XMLElement& xml_, unsigned size_)
+Ram::Ram(const XMLElement& xml_, size_t size)
 	: xml(xml_)
-	, ram(size_)
-	, size(size_)
+	, ram(size)
+	, sz(size)
 {
 	clear();
 }
-
-Ram::~Ram() = default;
 
 void Ram::clear(byte c)
 {
-	if (const XMLElement* init = xml.findChild("initialContent")) {
+	if (const auto* init = xml.findChild("initialContent")) {
 		// get pattern (and decode)
-		const string& encoding = init->getAttribute("encoding");
+		auto encoding = init->getAttributeValue("encoding");
 		size_t done = 0;
 		if (encoding == "gz-base64") {
-			auto p = Base64::decode(init->getData());
-			uLongf dstLen = getSize();
-			if (uncompress(reinterpret_cast<Bytef*>(ram.data()), &dstLen,
-			               reinterpret_cast<const Bytef*>(p.first.data()), uLong(p.second))
+			auto [buf, bufSize] = Base64::decode(init->getData());
+			auto dstLen = narrow<uLongf>(size());
+			if (uncompress(std::bit_cast<Bytef*>(ram.data()), &dstLen,
+			               std::bit_cast<const Bytef*>(buf.data()), uLong(bufSize))
 			     != Z_OK) {
 				throw MSXException("Error while decompressing initialContent.");
 			}
 			done = dstLen;
-		} else if ((encoding == "hex") || (encoding == "base64")) {
-			auto p = (encoding == "hex")
+		} else if (encoding == one_of("hex", "base64")) {
+			auto [buf, bufSize] = (encoding == "hex")
 			       ? HexDump::decode(init->getData())
 			       : Base64 ::decode(init->getData());
-			if (p.second == 0) {
+			if (bufSize == 0) {
 				throw MSXException("Zero-length initial pattern");
 			}
-			done = std::min(size_t(size), p.second);
-			memcpy(ram.data(), p.first.data(), done);
+			done = std::min(size(), bufSize);
+			ranges::copy(std::span{buf.data(), done}, ram.data());
 		} else {
 			throw MSXException("Unsupported encoding \"", encoding,
 			                   "\" for initialContent");
 		}
 
 		// repeat pattern over whole ram
-		auto left = size - done;
+		auto left = size() - done;
 		while (left) {
 			auto tmp = std::min(done, left);
-			memcpy(&ram[done], &ram[0], tmp);
+			ranges::copy(std::span{ram.data(), tmp}, &ram[done]);
 			done += tmp;
 			left -= tmp;
 		}
 	} else {
 		// no init pattern specified
-		memset(ram.data(), c, size);
+		ranges::fill(*this, c);
 	}
-
 }
 
-const string& Ram::getName() const
+const std::string& Ram::getName() const
 {
 	return debuggable->getName();
 }
 
 RamDebuggable::RamDebuggable(MSXMotherBoard& motherBoard_,
-                             const string& name_,
-                             const string& description_, Ram& ram_)
-	: SimpleDebuggable(motherBoard_, name_, description_, ram_.getSize())
+                             const std::string& name_,
+                             static_string_view description_, Ram& ram_)
+	: SimpleDebuggable(motherBoard_, name_, description_, narrow<unsigned>(ram_.size()))
 	, ram(ram_)
 {
 }
@@ -119,7 +107,8 @@ void RamDebuggable::write(unsigned address, byte value)
 template<typename Archive>
 void Ram::serialize(Archive& ar, unsigned /*version*/)
 {
-	ar.serialize_blob("ram", ram.data(), size);
+	// ar.serialize_blob("ram", std::span{*this}); // TODO error with clang-15/libc++
+	ar.serialize_blob("ram", std::span{begin(), end()});
 }
 INSTANTIATE_SERIALIZE_METHODS(Ram);
 

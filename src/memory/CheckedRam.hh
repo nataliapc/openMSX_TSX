@@ -28,17 +28,18 @@ class CheckedRam final : private Observer<Setting>
 {
 public:
 	CheckedRam(const DeviceConfig& config, const std::string& name,
-	           const std::string& description, unsigned size);
+	           static_string_view description, size_t size);
 	~CheckedRam();
 
-	byte read(unsigned addr);
-	byte peek(unsigned addr) const { return ram[addr]; }
-	void write(unsigned addr, const byte value);
+	[[nodiscard]] byte read(size_t addr);
+	[[nodiscard]] byte peek(size_t addr) const { return ram[addr]; }
+	void write(size_t addr, byte value);
 
-	const byte* getReadCacheLine(unsigned addr) const;
-	byte* getWriteCacheLine(unsigned addr) const;
+	[[nodiscard]] const byte* getReadCacheLine(size_t addr) const;
+	[[nodiscard]] byte* getWriteCacheLine(size_t addr) const;
+	[[nodiscard]] byte* getRWCacheLines(size_t addr, size_t size) const;
 
-	unsigned getSize() const { return ram.getSize(); }
+	[[nodiscard]] size_t size() const { return ram.size(); }
 	void clear();
 
 	/**
@@ -47,7 +48,7 @@ public:
 	 * consistently, so that the initialized-administration will be always
 	 * up to date!
 	 */
-	Ram& getUncheckedRam() { return ram; }
+	[[nodiscard]] Ram& getUncheckedRam() { return ram; }
 
 	// TODO
 	//template<typename Archive>
@@ -57,8 +58,9 @@ private:
 	void init();
 
 	// Observer<Setting>
-	void update(const Setting& setting) override;
+	void update(const Setting& setting) noexcept override;
 
+private:
 	std::vector<bool> completely_initialized_cacheline;
 	std::vector<std::bitset<CacheLine::SIZE>> uninitialized;
 	Ram ram;

@@ -7,6 +7,7 @@
 #include "CliComm.hh"
 #include "AdhocCliCommParser.hh"
 #include "Poller.hh"
+#include <array>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -22,7 +23,7 @@ public:
 	void setUpdateEnable(CliComm::UpdateType type, bool value) {
 		updateEnabled[type] = value;
 	}
-	bool getUpdateEnable(CliComm::UpdateType type) const {
+	[[nodiscard]] bool getUpdateEnable(CliComm::UpdateType type) const {
 		return updateEnabled[type];
 	}
 
@@ -36,9 +37,9 @@ public:
 protected:
 	CliConnection(CommandController& commandController,
 	              EventDistributor& eventDistributor);
-	~CliConnection();
+	~CliConnection() override;
 
-	virtual void output(string_view message) = 0;
+	virtual void output(std::string_view message) = 0;
 
 	/** End this connection by sending the closing tag
 	  * and then closing the stream.
@@ -67,19 +68,19 @@ private:
 	void execute(const std::string& command);
 
 	// CliListener
-	void log(CliComm::LogLevel level, string_view message) override;
-	void update(CliComm::UpdateType type, string_view machine,
-	            string_view name, string_view value) override;
+	void log(CliComm::LogLevel level, std::string_view message, float fraction) noexcept override;
+	void update(CliComm::UpdateType type, std::string_view machine,
+	            std::string_view name, std::string_view value) noexcept override;
 
 	// EventListener
-	int signalEvent(const std::shared_ptr<const Event>& event) override;
+	int signalEvent(const Event& event) override;
 
 	CommandController& commandController;
 	EventDistributor& eventDistributor;
 
 	std::thread thread;
 
-	bool updateEnabled[CliComm::NUM_UPDATES];
+	std::array<bool, CliComm::NUM_UPDATES> updateEnabled;
 };
 
 class StdioConnection final : public CliConnection
@@ -87,9 +88,9 @@ class StdioConnection final : public CliConnection
 public:
 	StdioConnection(CommandController& commandController,
 	                EventDistributor& eventDistributor);
-	~StdioConnection();
+	~StdioConnection() override;
 
-	void output(string_view message) override;
+	void output(std::string_view message) override;
 
 private:
 	void close() override;
@@ -102,10 +103,10 @@ class PipeConnection final : public CliConnection
 public:
 	PipeConnection(CommandController& commandController,
 	               EventDistributor& eventDistributor,
-	               string_view name);
-	~PipeConnection();
+	               std::string_view name);
+	~PipeConnection() override;
 
-	void output(string_view message) override;
+	void output(std::string_view message) override;
 
 private:
 	void close() override;
@@ -122,9 +123,9 @@ public:
 	SocketConnection(CommandController& commandController,
 	                 EventDistributor& eventDistributor,
 	                 SOCKET sd);
-	~SocketConnection();
+	~SocketConnection() override;
 
-	void output(string_view message) override;
+	void output(std::string_view message) override;
 
 private:
 	void close() override;
@@ -133,7 +134,7 @@ private:
 
 	std::mutex sdMutex;
 	SOCKET sd;
-	bool established;
+	bool established = false;
 };
 
 } // namespace openmsx

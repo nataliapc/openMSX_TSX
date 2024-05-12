@@ -4,78 +4,74 @@
 #include "MSXMotherBoard.hh"
 #include "MSXCPU.hh"
 #include "MSXDevice.hh"
-#include "CliComm.hh"
+#include "MSXCliComm.hh"
 #include "HardwareConfig.hh"
 #include "MSXException.hh"
-#include "Math.hh"
+#include "narrow.hh"
+#include "one_of.hh"
+#include "ranges.hh"
 #include "serialize.hh"
 #include "xrange.hh"
-#include "countof.hh"
-#include <cstring>
+#include <bit>
 #include <cassert>
+#include <iterator>
 #include <memory>
-#include <numeric>
-
-using std::string;
-using std::vector;
 
 namespace openmsx {
 
-AmdFlash::AmdFlash(const Rom& rom, vector<SectorInfo> sectorInfo_,
-                   word ID_, bool use12bitAddressing_,
-                   const DeviceConfig& config, bool load)
+AmdFlash::AmdFlash(const Rom& rom, std::span<const SectorInfo> sectorInfo_,
+                   uint16_t ID_, Addressing addressing_,
+                   const DeviceConfig& config, Load load)
 	: motherBoard(config.getMotherBoard())
-	, sectorInfo(std::move(sectorInfo_))
-	, size(std::accumulate(begin(sectorInfo), end(sectorInfo), 0, [](int t, SectorInfo i) { return t + i.size;}))
+	, sectorInfo(sectorInfo_)
+	, sz(sum(sectorInfo, &SectorInfo::size))
 	, ID(ID_)
-	, use12bitAddressing(use12bitAddressing_)
+	, addressing(addressing_)
 {
 	init(rom.getName() + "_flash", config, load, &rom);
 }
 
-AmdFlash::AmdFlash(const string& name, vector<SectorInfo> sectorInfo_,
-                   word ID_, bool use12bitAddressing_,
+AmdFlash::AmdFlash(const std::string& name, std::span<const SectorInfo> sectorInfo_,
+                   uint16_t ID_, Addressing addressing_,
                    const DeviceConfig& config)
 	: motherBoard(config.getMotherBoard())
-	, sectorInfo(std::move(sectorInfo_))
-	, size(std::accumulate(begin(sectorInfo), end(sectorInfo), 0, [](int t, SectorInfo i) { return t + i.size;}))
+	, sectorInfo(sectorInfo_)
+	, sz(sum(sectorInfo, &SectorInfo::size))
 	, ID(ID_)
-	, use12bitAddressing(use12bitAddressing_)
+	, addressing(addressing_)
 {
-	init(name, config, true, nullptr);
+	init(name, config, Load::NORMAL, nullptr);
 }
 
-static bool sramEmpty(const SRAM& ram)
+[[nodiscard]] static bool sramEmpty(const SRAM& ram)
 {
-	for (auto i : xrange(ram.getSize())) {
-		if (ram[i] != 0xFF) return false;
-	}
-	return true;
+	return ranges::all_of(xrange(ram.size()),
+	                      [&](auto i) { return ram[i] == 0xFF; });
 }
 
-void AmdFlash::init(const string& name, const DeviceConfig& config, bool load, const Rom* rom)
+void AmdFlash::init(const std::string& name, const DeviceConfig& config, Load load, const Rom* rom)
 {
-	assert(Math::isPowerOfTwo(getSize()));
+	assert(std::has_single_bit(size()));
 
 	auto numSectors = sectorInfo.size();
 
-	unsigned writableSize = 0;
-	unsigned readOnlySize = 0;
+	size_t writableSize = 0;
+	size_t readOnlySize = 0;
 	writeAddress.resize(numSectors);
 	for (auto i : xrange(numSectors)) {
 		if (sectorInfo[i].writeProtected) {
 			writeAddress[i] = -1;
 			readOnlySize += sectorInfo[i].size;
 		} else {
-			writeAddress[i] = writableSize;
+			writeAddress[i] = narrow<ptrdiff_t>(writableSize);
 			writableSize += sectorInfo[i].size;
 		}
 	}
-	assert((writableSize + readOnlySize) == getSize());
+	assert((writableSize + readOnlySize) == size());
 
 	bool loaded = false;
 	if (writableSize) {
-		if (load) {
+		if (load == Load::NORMAL) {
 			ram = std::make_unique<SRAM>(
 				name, "flash rom",
 				writableSize, config, nullptr, &loaded);
@@ -95,7 +91,7 @@ void AmdFlash::init(const string& name, const DeviceConfig& config, bool load, c
 		assert(rom);
 	}
 
-	auto* romTag = config.getXML()->findChild("rom");
+	const auto* romTag = config.getXML()->findChild("rom");
 	bool initialContentSpecified = romTag && romTag->findChild("sha1");
 
 	// check whether the loaded SRAM is empty, whilst initial content was specified
@@ -123,7 +119,7 @@ void AmdFlash::init(const string& name, const DeviceConfig& config, bool load, c
 		// initial flash content is all 0xFF.
 		try {
 			rom_ = std::make_unique<Rom>(
-				string{}, string{}, // dummy name and description
+				"", "", // dummy name and description
 				config);
 			rom = rom_.get();
 			config.getCliComm().printInfo(
@@ -142,29 +138,29 @@ void AmdFlash::init(const string& name, const DeviceConfig& config, bool load, c
 	}
 
 	readAddress.resize(numSectors);
-	unsigned romSize = rom ? rom->getSize() : 0;
-	unsigned offset = 0;
+	auto romSize = rom ? rom->size() : 0;
+	size_t offset = 0;
 	for (auto i : xrange(numSectors)) {
-		unsigned sectorSize = sectorInfo[i].size;
-		if (isSectorWritable(unsigned(i))) {
+		auto sectorSize = sectorInfo[i].size;
+		if (isSectorWritable(i)) {
 			readAddress[i] = &(*ram)[writeAddress[i]];
 			if (!loaded) {
-				auto ramPtr = const_cast<byte*>(
+				auto* ramPtr = const_cast<uint8_t*>(
 					&(*ram)[writeAddress[i]]);
 				if (offset >= romSize) {
 					// completely past end of rom
-					memset(ramPtr, 0xFF, sectorSize);
+					ranges::fill(std::span{ramPtr, sectorSize}, 0xFF);
 				} else if (offset + sectorSize >= romSize) {
 					// partial overlap
-					unsigned last = romSize - offset;
-					unsigned missing = sectorSize - last;
-					const byte* romPtr = &(*rom)[offset];
-					memcpy(ramPtr, romPtr, last);
-					memset(ramPtr + last, 0xFF, missing);
+					auto last = romSize - offset;
+					auto missing = sectorSize - last;
+					const uint8_t* romPtr = &(*rom)[offset];
+					ranges::copy(std::span{romPtr, last}, ramPtr);
+					ranges::fill(std::span{&ramPtr[last], missing}, 0xFF);
 				} else {
 					// completely before end of rom
-					const byte* romPtr = &(*rom)[offset];
-					memcpy(ramPtr, romPtr, sectorSize);
+					const uint8_t* romPtr = &(*rom)[offset];
+					ranges::copy(std::span{romPtr, sectorSize}, ramPtr);
 				}
 			}
 		} else {
@@ -177,27 +173,27 @@ void AmdFlash::init(const string& name, const DeviceConfig& config, bool load, c
 		}
 		offset += sectorSize;
 	}
-	assert(offset == getSize());
+	assert(offset == size());
 
 	reset();
 }
 
 AmdFlash::~AmdFlash() = default;
 
-void AmdFlash::getSectorInfo(unsigned address, unsigned& sector,
-                             unsigned& sectorSize, unsigned& offset) const
+AmdFlash::GetSectorInfoResult AmdFlash::getSectorInfo(size_t address) const
 {
-	address &= getSize() - 1;
-	auto it = begin(sectorInfo);
-	sector = 0;
+	address &= size() - 1;
+	auto it = sectorInfo.begin();
+	size_t sector = 0;
 	while (address >= it->size) {
 		address -= it->size;
 		++sector;
 		++it;
-		assert(it != end(sectorInfo));
+		assert(it != sectorInfo.end());
 	}
-	sectorSize = it->size;
-	offset = address;
+	auto sectorSize = it->size;
+	auto offset = address;
+	return {sector, sectorSize, offset};
 }
 
 void AmdFlash::reset()
@@ -210,29 +206,28 @@ void AmdFlash::setState(State newState)
 {
 	if (state == newState) return;
 	state = newState;
-	motherBoard.getCPU().invalidateMemCache(0x0000, 0x10000);
+	motherBoard.getCPU().invalidateAllSlotsRWCache(0x0000, 0x10000);
 }
 
-byte AmdFlash::peek(unsigned address) const
+uint8_t AmdFlash::peek(size_t address) const
 {
-	unsigned sector, sectorSize, offset;
-	getSectorInfo(address, sector, sectorSize, offset);
+	auto [sector, sectorSize, offset] = getSectorInfo(address);
 	if (state == ST_IDLE) {
-		if (const byte* addr = readAddress[sector]) {
+		if (const uint8_t* addr = readAddress[sector]) {
 			return addr[offset];
 		} else {
 			return 0xFF;
 		}
 	} else {
-		if (use12bitAddressing) {
+		if (addressing == Addressing::BITS_12) {
 			// convert the address to the '11 bit case'
 			address >>= 1;
 		}
 		switch (address & 3) {
 		case 0:
-			return ID >> 8;
+			return narrow_cast<uint8_t>(ID >> 8);
 		case 1:
-			return ID & 0xFF;
+			return narrow_cast<uint8_t>(ID & 0xFF);
 		case 2:
 			// 1 -> write protected
 			return isSectorWritable(sector) ? 0 : 1;
@@ -245,36 +240,35 @@ byte AmdFlash::peek(unsigned address) const
 	}
 }
 
-bool AmdFlash::isSectorWritable(unsigned sector) const
+bool AmdFlash::isSectorWritable(size_t sector) const
 {
-	return vppWpPinLow && (sector == 0 || sector == 1) ? false : (writeAddress[sector] != -1) ;
+	return vppWpPinLow && (sector == one_of(0u, 1u)) ? false : (writeAddress[sector] != -1) ;
 }
 
-byte AmdFlash::read(unsigned address)
+uint8_t AmdFlash::read(size_t address) const
 {
 	// note: after a read we stay in the same mode
 	return peek(address);
 }
 
-const byte* AmdFlash::getReadCacheLine(unsigned address) const
+const uint8_t* AmdFlash::getReadCacheLine(size_t address) const
 {
 	if (state == ST_IDLE) {
-		unsigned sector, sectorSize, offset;
-		getSectorInfo(address, sector, sectorSize, offset);
-		const byte* addr = readAddress[sector];
-		return addr ? &addr[offset] : MSXDevice::unmappedRead;
+		auto [sector, sectorSize, offset] = getSectorInfo(address);
+		const uint8_t* addr = readAddress[sector];
+		return addr ? &addr[offset] : MSXDevice::unmappedRead.data();
 	} else {
 		return nullptr;
 	}
 }
 
-void AmdFlash::write(unsigned address, byte value)
+void AmdFlash::write(size_t address, uint8_t value)
 {
 	assert(cmdIdx < MAX_CMD_SIZE);
 	cmd[cmdIdx].addr = address;
 	cmd[cmdIdx].value = value;
 	++cmdIdx;
-	if (checkCommandManifacturer() ||
+	if (checkCommandManufacturer() ||
 	    checkCommandEraseSector() ||
 	    checkCommandProgram() ||
 	    checkCommandDoubleByteProgram() ||
@@ -302,13 +296,12 @@ bool AmdFlash::checkCommandReset()
 
 bool AmdFlash::checkCommandEraseSector()
 {
-	static const byte cmdSeq[] = { 0xaa, 0x55, 0x80, 0xaa, 0x55 };
-	if (partialMatch(5, cmdSeq)) {
+	static constexpr std::array<uint8_t, 5> cmdSeq = {0xaa, 0x55, 0x80, 0xaa, 0x55};
+	if (partialMatch(cmdSeq)) {
 		if (cmdIdx < 6) return true;
 		if (cmd[5].value == 0x30) {
-			unsigned addr = cmd[5].addr;
-			unsigned sector, sectorSize, offset;
-			getSectorInfo(addr, sector, sectorSize, offset);
+			auto addr = cmd[5].addr;
+			auto [sector, sectorSize, offset] = getSectorInfo(addr);
 			if (isSectorWritable(sector)) {
 				ram->memset(writeAddress[sector],
 				            0xff, sectorSize);
@@ -320,26 +313,25 @@ bool AmdFlash::checkCommandEraseSector()
 
 bool AmdFlash::checkCommandEraseChip()
 {
-	static const byte cmdSeq[] = { 0xaa, 0x55, 0x80, 0xaa, 0x55 };
-	if (partialMatch(5, cmdSeq)) {
+	static constexpr std::array<uint8_t, 5> cmdSeq = {0xaa, 0x55, 0x80, 0xaa, 0x55};
+	if (partialMatch(cmdSeq)) {
 		if (cmdIdx < 6) return true;
 		if (cmd[5].value == 0x10) {
-			if (ram) ram->memset(0, 0xff, ram->getSize());
+			if (ram) ram->memset(0, 0xff, ram->size());
 		}
 	}
 	return false;
 }
 
-bool AmdFlash::checkCommandProgramHelper(unsigned numBytes, const byte* cmdSeq, size_t cmdLen)
+bool AmdFlash::checkCommandProgramHelper(size_t numBytes, std::span<const uint8_t> cmdSeq)
 {
-	if (partialMatch(cmdLen, cmdSeq)) {
-		if (cmdIdx < (cmdLen + numBytes)) return true;
-		for (auto i = cmdLen; i < (cmdLen + numBytes); ++i) {
-			unsigned addr = cmd[i].addr;
-			unsigned sector, sectorSize, offset;
-			getSectorInfo(addr, sector, sectorSize, offset);
+	if (partialMatch(cmdSeq)) {
+		if (cmdIdx < (cmdSeq.size() + numBytes)) return true;
+		for (auto i : xrange(cmdSeq.size(), cmdSeq.size() + numBytes)) {
+			auto addr = cmd[i].addr;
+			auto [sector, sectorSize, offset] = getSectorInfo(addr);
 			if (isSectorWritable(sector)) {
-				unsigned ramAddr = writeAddress[sector] + offset;
+				auto ramAddr = writeAddress[sector] + offset;
 				ram->write(ramAddr, (*ram)[ramAddr] & cmd[i].value);
 			}
 		}
@@ -349,26 +341,26 @@ bool AmdFlash::checkCommandProgramHelper(unsigned numBytes, const byte* cmdSeq, 
 
 bool AmdFlash::checkCommandProgram()
 {
-	static const byte cmdSeq[] = { 0xaa, 0x55, 0xa0 };
-	return checkCommandProgramHelper(1, cmdSeq, countof(cmdSeq));
+	static constexpr std::array<uint8_t, 3> cmdSeq = {0xaa, 0x55, 0xa0};
+	return checkCommandProgramHelper(1, cmdSeq);
 }
 
 bool AmdFlash::checkCommandDoubleByteProgram()
 {
-	static const byte cmdSeq[] = { 0x50 };
-	return checkCommandProgramHelper(2, cmdSeq, countof(cmdSeq));
+	static constexpr std::array<uint8_t, 1> cmdSeq = {0x50};
+	return checkCommandProgramHelper(2, cmdSeq);
 }
 
 bool AmdFlash::checkCommandQuadrupleByteProgram()
 {
-	static const byte cmdSeq[] = { 0x56 };
-	return checkCommandProgramHelper(4, cmdSeq, countof(cmdSeq));
+	static constexpr std::array<uint8_t, 1> cmdSeq = {0x56};
+	return checkCommandProgramHelper(4, cmdSeq);
 }
 
-bool AmdFlash::checkCommandManifacturer()
+bool AmdFlash::checkCommandManufacturer()
 {
-	static const byte cmdSeq[] = { 0xaa, 0x55, 0x90 };
-	if (partialMatch(3, cmdSeq)) {
+	static constexpr std::array<uint8_t, 3> cmdSeq = {0xaa, 0x55, 0x90};
+	if (partialMatch(cmdSeq)) {
 		if (cmdIdx == 3) {
 			setState(ST_IDENT);
 		}
@@ -377,16 +369,15 @@ bool AmdFlash::checkCommandManifacturer()
 	return false;
 }
 
-bool AmdFlash::partialMatch(size_t len, const byte* dataSeq) const
+bool AmdFlash::partialMatch(std::span<const uint8_t> dataSeq) const
 {
-	static const unsigned addrSeq[] = { 0, 1, 0, 0, 1 };
-	unsigned cmdAddr[2] = { 0x555, 0x2aa };
+	static constexpr std::array<unsigned, 5> addrSeq = {0, 1, 0, 0, 1};
+	static constexpr std::array<unsigned, 2> cmdAddr = {0x555, 0x2aa};
 
-	assert(len <= 5);
-	unsigned n = std::min(unsigned(len), cmdIdx);
-	for (unsigned i = 0; i < n; ++i) {
+	assert(dataSeq.size() <= 5);
+	for (auto i : xrange(std::min(unsigned(dataSeq.size()), cmdIdx))) {
 		// convert the address to the '11 bit case'
-		unsigned addr = use12bitAddressing ? cmd[i].addr >> 1 : cmd[i].addr;
+		auto addr = (addressing == Addressing::BITS_12) ? cmd[i].addr >> 1 : cmd[i].addr;
 		if (((addr & 0x7FF) != cmdAddr[addrSeq[i]]) ||
 		    (cmd[i].value != dataSeq[i])) {
 			return false;
@@ -396,7 +387,7 @@ bool AmdFlash::partialMatch(size_t len, const byte* dataSeq) const
 }
 
 
-static std::initializer_list<enum_string<AmdFlash::State>> stateInfo = {
+static constexpr std::initializer_list<enum_string<AmdFlash::State>> stateInfo = {
 	{ "IDLE",  AmdFlash::ST_IDLE  },
 	{ "IDENT", AmdFlash::ST_IDENT }
 };
@@ -405,17 +396,17 @@ SERIALIZE_ENUM(AmdFlash::State, stateInfo);
 template<typename Archive>
 void AmdFlash::AmdCmd::serialize(Archive& ar, unsigned /*version*/)
 {
-	ar.serialize("address", addr);
-	ar.serialize("value", value);
+	ar.serialize("address", addr,
+	             "value",   value);
 }
 
 template<typename Archive>
 void AmdFlash::serialize(Archive& ar, unsigned version)
 {
-	ar.serialize("ram", *ram);
-	ar.serialize("cmd", cmd);
-	ar.serialize("cmdIdx", cmdIdx);
-	ar.serialize("state", state);
+	ar.serialize("ram",    *ram,
+	             "cmd",    cmd,
+	             "cmdIdx", cmdIdx,
+	             "state",  state);
 	if (ar.versionAtLeast(version, 2)) {
 		ar.serialize("vppWpPinLow", vppWpPinLow);
 	}

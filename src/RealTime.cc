@@ -1,16 +1,17 @@
 #include "RealTime.hh"
-#include "Timer.hh"
-#include "EventDistributor.hh"
-#include "EventDelay.hh"
+
+#include "BooleanSetting.hh"
 #include "Event.hh"
-#include "FinishFrameEvent.hh"
+#include "EventDelay.hh"
+#include "EventDistributor.hh"
 #include "GlobalSettings.hh"
 #include "MSXMotherBoard.hh"
 #include "Reactor.hh"
-#include "IntegerSetting.hh"
-#include "BooleanSetting.hh"
 #include "ThrottleManager.hh"
-#include "checked_cast.hh"
+#include "Timer.hh"
+
+#include "narrow.hh"
+#include "unreachable.hh"
 
 namespace openmsx {
 
@@ -25,46 +26,45 @@ RealTime::RealTime(
 	, motherBoard(motherBoard_)
 	, eventDistributor(motherBoard.getReactor().getEventDistributor())
 	, eventDelay(eventDelay_)
+	, speedManager   (globalSettings.getSpeedManager())
 	, throttleManager(globalSettings.getThrottleManager())
-	, speedSetting   (globalSettings.getSpeedSetting())
 	, pauseSetting   (globalSettings.getPauseSetting())
 	, powerSetting   (globalSettings.getPowerSetting())
-	, emuTime(EmuTime::zero)
-	, enabled(true)
 {
-	speedSetting.attach(*this);
+	speedManager.attach(*this);
 	throttleManager.attach(*this);
 	pauseSetting.attach(*this);
 	powerSetting.attach(*this);
 
 	resync();
 
-	eventDistributor.registerEventListener(OPENMSX_FINISH_FRAME_EVENT, *this);
-	eventDistributor.registerEventListener(OPENMSX_FRAME_DRAWN_EVENT,  *this);
+	for (auto type : {EventType::FINISH_FRAME, EventType::FRAME_DRAWN}) {
+		eventDistributor.registerEventListener(type, *this);
+	}
 }
 
 RealTime::~RealTime()
 {
-	eventDistributor.unregisterEventListener(OPENMSX_FRAME_DRAWN_EVENT,  *this);
-	eventDistributor.unregisterEventListener(OPENMSX_FINISH_FRAME_EVENT, *this);
-
+	for (auto type : {EventType::FRAME_DRAWN, EventType::FINISH_FRAME}) {
+		eventDistributor.unregisterEventListener(type, *this);
+	}
 	powerSetting.detach(*this);
 	pauseSetting.detach(*this);
 	throttleManager.detach(*this);
-	speedSetting.detach(*this);
+	speedManager.detach(*this);
 }
 
-double RealTime::getRealDuration(EmuTime::param time1, EmuTime::param time2)
+double RealTime::getRealDuration(EmuTime::param time1, EmuTime::param time2) const
 {
-	return (time2 - time1).toDouble() * 100.0 / speedSetting.getInt();
+	return (time2 - time1).toDouble() / speedManager.getSpeed();
 }
 
-EmuDuration RealTime::getEmuDuration(double realDur)
+EmuDuration RealTime::getEmuDuration(double realDur) const
 {
-	return EmuDuration(realDur * speedSetting.getInt() / 100.0);
+	return EmuDuration(realDur * speedManager.getSpeed());
 }
 
-bool RealTime::timeLeft(uint64_t us, EmuTime::param time)
+bool RealTime::timeLeft(uint64_t us, EmuTime::param time) const
 {
 	auto realDuration = static_cast<uint64_t>(
 		getRealDuration(emuTime, time) * 1000000ULL);
@@ -91,18 +91,18 @@ void RealTime::internalSync(EmuTime::param time, bool allowSleep)
 		        getRealDuration(emuTime, time) * 1000000ULL);
 		idealRealTime += realDuration;
 		auto currentRealTime = Timer::getTime();
-		int64_t sleep = idealRealTime - currentRealTime;
+		auto sleep = narrow_cast<int64_t>(idealRealTime - currentRealTime);
 		if (allowSleep) {
 			// want to sleep for 'sleep' us
-			sleep += static_cast<int64_t>(sleepAdjust);
+			sleep += narrow_cast<int64_t>(sleepAdjust);
 			int64_t delta = 0;
 			if (sleep > 0) {
 				Timer::sleep(sleep); // request to sleep for 'sleep+sleepAdjust'
-				int64_t slept = Timer::getTime() - currentRealTime;
+				auto slept = narrow<int64_t>(Timer::getTime() - currentRealTime);
 				delta = sleep - slept; // actually slept for 'slept' us
 			}
 			const double ALPHA = 0.2;
-			sleepAdjust = sleepAdjust * (1 - ALPHA) + delta * ALPHA;
+			sleepAdjust = sleepAdjust * (1 - ALPHA) + narrow_cast<double>(delta) * ALPHA;
 		}
 		if (-sleep > MAX_LAG) {
 			idealRealTime = currentRealTime - MAX_LAG / 2;
@@ -121,32 +121,42 @@ void RealTime::executeUntil(EmuTime::param time)
 	setSyncPoint(time + getEmuDuration(SYNC_INTERVAL));
 }
 
-int RealTime::signalEvent(const std::shared_ptr<const Event>& event)
+int RealTime::signalEvent(const Event& event)
 {
 	if (!motherBoard.isActive() || !enabled) {
 		// these are global events, only the active machine should
 		// synchronize with real time
 		return 0;
 	}
-	if (event->getType() == OPENMSX_FINISH_FRAME_EVENT) {
-		auto& ffe = checked_cast<const FinishFrameEvent&>(*event);
-		if (!ffe.needRender()) {
-			// sync but don't sleep
-			sync(getCurrentTime(), false);
+	visit(overloaded{
+		[&](const FinishFrameEvent& ffe) {
+			if (!ffe.needRender()) {
+				// sync but don't sleep
+				sync(getCurrentTime(), false);
+			}
+		},
+		[&](const FrameDrawnEvent&) {
+			// sync and possibly sleep
+			sync(getCurrentTime(), true);
+		},
+		[&](const EventBase /*e*/) {
+			UNREACHABLE;
 		}
-	} else if (event->getType() == OPENMSX_FRAME_DRAWN_EVENT) {
-		// sync and possibly sleep
-		sync(getCurrentTime(), true);
-	}
+	}, event);
 	return 0;
 }
 
-void RealTime::update(const Setting& /*setting*/)
+void RealTime::update(const Setting& /*setting*/) noexcept
 {
 	resync();
 }
 
-void RealTime::update(const ThrottleManager& /*throttleManager*/)
+void RealTime::update(const SpeedManager& /*speedManager*/) noexcept
+{
+	resync();
+}
+
+void RealTime::update(const ThrottleManager& /*throttleManager*/) noexcept
 {
 	resync();
 }

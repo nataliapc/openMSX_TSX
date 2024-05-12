@@ -6,8 +6,9 @@
     <manufacturer>Panasonic</manufacturer>
     <code>FS-A1FM</code>
     <release_year>1987</release_year>
-    <description/>
+    <description>This is the FS-A1F but with a built in modem (which is not emulated). Also with disk drive, 12x12 dot kanji ROM and large built in software.</description>
     <type>MSX2</type>
+    <region>jp</region>
   </info>
 
   <CassettePort/>
@@ -54,8 +55,8 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <RTC id="Real time clock">
@@ -92,6 +93,7 @@
         <MemoryMapper id="Main RAM">
           <size>64</size>
           <mem base="0x0000" size="0x10000"/>
+          <initialContent encoding="gz-base64">eJxjYBhY8H+AAQAioH+B</initialContent> <!-- ((chr(0) * 128) + (chr(255) * 128)), on Peter Hanraets' machine with serial 8DBKA02048. -->
         </MemoryMapper>
       </secondary>
 

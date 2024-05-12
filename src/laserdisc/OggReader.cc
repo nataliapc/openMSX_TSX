@@ -1,13 +1,14 @@
 #include "OggReader.hh"
 #include "MSXException.hh"
 #include "yuv2rgb.hh"
-#include "likely.hh"
 #include "CliComm.hh"
 #include "MemoryOps.hh"
-#include "stl.hh"
+#include "narrow.hh"
+#include "one_of.hh"
+#include "ranges.hh"
 #include "stringsp.hh" // for strncasecmp
-#include <algorithm>
-#include <cstring> // for memcpy, memcmp
+#include "view.hh"
+#include "xrange.hh"
 #include <cstdlib> // for atoi
 #include <cctype> // for isspace
 #include <memory>
@@ -45,32 +46,19 @@ Frame::~Frame()
 OggReader::OggReader(const Filename& filename, CliComm& cli_)
 	: cli(cli_)
 	, file(filename)
+	, fileSize(file.getSize())
 {
-	audioSerial = -1;
-	videoSerial = -1;
-	skeletonSerial = -1;
-	audioHeaders = 3;
-	keyFrame = size_t(-1);
-	currentSample = 0;
-	currentFrame = 1;
-	vorbisPos = 0;
-
 	th_info ti;
 	th_comment tc;
 	th_setup_info* tsi = nullptr;
 
 	th_info_init(&ti);
 	th_comment_init(&tc);
-	theora = nullptr;
 
 	vorbis_info_init(&vi);
 	vorbis_comment_init(&vc);
 
 	ogg_sync_init(&sync);
-
-	state = PLAYING;
-	fileOffset = 0;
-	fileSize = file.getSize();
 
 	ogg_page page;
 
@@ -116,7 +104,7 @@ OggReader::OggReader(const Filename& filename, CliComm& cli_)
 				throw MSXException("Header to small");
 			}
 
-			if (memcmp(packet.packet, "\x01vorbis", 7) == 0) {
+			if (ranges::equal(std::span{packet.packet, 7}, std::array<uint8_t, 7>{1, 'v', 'o', 'r', 'b', 'i', 's'})) {
 				if (audioSerial != -1) {
 					ogg_stream_clear(&stream);
 					throw MSXException("Duplicate audio stream");
@@ -127,7 +115,7 @@ OggReader::OggReader(const Filename& filename, CliComm& cli_)
 
 				vorbisHeaderPage(&page);
 
-			} else if (memcmp(packet.packet, "\x80theora", 7) == 0) {
+			} else if (ranges::equal(std::span{packet.packet, 7}, std::array<uint8_t, 7>{128, 't', 'h', 'e', 'o', 'r', 'a'})) {
 				if (videoSerial != -1) {
 					ogg_stream_clear(&stream);
 					throw MSXException("Duplicate video stream");
@@ -138,14 +126,14 @@ OggReader::OggReader(const Filename& filename, CliComm& cli_)
 
 				theoraHeaderPage(&page, ti, tc, tsi);
 
-			} else if (memcmp(packet.packet, "fishead", 8) == 0) {
+			} else if (ranges::equal(std::span{packet.packet, 8}, std::array<uint8_t, 8>{'f', 'i', 's', 'h', 'e', 'a', 'd', 0})) {
 				skeletonSerial = serial;
 
-			} else if (memcmp(packet.packet, "BBCD", 4) == 0) {
+			} else if (ranges::equal(std::span{packet.packet, 4}, std::array<uint8_t, 4>{'B', 'B', 'C', 'D'})) {
 				ogg_stream_clear(&stream);
 				throw MSXException("DIRAC not supported");
 
-			} else if (memcmp(packet.packet, "\177FLAC", 5) == 0) {
+			} else if (ranges::equal(std::span{packet.packet, 5}, std::array<uint8_t, 5>{127, 'F', 'L', 'A', 'C'})) {
 				ogg_stream_clear(&stream);
 				throw MSXException("FLAC not supported");
 
@@ -188,8 +176,7 @@ OggReader::OggReader(const Filename& filename, CliComm& cli_)
 		if (ti.pixel_fmt != TH_PF_420) {
 			throw MSXException("Video must be YUV420");
 		}
-	}
-	catch (MSXException&) {
+	} catch (MSXException&) {
 		th_setup_free(tsi);
 		th_info_clear(&ti);
 		th_comment_clear(&tc);
@@ -237,9 +224,9 @@ OggReader::~OggReader()
 void OggReader::vorbisFoundPosition()
 {
 	auto last = vorbisPos;
-	for (auto it = audioList.rbegin(); it != audioList.rend(); ++it) {
-		last -= (*it)->length;
-		(*it)->position = last;
+	for (auto& audioFrag : view::reverse(audioList)) {
+		last -= audioFrag->length;
+		audioFrag->position = last;
 	}
 
 	// last is now the first vorbis audio decoded
@@ -322,7 +309,7 @@ void OggReader::theoraHeaderPage(ogg_page* page, th_info& ti, th_comment& tc,
 void OggReader::readVorbis(ogg_packet* packet)
 {
 	// deal with header packets
-	if (unlikely(packet->packetno <= 2)) {
+	if (packet->packetno <= 2) [[unlikely]] {
 		return;
 	}
 
@@ -355,8 +342,8 @@ void OggReader::readVorbis(ogg_packet* packet)
 	vorbis_synthesis_blockin(&vd, &vb);
 
 	float** pcm;
-	long decoded = vorbis_synthesis_pcmout(&vd, &pcm);
-	long pos = 0;
+	int decoded = vorbis_synthesis_pcmout(&vd, &pcm);
+	int pos = 0;
 
 	while (pos < decoded)  {
 		// Find memory to copy PCM into
@@ -373,14 +360,11 @@ void OggReader::readVorbis(ogg_packet* packet)
 		}
 
 		// Copy PCM
-		unsigned len = std::min<long>(decoded - pos,
-		                              AudioFragment::MAX_SAMPLES - audio->length);
+		auto len = std::min(decoded - pos,
+		                    narrow<int>(AudioFragment::MAX_SAMPLES - audio->length));
 
-		memcpy(audio->pcm[0] + audio->length, pcm[0] + pos,
-		       len * sizeof(float));
-		memcpy(audio->pcm[1] + audio->length, pcm[1] + pos,
-		       len * sizeof(float));
-
+		ranges::copy(std::span{&pcm[0][pos], size_t(len)}, &audio->pcm[0][audio->length]);
+		ranges::copy(std::span{&pcm[1][pos], size_t(len)}, &audio->pcm[1][audio->length]);
 		audio->length += len;
 		pos += len;
 
@@ -399,7 +383,7 @@ void OggReader::readVorbis(ogg_packet* packet)
 		}
 	}
 
-	// The granulepos is the no. of samples since the begining of the
+	// The granulepos is the no. of samples since the beginning of the
 	// stream. Only once per ogg page is this populated.
 	if (packet->granulepos != -1) {
 		if (vorbisPos == AudioFragment::UNKNOWN_POS) {
@@ -408,7 +392,7 @@ void OggReader::readVorbis(ogg_packet* packet)
 		} else {
 			if (vorbisPos != size_t(packet->granulepos)) {
 				cli.printWarning(
-                                        "vorbis audio out of sync, expected ",
+					"vorbis audio out of sync, expected ",
 					vorbisPos, ", got ", packet->granulepos);
 				vorbisPos = packet->granulepos;
 			}
@@ -419,7 +403,7 @@ void OggReader::readVorbis(ogg_packet* packet)
 	vorbis_synthesis_read(&vd, decoded);
 }
 
-size_t OggReader::frameNo(ogg_packet* packet)
+size_t OggReader::frameNo(ogg_packet* packet) const
 {
 	if (packet->granulepos == -1) {
 		return size_t(-1);
@@ -433,7 +417,7 @@ size_t OggReader::frameNo(ogg_packet* packet)
 void OggReader::readMetadata(th_comment& tc)
 {
 	char* metadata = nullptr;
-	for (int i = 0; i < tc.comments; ++i) {
+	for (auto i : xrange(tc.comments)) {
 		if (!strncasecmp(tc.user_comments[i], "location=",
 				 strlen("location="))) {
 			metadata = tc.user_comments[i] + strlen("location=");
@@ -457,19 +441,19 @@ void OggReader::readMetadata(th_comment& tc)
 			++p;
 			size_t frame = atol(p);
 			if (frame) {
-				chapters.emplace_back(chapter, frame);
+				chapters.emplace_back(ChapterFrame{chapter, frame});
 			}
 		} else if (strncasecmp(p, "stop: ", 6) == 0) {
-			size_t stopframe = atol(p + 6);
-			if (stopframe) {
-				stopFrames.push_back(stopframe);
+			size_t stopFrame = atol(p + 6);
+			if (stopFrame) {
+				stopFrames.push_back(stopFrame);
 			}
 		}
 		p = strchr(p, '\n');
 		if (p) ++p;
 	}
-	sort(begin(stopFrames), end(stopFrames));
-	sort(begin(chapters  ), end(chapters  ), LessTupleElement<0>());
+	ranges::sort(stopFrames);
+	ranges::sort(chapters, {}, &ChapterFrame::chapter);
 }
 
 void OggReader::readTheora(ogg_packet* packet)
@@ -574,19 +558,18 @@ void OggReader::readTheora(ogg_packet* packet)
 		recycleFrameList.pop_back();
 	}
 
-	int y_size  = yuv[0].height * yuv[0].stride;
-	int uv_size = yuv[1].height * yuv[1].stride;
-	memcpy(frame->buffer[0].data, yuv[0].data, y_size);
-	memcpy(frame->buffer[1].data, yuv[1].data, uv_size);
-	memcpy(frame->buffer[2].data, yuv[2].data, uv_size);
+	size_t y_size  = yuv[0].height * size_t(yuv[0].stride);
+	size_t uv_size = yuv[1].height * size_t(yuv[1].stride);
+	ranges::copy(std::span{yuv[0].data,  y_size}, frame->buffer[0].data);
+	ranges::copy(std::span{yuv[1].data, uv_size}, frame->buffer[1].data);
+	ranges::copy(std::span{yuv[2].data, uv_size}, frame->buffer[2].data);
 
-	// At lot of frames have framenumber -1, only some have the correct
+	// At lot of frames have frame number -1, only some have the correct
 	// frame number. We continue counting from the previous known
 	// postion
 	Frame* last = frameList.empty() ? nullptr : frameList.back().get();
 	if (last && (last->no != size_t(-1))) {
-		if ((frameno != size_t(-1)) &&
-		    (frameno != last->no + last->length)) {
+		if (frameno != one_of(size_t(-1), last->no + last->length)) {
 			cli.printWarning("Theora frame sequence wrong");
 		} else {
 			frameno = last->no + last->length;
@@ -601,10 +584,9 @@ void OggReader::readTheora(ogg_packet* packet)
 	// numbers correctly
 	if (!frameList.empty() && (frameno != size_t(-1)) &&
 	    (frameList[0]->no == size_t(-1))) {
-		for (auto it = frameList.rbegin();
-		     it != frameList.rend(); ++it) {
-			frameno -= (*it)->length;
-			(*it)->no = frameno;
+		for (auto& frm : view::reverse(frameList)) {
+			frameno -= frm->length;
+			frm->no = frameno;
 		}
 	}
 
@@ -636,7 +618,7 @@ void OggReader::getFrameNo(RawFrame& rawFrame, size_t frameno)
 			// we're missing frames!
 			frame = frameList[0].get();
 			cli.printWarning(
-                                "Cannot find frame ", frameno, " using ",
+					"Cannot find frame ", frameno, " using ",
 			        frame->no, " instead");
 			break;
 		}
@@ -768,9 +750,9 @@ bool OggReader::nextPacket()
 
 bool OggReader::nextPage(ogg_page* page)
 {
-	static const size_t CHUNK = 4096;
+	static constexpr size_t CHUNK = 4096;
 
-	int ret;
+	long ret;
 	while ((ret = ogg_sync_pageseek(&sync, page)) <= 0) {
 		if (ret < 0) {
 			//throw MSXException("Invalid Ogg file");
@@ -786,7 +768,7 @@ bool OggReader::nextPage(ogg_page* page)
 		}
 
 		char* buffer = ogg_sync_buffer(&sync, long(chunk));
-		file.read(buffer, chunk);
+		file.read(std::span{buffer, chunk});
 		fileOffset += chunk;
 
 		if (ogg_sync_wrote(&sync, long(chunk)) == -1) {
@@ -801,9 +783,9 @@ size_t OggReader::bisection(
 	size_t frame, size_t sample,
 	size_t maxOffset, size_t maxSamples, size_t maxFrames)
 {
-	// Defined to be a power-of-two such that the arthmetic can be done faster.
+	// Defined to be a power-of-two such that the calculations can be done faster.
 	// Note that the sample-number is in the range of: 1..(44100*60*60)
-	static const uint64_t SHIFT = 0x20000000ull;
+	constexpr uint64_t SHIFT = 0x20000000ULL;
 
 	uint64_t offsetA = 0, offsetB = maxOffset;
 	uint64_t sampleA = 0, sampleB = maxSamples;
@@ -855,7 +837,7 @@ size_t OggReader::bisection(
 
 size_t OggReader::findOffset(size_t frame, size_t sample)
 {
-	static const size_t STEP = 32 * 1024;
+	static constexpr size_t STEP = 32 * 1024;
 
 	// first calculate total length in bytes, samples and frames
 
@@ -926,7 +908,7 @@ size_t OggReader::findOffset(size_t frame, size_t sample)
 
 	state = PLAYING;
 
-	if ((keyFrame == size_t(-1)) || (frame == keyFrame)) {
+	if (keyFrame == one_of(size_t(-1), frame)) {
 		return offset;
 	}
 
@@ -937,8 +919,8 @@ bool OggReader::seek(size_t frame, size_t samples)
 {
 	// Remove all queued frames
 	recycleFrameList.insert(end(recycleFrameList),
-		make_move_iterator(begin(frameList)),
-		make_move_iterator(end  (frameList)));
+		std::move_iterator(begin(frameList)),
+		std::move_iterator(end  (frameList)));
 	frameList.clear();
 
 	// Remove all queued audio
@@ -966,15 +948,13 @@ bool OggReader::seek(size_t frame, size_t samples)
 
 bool OggReader::stopFrame(size_t frame) const
 {
-	return std::binary_search(begin(stopFrames), end(stopFrames), frame);
+	return ranges::binary_search(stopFrames, frame);
 }
 
 size_t OggReader::getChapter(int chapterNo) const
 {
-	auto it = std::lower_bound(begin(chapters), end(chapters),
-	                           chapterNo, LessTupleElement<0>());
-	return ((it != end(chapters)) && (it->first == chapterNo))
-		? it->second : 0;
+	auto c = binary_find(chapters, chapterNo, {}, &ChapterFrame::chapter);
+	return c ? c->frame : 0;
 }
 
 } // namespace openmsx

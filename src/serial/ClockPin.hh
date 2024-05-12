@@ -16,7 +16,7 @@ public:
 	virtual void signalPosEdge(ClockPin& pin, EmuTime::param time) = 0;
 
 protected:
-	~ClockPinListener() {}
+	~ClockPinListener() = default;
 };
 
 class ClockPin final : public Schedulable
@@ -30,12 +30,12 @@ public:
 	                      EmuDuration::param hi, EmuTime::param time);
 
 	// output side
-	bool getState(EmuTime::param time) const;
-	bool isPeriodic() const { return periodic; }
-	EmuDuration::param getTotalDuration() const;
-	EmuDuration::param getHighDuration() const;
-	int getTicksBetween(EmuTime::param begin,
-	                    EmuTime::param end) const;
+	[[nodiscard]] bool getState(EmuTime::param time) const;
+	[[nodiscard]] bool isPeriodic() const { return periodic; }
+	[[nodiscard]] EmuDuration::param getTotalDuration() const;
+	[[nodiscard]] EmuDuration::param getHighDuration() const;
+	[[nodiscard]] unsigned getTicksBetween(EmuTime::param begin,
+	                                       EmuTime::param end) const;
 
 	// control
 	void generateEdgeSignals(bool wanted, EmuTime::param time);
@@ -48,15 +48,16 @@ private:
 	void schedule(EmuTime::param time);
 	void executeUntil(EmuTime::param time) override;
 
+private:
 	ClockPinListener* const listener;
 
 	EmuDuration totalDur;
 	EmuDuration hiDur;
-	EmuTime referenceTime;
+	EmuTime referenceTime = EmuTime::zero();
 
-	bool periodic;
-	bool status;
-	bool signalEdge;
+	bool periodic = false;
+	bool status = false;
+	bool signalEdge = false;
 };
 
 } // namespace openmsx

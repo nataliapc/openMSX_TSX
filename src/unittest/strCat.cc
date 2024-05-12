@@ -1,6 +1,9 @@
 #include "catch.hpp"
 #include "strCat.hh"
 
+#include <array>
+#include <iostream>
+
 static std::string rValue()
 {
 	return "bar";
@@ -20,9 +23,9 @@ static std::ostream& operator<<(std::ostream& os, const MyType& m)
 TEST_CASE("strCat")
 {
 	std::string str = "abc";
-	string_view sr = "xyz";
+	std::string_view sr = "xyz";
 	const char* literal = "foo";
-	char buf[100]; buf[0] = 'q'; buf[1] = 'u'; buf[2] = 'x'; buf[3] = '\0';
+	std::array<char, 100> buf; buf[0] = 'q'; buf[1] = 'u'; buf[2] = 'x'; buf[3] = '\0';
 	char c = '-';
 	unsigned char uc = 222;
 	int m = -31;
@@ -39,7 +42,7 @@ TEST_CASE("strCat")
 		CHECK(strCat(str) == "abc");
 		CHECK(strCat(sr) == "xyz");
 		CHECK(strCat(literal) == "foo");
-		CHECK(strCat(buf) == "qux");
+		CHECK(strCat(buf.data()) == "qux");
 		CHECK(strCat(c) == "-");
 		CHECK(strCat(uc) == "222");
 		CHECK(strCat(m) == "-31");
@@ -49,6 +52,15 @@ TEST_CASE("strCat")
 		CHECK(strCat(t) == "--|a|--");
 		CHECK(strCat(hex_string<8>(i)) == "0001e240");
 		CHECK(strCat(hex_string<4>(i)) == "e240");
+		CHECK(strCat(hex_string<4, HexCase::upper>(i)) == "E240");
+		CHECK(strCat(hex_string(Digits{5}, i)) == "1e240");
+		CHECK(strCat(hex_string<HexCase::upper>(Digits{5}, i)) == "1E240");
+		CHECK(strCat(hex_string(Digits{3}, i)) == "240");
+		CHECK(strCat(bin_string<16>(i)) == "1110001001000000");
+		CHECK(strCat(bin_string<8>(i)) == "01000000");
+		CHECK(strCat(dec_string<8>(i)) == "  123456");
+		CHECK(strCat(dec_string<6>(i)) == "123456");
+		CHECK(strCat(dec_string<4>(i)) == "3456");
 		CHECK(strCat(spaces(5)) == "     ");
 	}
 	SECTION("two") {
@@ -58,7 +70,7 @@ TEST_CASE("strCat")
 		CHECK(strCat(i, str) == "123456abc");
 		CHECK(strCat(m, str) == "-31abc");
 		CHECK(strCat(uc, str) == "222abc");
-		CHECK(strCat(buf, i) == "qux123456");
+		CHECK(strCat(buf.data(), i) == "qux123456");
 		CHECK(strCat(literal, m) == "foo-31");
 		CHECK(strCat(i, m) == "123456-31");
 		CHECK(strCat(c, m) == "--31");
@@ -86,16 +98,16 @@ TEST_CASE("strCat")
 	SECTION("three") {
 		CHECK(strCat(str, str, str) == "abcabcabc");
 		CHECK(strCat(i, m, c) == "123456-31-");
-		CHECK(strCat(literal, buf, rValue()) == "fooquxbar");
+		CHECK(strCat(literal, buf.data(), rValue()) == "fooquxbar");
 
 		// 1st an r-value is a special case
 		CHECK(strCat(rValue(), i, literal) == "bar123456foo");
-		CHECK(strCat(rValue(), uc, buf) == "bar222qux");
+		CHECK(strCat(rValue(), uc, buf.data()) == "bar222qux");
 	}
 	SECTION("many") {
-		CHECK(strCat(str, sr, literal, buf, c, uc, m, i, rValue(), spaces(2), hex_string<2>(255)) ==
+		CHECK(strCat(str, sr, literal, buf.data(), c, uc, m, i, rValue(), spaces(2), hex_string<2>(255)) ==
 		      "abcxyzfooqux-222-31123456bar  ff");
-		CHECK(strCat(rValue(), uc, buf, c, spaces(2), str, i, hex_string<3>(9999), sr, literal, m) ==
+		CHECK(strCat(rValue(), uc, buf.data(), c, spaces(2), str, i, hex_string<3>(9999), sr, literal, m) ==
 		      "bar222qux-  abc12345670fxyzfoo-31");
 	}
 }
@@ -115,9 +127,9 @@ static void testAppend(const std::string& expected, Args&& ...args)
 TEST_CASE("strAppend")
 {
 	std::string str = "mno";
-	string_view sr = "rst";
+	std::string_view sr = "rst";
 	const char* literal = "ijklmn";
-	char buf[100]; buf[0] = 'd'; buf[1] = 'e'; buf[2] = '\0'; buf[3] = 'f';
+	std::array<char, 100> buf; buf[0] = 'd'; buf[1] = 'e'; buf[2] = '\0'; buf[3] = 'f';
 	char c = '+';
 	unsigned u = 4294967295u;
 	long long ll = -876;
@@ -130,7 +142,7 @@ TEST_CASE("strAppend")
 		testAppend("mno", str);
 		testAppend("rst", sr);
 		testAppend("ijklmn", literal);
-		testAppend("de", buf);
+		testAppend("de", buf.data());
 		testAppend("+", c);
 		testAppend("4294967295", u);
 		testAppend("-876", ll);
@@ -140,7 +152,7 @@ TEST_CASE("strAppend")
 	SECTION("many") {
 		std::string s = "bla";
 		strAppend(s, str, sr, literal, spaces(3));
-		strAppend(s, buf, c, u, ll, rValue());
+		strAppend(s, buf.data(), c, u, ll, rValue());
 		CHECK(s == "blamnorstijklmn   de+4294967295-876bar");
 	}
 }
@@ -154,7 +166,7 @@ TEST_CASE("strAppend")
 auto test1(int i) { return strCat(i); }
 auto test1b(int i) { return std::to_string(i); }
 auto test2(const char* s) { return strCat(s); }
-auto test3(string_view s) { return strCat(s); }
+auto test3(std::string_view s) { return strCat(s); }
 auto test4(const std::string& s) { return strCat(s); }
 auto test5() { return strCat("bla"); }
 auto test6() { return strCat('a'); }

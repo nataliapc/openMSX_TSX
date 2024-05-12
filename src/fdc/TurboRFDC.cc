@@ -16,35 +16,46 @@
 #include "CacheLine.hh"
 #include "Rom.hh"
 #include "MSXException.hh"
+#include "narrow.hh"
 #include "serialize.hh"
 
 namespace openmsx {
 
-static TurboRFDC::Type parseType(const DeviceConfig& config)
+[[nodiscard]] static TurboRFDC::Type parseType(const DeviceConfig& config)
 {
-	auto ioregs = config.getChildData("io_regs", {});
-	if (ioregs == "7FF2") {
+	auto ioRegs = config.getChildData("io_regs", {});
+	if (ioRegs == "7FF2") {
 		return TurboRFDC::R7FF2;
-	} else if (ioregs == "7FF8") {
+	} else if (ioRegs == "7FF8") {
 		return TurboRFDC::R7FF8;
-	} else if (ioregs.empty()) {
+	} else if (ioRegs.empty()) {
 		// for backwards compatibility
 		return TurboRFDC::BOTH;
 	} else {
 		throw MSXException(
 			"Invalid 'io_regs' specification: expected one of "
-			"'7FF2' or '7FF8', but got: ", ioregs);
+			"'7FF2' or '7FF8', but got: ", ioRegs);
 	}
 }
 
 TurboRFDC::TurboRFDC(const DeviceConfig& config)
 	: MSXFDC(config)
-	, controller(getScheduler(), reinterpret_cast<DiskDrive**>(drives),
-	             getCliComm(), getCurrentTime())
-	, romBlockDebug(*this, &bank, 0x4000, 0x4000, 14)
-	, blockMask((rom->getSize() / 0x4000) - 1)
+	, controller(getScheduler(), drives, getCliComm(), getCurrentTime())
+	, romBlockDebug(*this, std::span{&bank, 1}, 0x4000, 0x4000, 14)
+	, memory(subspan<0x4000>(*rom))
+	, blockMask(narrow_cast<byte>((rom->size() / 0x4000) - 1))
 	, type(parseType(config))
 {
+	auto size = rom->size();
+	if ((size % 0x4000) != 0) {
+		throw MSXException("TurboRFDC rom size must be a multiple of 16kB");
+	}
+	if (size == 0) {
+		throw MSXException("TurboRFDC rom size too small");
+	}
+	if ((size / 0x4000) > 256) {
+		throw MSXException("TurboRFDC rom size too large");
+	}
 	reset(getCurrentTime());
 }
 
@@ -71,14 +82,14 @@ byte TurboRFDC::readMem(word address, EmuTime::param time_)
 				if (controller.diskChanged(1)) result &= ~0x20;
 				return result;
 			}
-			case 0x4: return controller.readReg(4, time);
-			case 0x5: return controller.readReg(5, time);
+			case 0x4: return controller.readStatus(time);
+			case 0x5: return controller.readDataPort(time);
 			}
 		}
 		if (type != R7FF2) { // non-turboR or BOTH
 			switch (address & 0xF) {
-			case 0xA: return controller.readReg(4, time);
-			case 0xB: return controller.readReg(5, time);
+			case 0xA: return controller.readStatus(time);
+			case 0xB: return controller.readDataPort(time);
 			}
 
 		}
@@ -107,14 +118,14 @@ byte TurboRFDC::peekMem(word address, EmuTime::param time) const
 				if (controller.peekDiskChanged(1)) result &= ~0x20;
 				return result;
 			}
-			case 0x4: return controller.peekReg(4, time);
-			case 0x5: return controller.peekReg(5, time);
+			case 0x4: return controller.peekStatus();
+			case 0x5: return controller.peekDataPort(time);
 			}
 		}
 		if (type != R7FF2) { // non-turboR or BOTH
 			switch (address & 0xF) {
-			case 0xA: return controller.peekReg(4, time);
-			case 0xB: return controller.peekReg(5, time);
+			case 0xA: return controller.peekStatus();
+			case 0xB: return controller.peekDataPort(time);
 			}
 		}
 		switch (address & 0xF) {
@@ -147,7 +158,7 @@ const byte* TurboRFDC::getReadCacheLine(word start) const
 	} else if ((0x4000 <= start) && (start < 0x8000)) {
 		return &memory[start & 0x3FFF];
 	} else {
-		return unmappedRead;
+		return unmappedRead.data();
 	}
 }
 
@@ -164,20 +175,26 @@ void TurboRFDC::writeMem(word address, byte value, EmuTime::param time_)
 		if (type != R7FF8) { // turboR or BOTH
 			switch (address & 0x3FFF) {
 			case 0x3FF2:
-			case 0x3FF3:
-			case 0x3FF4:
+				controller.writeControlReg0(value, time);
+				break;
+			case 0x3ff3:
+				controller.writeControlReg1(value, time);
+				break;
 			case 0x3FF5:
-				controller.writeReg(address & 0xF, value, time);
+				controller.writeDataPort(value, time);
 				break;
 			}
 		}
 		if (type != R7FF2) { // non-turboR or BOTH
 			switch (address & 0x3FFF) {
 			case 0x3FF8:
+				controller.writeControlReg0(value, time);
+				break;
 			case 0x3FF9:
-			case 0x3FFA:
+				controller.writeControlReg1(value, time);
+				break;
 			case 0x3FFB:
-				controller.writeReg((address & 0xF) - 6, value, time);
+				controller.writeDataPort(value, time);
 				break;
 			}
 		}
@@ -186,9 +203,9 @@ void TurboRFDC::writeMem(word address, byte value, EmuTime::param time_)
 
 void TurboRFDC::setBank(byte value)
 {
-	invalidateMemCache(0x4000, 0x4000);
+	invalidateDeviceRCache(0x4000, 0x4000);
 	bank = value & blockMask;
-	memory = &(*rom)[0x4000 * bank];
+	memory = subspan<0x4000>(*rom, 0x4000 * bank);
 }
 
 byte* TurboRFDC::getWriteCacheLine(word address) const
@@ -197,7 +214,7 @@ byte* TurboRFDC::getWriteCacheLine(word address) const
 	    ((address & 0x3FF0) == (0x3FF0 & CacheLine::HIGH))) {
 		return nullptr;
 	} else {
-		return unmappedWrite;
+		return unmappedWrite.data();
 	}
 }
 
@@ -206,9 +223,9 @@ template<typename Archive>
 void TurboRFDC::serialize(Archive& ar, unsigned /*version*/)
 {
 	ar.template serializeBase<MSXFDC>(*this);
-	ar.serialize("TC8566AF", controller);
-	ar.serialize("bank", bank);
-	if (ar.isLoader()) {
+	ar.serialize("TC8566AF", controller,
+	             "bank",     bank);
+	if constexpr (Archive::IS_LOADER) {
 		setBank(bank);
 	}
 }

@@ -7,9 +7,10 @@
   <info>
     <manufacturer>Sony</manufacturer>
     <code>HB-10</code>
-    <release_year></release_year>
-    <description/>
+    <release_year>1985</release_year>
+    <description>Basic Japanese MSX1 with 16kB RAM.</description>
     <type>MSX</type>
+    <region>jp</region>
   </info>
 
   <CassettePort/>
@@ -23,13 +24,13 @@
       <io base="0xA8" num="4"/>
       <keyboard_type>jp_ansi</keyboard_type>
       <has_keypad>false</has_keypad>
-      <key_ghosting_sgc_protected>false</key_ghosting_sgc_protected> <!-- not sure yet -->
+      <key_ghosting_sgc_protected>false</key_ghosting_sgc_protected> <!-- checked by Peter Hanraets -->
       <code_kana_locks>true</code_kana_locks>
       <graph_locks>false</graph_locks>
     </PPI>
 
     <VDP id="VDP">
-      <version>TMS99X8A</version>
+      <version>TMS9118</version>
       <io base="0x98" num="2"/>
     </VDP>
 
@@ -39,8 +40,8 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <PrinterPort id="Printer Port">

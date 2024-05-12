@@ -2,6 +2,7 @@
 #include "MSXCPU.hh"
 #include "MSXMotherBoard.hh"
 #include "PanasonicMemory.hh"
+#include "narrow.hh"
 #include "outer.hh"
 #include "serialize.hh"
 #include "unreachable.hh"
@@ -34,9 +35,8 @@ byte MSXS1990::peekIO(word port, EmuTime::param /*time*/) const
 		return registerSelect;
 	case 1:
 		return readRegister(registerSelect);
-	default: // unreachable, avoid warning
+	default:
 		UNREACHABLE;
-		return 0;
 	}
 }
 
@@ -101,13 +101,13 @@ MSXS1990::Debuggable::Debuggable(MSXMotherBoard& motherBoard_, const std::string
 byte MSXS1990::Debuggable::read(unsigned address)
 {
 	auto& s1990 = OUTER(MSXS1990, debuggable);
-	return s1990.readRegister(address);
+	return s1990.readRegister(narrow<byte>(address));
 }
 
 void MSXS1990::Debuggable::write(unsigned address, byte value)
 {
 	auto& s1990 = OUTER(MSXS1990, debuggable);
-	s1990.writeRegister(address, value);
+	s1990.writeRegister(narrow<byte>(address), value);
 }
 
 
@@ -115,9 +115,9 @@ template<typename Archive>
 void MSXS1990::serialize(Archive& ar, unsigned /*version*/)
 {
 	ar.template serializeBase<MSXDevice>(*this);
-	ar.serialize("registerSelect", registerSelect);
-	ar.serialize("cpuStatus", cpuStatus);
-	if (ar.isLoader()) {
+	ar.serialize("registerSelect", registerSelect,
+	             "cpuStatus",      cpuStatus);
+	if constexpr (Archive::IS_LOADER) {
 		setCPUStatus(cpuStatus);
 	}
 }

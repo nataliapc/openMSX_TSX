@@ -5,9 +5,10 @@
   <info>
     <manufacturer>Sony</manufacturer>
     <code>HB-55P</code>
-    <release_year>1983</release_year>
-    <description/>
+    <release_year>1984</release_year>
+    <description>European version of HB-55, with 16kB RAM and built in Personal Databank software.</description>
     <type>MSX</type>
+    <region>eu</region>
   </info>
 
   <CassettePort/>
@@ -36,8 +37,8 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <PrinterPort id="Printer Port">

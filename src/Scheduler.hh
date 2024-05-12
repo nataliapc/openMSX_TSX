@@ -3,7 +3,6 @@
 
 #include "EmuTime.hh"
 #include "SchedulerQueue.hh"
-#include "likely.hh"
 #include <vector>
 
 namespace openmsx {
@@ -14,20 +13,19 @@ class MSXCPU;
 class SynchronizationPoint
 {
 public:
+	SynchronizationPoint() = default;
 	SynchronizationPoint(EmuTime::param time, Schedulable* dev)
 		: timeStamp(time), device(dev) {}
-	SynchronizationPoint()
-		: timeStamp(EmuTime::zero), device(nullptr) {}
-	EmuTime::param getTime() const { return timeStamp; }
+	[[nodiscard]] EmuTime::param getTime() const { return timeStamp; }
 	void setTime(EmuTime::param time) { timeStamp = time; }
-	Schedulable* getDevice() const { return device; }
+	[[nodiscard]] Schedulable* getDevice() const { return device; }
 
-	template <typename Archive>
+	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 private:
-	EmuTime timeStamp;
-	Schedulable* device;
+	EmuTime timeStamp = EmuTime::zero();
+	Schedulable* device = nullptr;
 };
 
 
@@ -36,7 +34,7 @@ class Scheduler
 public:
 	using SyncPoints = std::vector<SynchronizationPoint>;
 
-	Scheduler();
+	Scheduler() = default;
 	~Scheduler();
 
 	void setCPU(MSXCPU* cpu_)
@@ -47,12 +45,12 @@ public:
 	/**
 	 * Get the current scheduler time.
 	 */
-	EmuTime::param getCurrentTime() const;
+	[[nodiscard]] EmuTime::param getCurrentTime() const;
 
 	/**
 	 * TODO
 	 */
-	inline EmuTime::param getNext() const
+	[[nodiscard]] inline EmuTime::param getNext() const
 	{
 		return queue.front().getTime();
 	}
@@ -62,14 +60,13 @@ public:
 	 */
 	inline void schedule(EmuTime::param limit)
 	{
-		EmuTime next = getNext();
-		if (unlikely(limit >= next)) {
+		if (EmuTime next = getNext(); limit >= next) [[unlikely]] {
 			scheduleHelper(limit, next); // slow path not inlined
 		}
 		scheduleTime = limit;
 	}
 
-	template <typename Archive>
+	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 private: // -> intended for Schedulable
@@ -86,7 +83,7 @@ private: // -> intended for Schedulable
 	 */
 	void setSyncPoint(EmuTime::param timestamp, Schedulable& device);
 
-	SyncPoints getSyncPoints(const Schedulable& device) const;
+	[[nodiscard]] SyncPoints getSyncPoints(const Schedulable& device) const;
 
 	/**
 	 * Removes a syncPoint of a given device.
@@ -95,27 +92,28 @@ private: // -> intended for Schedulable
 	 * removed.
 	 * Returns false <=> if there was no match (so nothing removed)
 	 */
-	bool removeSyncPoint(Schedulable& device);
+	bool removeSyncPoint(const Schedulable& device);
 
-	/** Remove all syncpoints for the given device.
+	/** Remove all sync-points for the given device.
 	  */
-	void removeSyncPoints(Schedulable& device);
+	void removeSyncPoints(const Schedulable& device);
 
 	/**
 	 * Is there a pending syncPoint for this device?
 	 */
-	bool pendingSyncPoint(const Schedulable& device, EmuTime& result) const;
+	[[nodiscard]] bool pendingSyncPoint(const Schedulable& device, EmuTime& result) const;
 
 private:
 	void scheduleHelper(EmuTime::param limit, EmuTime next);
 
+private:
 	/** Vector used as heap, not a priority queue because that
 	  * doesn't allow removal of non-top element.
 	  */
 	SchedulerQueue<SynchronizationPoint> queue;
-	EmuTime scheduleTime;
-	MSXCPU* cpu;
-	bool scheduleInProgress;
+	EmuTime scheduleTime = EmuTime::zero();
+	MSXCPU* cpu = nullptr;
+	bool scheduleInProgress = false;
 };
 
 } // namespace openmsx

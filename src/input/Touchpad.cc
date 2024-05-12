@@ -8,19 +8,18 @@
 #include "Touchpad.hh"
 #include "MSXEventDistributor.hh"
 #include "StateChangeDistributor.hh"
-#include "InputEvents.hh"
+#include "Event.hh"
 #include "StateChange.hh"
 #include "Display.hh"
+#include "OutputSurface.hh"
 #include "CommandController.hh"
 #include "CommandException.hh"
 #include "Clock.hh"
-#include "Math.hh"
-#include "checked_cast.hh"
 #include "serialize.hh"
 #include "serialize_meta.hh"
+#include "xrange.hh"
 #include <iostream>
 
-using std::shared_ptr;
 using namespace gl;
 
 namespace openmsx {
@@ -30,24 +29,24 @@ class TouchpadState final : public StateChange
 public:
 	TouchpadState() = default; // for serialize
 	TouchpadState(EmuTime::param time_,
-	              byte x_, byte y_, bool touch_, bool button_)
+	              uint8_t x_, uint8_t y_, bool touch_, bool button_)
 		: StateChange(time_)
 		, x(x_), y(y_), touch(touch_), button(button_) {}
-	byte getX()      const { return x; }
-	byte getY()      const { return y; }
-	bool getTouch()  const { return touch; }
-	bool getButton() const { return button; }
+	[[nodiscard]] uint8_t getX()   const { return x; }
+	[[nodiscard]] uint8_t getY()   const { return y; }
+	[[nodiscard]] bool getTouch()  const { return touch; }
+	[[nodiscard]] bool getButton() const { return button; }
 
 	template<typename Archive> void serialize(Archive& ar, unsigned /*version*/)
 	{
 		ar.template serializeBase<StateChange>(*this);
-		ar.serialize("x",      x);
-		ar.serialize("y",      y);
-		ar.serialize("touch",  touch);
-		ar.serialize("button", button);
+		ar.serialize("x",      x,
+		             "y",      y,
+		             "touch",  touch,
+		             "button", button);
 	}
 private:
-	byte x, y;
+	uint8_t x, y;
 	bool touch, button;
 };
 REGISTER_POLYMORPHIC_CLASS(StateChange, TouchpadState, "TouchpadState");
@@ -65,13 +64,9 @@ Touchpad::Touchpad(MSXEventDistributor& eventDistributor_,
 		"2x3 matrix to transform host mouse coordinates to "
 		"MSX touchpad coordinates, see manual for details",
 		"{ 256 0 0 } { 0 256 0 }")
-	, start(EmuTime::zero)
-	, hostButtons(0)
-	, x(0), y(0), touch(false), button(false)
-	, shift(0), channel(0), last(0)
 {
 	auto& interp = commandController.getInterpreter();
-	transformSetting.setChecker([this, &interp](TclObject& newValue) {
+	transformSetting.setChecker([this, &interp](const TclObject& newValue) {
 		try {
 			parseTransformMatrix(interp, newValue);
 		} catch (CommandException& e) {
@@ -83,7 +78,7 @@ Touchpad::Touchpad(MSXEventDistributor& eventDistributor_,
 		parseTransformMatrix(interp, transformSetting.getValue());
 	} catch (CommandException& e) {
 		// should only happen when settings.xml was manually edited
-		std::cerr << e.getMessage() << std::endl;
+		std::cerr << e.getMessage() << '\n';
 		// fill in safe default values
 		m[0][0] = 256.0f; m[1][0] =   0.0f; m[2][0] = 0.0f;
 		m[0][1] =   0.0f; m[1][1] = 256.0f; m[2][1] = 0.0f;
@@ -102,25 +97,24 @@ void Touchpad::parseTransformMatrix(Interpreter& interp, const TclObject& value)
 	if (value.getListLength(interp) != 2) {
 		throw CommandException("must have 2 rows");
 	}
-	for (int i = 0; i < 2; ++i) {
+	for (auto i : xrange(2)) {
 		TclObject row = value.getListIndex(interp, i);
 		if (row.getListLength(interp) != 3) {
 			throw CommandException("each row must have 3 elements");
 		}
-		for (int j = 0; j < 3; ++j) {
-			m[j][i] = row.getListIndex(interp, j).getDouble(interp);
+		for (auto j : xrange(3)) {
+			m[j][i] = row.getListIndex(interp, j).getFloat(interp);
 		}
 	}
 }
 
 // Pluggable
-const std::string& Touchpad::getName() const
+std::string_view Touchpad::getName() const
 {
-	static const std::string name("touchpad");
-	return name;
+	return "touchpad";
 }
 
-string_view Touchpad::getDescription() const
+std::string_view Touchpad::getDescription() const
 {
 	return "MSX Touchpad";
 }
@@ -138,24 +132,24 @@ void Touchpad::unplugHelper(EmuTime::param /*time*/)
 }
 
 // JoystickDevice
-static const byte SENSE  = JoystickDevice::RD_PIN1;
-static const byte EOC    = JoystickDevice::RD_PIN2;
-static const byte SO     = JoystickDevice::RD_PIN3;
-static const byte BUTTON = JoystickDevice::RD_PIN4;
-static const byte SCK    = JoystickDevice::WR_PIN6;
-static const byte SI     = JoystickDevice::WR_PIN7;
-static const byte CS     = JoystickDevice::WR_PIN8;
+static constexpr uint8_t SENSE  = JoystickDevice::RD_PIN1;
+static constexpr uint8_t EOC    = JoystickDevice::RD_PIN2;
+static constexpr uint8_t SO     = JoystickDevice::RD_PIN3;
+static constexpr uint8_t BUTTON = JoystickDevice::RD_PIN4;
+static constexpr uint8_t SCK    = JoystickDevice::WR_PIN6;
+static constexpr uint8_t SI     = JoystickDevice::WR_PIN7;
+static constexpr uint8_t CS     = JoystickDevice::WR_PIN8;
 
-byte Touchpad::read(EmuTime::param time)
+uint8_t Touchpad::read(EmuTime::param time)
 {
-	byte result = SENSE | BUTTON; // 1-bit means not pressed
+	uint8_t result = SENSE | BUTTON; // 1-bit means not pressed
 	if (touch)  result &= ~SENSE;
 	if (button) result &= ~BUTTON;
 
 	// EOC remains zero for 56 cycles after CS 0->1
 	// TODO at what clock frequency does the UPD7001 run?
 	//    400kHz is only the recommended value from the UPD7001 datasheet.
-	static const EmuDuration delta = Clock<400000>::duration(56);
+	constexpr EmuDuration delta = Clock<400000>::duration(56);
 	if ((time - start) > delta) {
 		result |= EOC;
 	}
@@ -166,9 +160,9 @@ byte Touchpad::read(EmuTime::param time)
 	return result | 0x30;
 }
 
-void Touchpad::write(byte value, EmuTime::param time)
+void Touchpad::write(uint8_t value, EmuTime::param time)
 {
-	byte diff = last ^ value;
+	uint8_t diff = last ^ value;
 	last = value;
 	if (diff & CS) {
 		if (value & CS) {
@@ -194,81 +188,76 @@ void Touchpad::write(byte value, EmuTime::param time)
 
 ivec2 Touchpad::transformCoords(ivec2 xy)
 {
-	auto size = display.getOutputScreenResolution();
-	if (size[0] > 0) {
-		vec2 uv = vec2(xy) / vec2(size);
+	if (auto* output = display.getOutputSurface()) {
+		vec2 uv = vec2(xy) / vec2(output->getLogicalSize());
 		xy = ivec2(m * vec3(uv, 1.0f));
 	}
 	return clamp(xy, 0, 255);
 }
 
 // MSXEventListener
-void Touchpad::signalEvent(const shared_ptr<const Event>& event,
-                           EmuTime::param time)
+void Touchpad::signalMSXEvent(const Event& event,
+                              EmuTime::param time) noexcept
 {
 	ivec2 pos = hostPos;
-	int b = hostButtons;
-	switch (event->getType()) {
-	case OPENMSX_MOUSE_MOTION_EVENT: {
-		auto& mev = checked_cast<const MouseMotionEvent&>(*event);
-		pos = transformCoords(ivec2(mev.getAbsX(), mev.getAbsY()));
-		break;
-	}
-	case OPENMSX_MOUSE_BUTTON_DOWN_EVENT: {
-		auto& butEv = checked_cast<const MouseButtonEvent&>(*event);
-		switch (butEv.getButton()) {
-		case MouseButtonEvent::LEFT:
-			b |= 1;
-			break;
-		case MouseButtonEvent::RIGHT:
-			b |= 2;
-			break;
-		default:
-			// ignore other buttons
-			break;
-		}
-		break;
-	}
-	case OPENMSX_MOUSE_BUTTON_UP_EVENT: {
-		auto& butEv = checked_cast<const MouseButtonEvent&>(*event);
-		switch (butEv.getButton()) {
-		case MouseButtonEvent::LEFT:
-			b &= ~1;
-			break;
-		case MouseButtonEvent::RIGHT:
-			b &= ~2;
-			break;
-		default:
-			// ignore other buttons
-			break;
-		}
-		break;
-	}
-	default:
-		// ignore
-		break;
-	}
+	auto b = hostButtons;
+
+	std::visit(overloaded{
+		[&](const MouseMotionEvent& e) {
+			pos = transformCoords(ivec2(e.getAbsX(), e.getAbsY()));
+		},
+		[&](const MouseButtonDownEvent& e) {
+			switch (e.getButton()) {
+			case SDL_BUTTON_LEFT:
+				b |= 1;
+				break;
+			case SDL_BUTTON_RIGHT:
+				b |= 2;
+				break;
+			default:
+				// ignore other buttons
+				break;
+			}
+		},
+		[&](const MouseButtonUpEvent& e) {
+			switch (e.getButton()) {
+			case SDL_BUTTON_LEFT:
+				b &= ~1;
+				break;
+			case SDL_BUTTON_RIGHT:
+				b &= ~2;
+				break;
+			default:
+				// ignore other buttons
+				break;
+			}
+		},
+		[](const EventBase&) { /*ignore*/ }
+	}, event);
+
 	if ((pos != hostPos) || (b != hostButtons)) {
 		hostPos     = pos;
 		hostButtons = b;
 		createTouchpadStateChange(
-			time, pos[0], pos[1],
+			time,
+			narrow_cast<uint8_t>(pos.x),
+			narrow_cast<uint8_t>(pos.y),
 			(hostButtons & 1) != 0,
 			(hostButtons & 2) != 0);
 	}
 }
 
 void Touchpad::createTouchpadStateChange(
-	EmuTime::param time, byte x_, byte y_, bool touch_, bool button_)
+	EmuTime::param time, uint8_t x_, uint8_t y_, bool touch_, bool button_)
 {
-	stateChangeDistributor.distributeNew(std::make_shared<TouchpadState>(
-		time, x_, y_, touch_, button_));
+	stateChangeDistributor.distributeNew<TouchpadState>(
+		time, x_, y_, touch_, button_);
 }
 
 // StateChangeListener
-void Touchpad::signalStateChange(const shared_ptr<StateChange>& event)
+void Touchpad::signalStateChange(const StateChange& event)
 {
-	if (auto* ts = dynamic_cast<TouchpadState*>(event.get())) {
+	if (const auto* ts = dynamic_cast<const TouchpadState*>(&event)) {
 		x      = ts->getX();
 		y      = ts->getY();
 		touch  = ts->getTouch();
@@ -276,13 +265,12 @@ void Touchpad::signalStateChange(const shared_ptr<StateChange>& event)
 	}
 }
 
-void Touchpad::stopReplay(EmuTime::param time)
+void Touchpad::stopReplay(EmuTime::param time) noexcept
 {
 	// TODO Get actual mouse state. Is it worth the trouble?
 	if (x || y || touch || button) {
-		stateChangeDistributor.distributeNew(
-			std::make_shared<TouchpadState>(
-				time, 0, 0, false, false));
+		stateChangeDistributor.distributeNew<TouchpadState>(
+			time, uint8_t(0), uint8_t(0), false, false);
 	}
 }
 
@@ -292,17 +280,19 @@ void Touchpad::serialize(Archive& ar, unsigned /*version*/)
 {
 	// no need to serialize hostX, hostY, hostButtons,
 	//                      transformSetting, m[][]
-	ar.serialize("start", start);
-	ar.serialize("x", x);
-	ar.serialize("y", y);
-	ar.serialize("touch", touch);
-	ar.serialize("button", button);
-	ar.serialize("shift", shift);
-	ar.serialize("channel", channel);
-	ar.serialize("last", last);
+	ar.serialize("start",   start,
+	             "x",       x,
+	             "y",       y,
+	             "touch",   touch,
+	             "button",  button,
+	             "shift",   shift,
+	             "channel", channel,
+	             "last",    last);
 
-	if (ar.isLoader() && isPluggedIn()) {
-		plugHelper(*getConnector(), EmuTime::dummy());
+	if constexpr (Archive::IS_LOADER) {
+		if (isPluggedIn()) {
+			plugHelper(*getConnector(), EmuTime::dummy());
+		}
 	}
 }
 INSTANTIATE_SERIALIZE_METHODS(Touchpad);

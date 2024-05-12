@@ -8,6 +8,7 @@
     <release_year>1982</release_year>
     <description>Game console with hardware similar to MSX.</description>
     <type>Coleco</type>
+    <region>us</region>
   </info>
 
   <slotmap>
@@ -52,6 +53,7 @@
       <RAM id="Main RAM">
         <mem base="0x6000" size="0x2000"/>
         <size>1024</size>
+        <initialContent encoding="hex">00</initialContent>
       </RAM>
     </primary>
 

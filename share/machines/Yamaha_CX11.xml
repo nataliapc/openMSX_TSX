@@ -6,8 +6,9 @@
     <manufacturer>Yamaha</manufacturer>
     <code>CX11</code>
     <release_year>1985</release_year>
-    <description>"Music Computer"</description>
+    <description>"Music Computer": Japanese MSX1 with 32kb RAM and built in SFG-01 module.</description>
     <type>MSX</type>
+    <region>jp</region>
   </info>
 
 <!--
@@ -34,7 +35,7 @@
       <sound>
         <volume>16000</volume>
       </sound>
-      <io base="0xA8" num="4"/>
+      <io base="0xA8" num="8"/> <!-- S-3527 mirrors -->
       <keyboard_type>jp_ansi</keyboard_type>
       <has_keypad>false</has_keypad>
       <key_ghosting_sgc_protected>false</key_ghosting_sgc_protected>
@@ -54,17 +55,19 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="8" type="IO"/> <!-- S-3527 mirrors -->
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <PrinterPort id="Printer Port">
-      <io base="0x90" num="2"/>
+      <io base="0x90" num="8" type="IO"/> <!-- S-3527 mirrors -->
+      <status_readable_on_all_ports>true</status_readable_on_all_ports> <!-- S-3527 property -->
     </PrinterPort>
 
     <primary slot="0">
       <RAM id="Main RAM">
         <mem base="0x8000" size="0x8000"/>
+        <initialContent encoding="hex">FF00</initialContent> <!-- on the machine of Peter Hanraets with serial 001332 -->
       </RAM>
       <ROM id="MSX BIOS with BASIC ROM">
         <rom>
@@ -85,6 +88,7 @@
     standard MSX cartridgeslot, but a 60 pins card edge connector, carrying all
     MSX cartridgeslot signals. -->
       <YamahaSFG id="Yamaha SFG-01">
+        <variant>YM2151</variant>
         <mem base="0x0000" size="0x10000"/>
         <sound>
           <volume>30000</volume>

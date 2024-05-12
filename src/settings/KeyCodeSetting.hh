@@ -2,7 +2,7 @@
 #define KEYCODESETTING_HH
 
 #include "Setting.hh"
-#include "Keys.hh"
+#include "SDLKey.hh"
 
 namespace openmsx {
 
@@ -10,12 +10,12 @@ class KeyCodeSetting final : public Setting
 {
 public:
 	KeyCodeSetting(CommandController& commandController,
-	               string_view name, string_view description,
-	               Keys::KeyCode initialValue);
+	               std::string_view name, static_string_view description,
+	               SDLKey initialValue);
 
-	string_view getTypeString() const override;
+	[[nodiscard]] std::string_view getTypeString() const override;
 
-	Keys::KeyCode getKey() const;
+	[[nodiscard]] SDLKey getKey() const noexcept;
 };
 
 } // namespace openmsx

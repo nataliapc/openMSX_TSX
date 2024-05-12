@@ -1,10 +1,10 @@
 #ifndef KEYBOARDSETTINGS_HH
 #define KEYBOARDSETTINGS_HH
 
-#include "Keys.hh"
+#include "SDLKey.hh"
 #include "EnumSetting.hh"
 #include "BooleanSetting.hh"
-#include <memory>
+#include <array>
 #include <cassert>
 
 namespace openmsx {
@@ -15,36 +15,36 @@ class KeyboardSettings
 {
 public:
 	enum KpEnterMode { MSX_KP_COMMA, MSX_ENTER };
-	enum MappingMode { KEY_MAPPING, CHARACTER_MAPPING };
+	enum MappingMode { KEY_MAPPING, CHARACTER_MAPPING, POSITIONAL_MAPPING };
 
 	explicit KeyboardSettings(CommandController& commandController);
 
-	Keys::KeyCode getDeadkeyHostKey(unsigned n) const {
+	[[nodiscard]] SDL_Keycode getDeadKeyHostKey(unsigned n) const {
 		assert(n < 3);
-		return deadkeyHostKey[n]->getEnum();
+		return deadKeyHostKey[n].getEnum();
 	}
-	Keys::KeyCode getCodeKanaHostKey() const {
+	[[nodiscard]] SDL_Keycode getCodeKanaHostKey() const {
 		return codeKanaHostKey.getEnum();
 	}
-	KpEnterMode getKpEnterMode() const {
+	[[nodiscard]] KpEnterMode getKpEnterMode() const {
 		return kpEnterMode.getEnum();
 	}
-	MappingMode getMappingMode() const {
+	[[nodiscard]] MappingMode getMappingMode() const {
 		return mappingMode.getEnum();
 	}
-	bool getAlwaysEnableKeypad() const {
+	[[nodiscard]] bool getAlwaysEnableKeypad() const {
 		return alwaysEnableKeypad.getBoolean();
 	}
-	bool getTraceKeyPresses() const {
+	[[nodiscard]] bool getTraceKeyPresses() const {
 		return traceKeyPresses.getBoolean();
 	}
-	bool getAutoToggleCodeKanaLock() const {
+	[[nodiscard]] bool getAutoToggleCodeKanaLock() const {
 		return autoToggleCodeKanaLock.getBoolean();
 	}
 
 private:
-	std::unique_ptr<EnumSetting<Keys::KeyCode>> deadkeyHostKey[3];
-	EnumSetting<Keys::KeyCode> codeKanaHostKey;
+	std::array<EnumSetting<SDL_Keycode>, 3> deadKeyHostKey;
+	EnumSetting<SDL_Keycode> codeKanaHostKey;
 	EnumSetting<KpEnterMode> kpEnterMode;
 	EnumSetting<MappingMode> mappingMode;
 	BooleanSetting alwaysEnableKeypad;

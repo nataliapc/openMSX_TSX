@@ -2,21 +2,23 @@
 #define STATECHANGEDISTRIBUTOR_HH
 
 #include "EmuTime.hh"
-#include <memory>
+#include "ReverseManager.hh"
+#include "StateChangeListener.hh"
+
+#include "ScopedAssign.hh"
+
 #include <vector>
 
 namespace openmsx {
 
-class StateChangeListener;
-class StateChangeRecorder;
-class StateChange;
-
 class StateChangeDistributor
 {
 public:
-	using EventPtr = std::shared_ptr<StateChange>;
-
-	StateChangeDistributor();
+	StateChangeDistributor() = default;
+	StateChangeDistributor(const StateChangeDistributor&) = delete;
+	StateChangeDistributor(StateChangeDistributor&&) = delete;
+	StateChangeDistributor& operator=(const StateChangeDistributor&) = delete;
+	StateChangeDistributor& operator=(StateChangeDistributor&&) = delete;
 	~StateChangeDistributor();
 
 	/** (Un)registers the given object to receive state change events.
@@ -32,8 +34,8 @@ public:
 	 * object is always the first object that gets informed about state
 	 * changing events.
 	 */
-	void registerRecorder  (StateChangeRecorder& recorder);
-	void unregisterRecorder(StateChangeRecorder& recorder);
+	void registerRecorder  (ReverseManager& recorder);
+	void unregisterRecorder(ReverseManager& recorder);
 
 	/** Deliver the event to all registered listeners
 	 * MSX input devices should call the distributeNew() version, only the
@@ -44,10 +46,30 @@ public:
 	 * new StateChangeDistributor object (object always starts in replay
 	 * state), but this is automatically taken care of because replay
 	 * always starts from a freshly restored snapshot.
-	 * @param event The event
+	 * Instead of a 'StateChange' parameter this method takes a
+	 * template-parameter 'T' and run-time parameters 'time' and '...arg'
+	 * that together can construct a 'StateChange' subclass 'T'.
 	 */
-	void distributeNew   (const EventPtr& event);
-	void distributeReplay(const EventPtr& event);
+	template<typename T, typename... Args>
+	void distributeNew(EmuTime::param time, Args&& ...args) {
+		if (recorder) {
+			if (isReplaying()) {
+				if (viewOnlyMode || blockNewEventsDuringReplay) return;
+				stopReplay(time);
+			}
+			assert(!isReplaying());
+			const auto& event = recorder->record<T>(time, std::forward<Args>(args)...);
+			distribute(event); // might throw, ok
+		} else {
+			T event(time, std::forward<Args>(args)...);
+			distribute(event); // might throw, ok
+		}
+	}
+
+	void distributeReplay(const StateChange& event) const {
+		assert(isReplaying());
+		distribute(event);
+	}
 
 	/** Explicitly stop replay.
 	 * Should be called when replay->live transition cannot be signaled via
@@ -63,17 +85,23 @@ public:
 	 * @param value false if new events stop replay mode
 	 */
 	void setViewOnlyMode(bool value) { viewOnlyMode = value; }
-	bool isViewOnlyMode() const { return viewOnlyMode; }
+	[[nodiscard]] bool isViewOnlyMode() const { return viewOnlyMode; }
 
-	bool isReplaying() const;
+	[[nodiscard]] auto tempBlockNewEventsDuringReplay() {
+		return ScopedAssign{blockNewEventsDuringReplay, true};
+	}
+
+	[[nodiscard]] bool isReplaying() const;
 
 private:
-	bool isRegistered(StateChangeListener* listener) const;
-	void distribute(const EventPtr& event);
+	[[nodiscard]] bool isRegistered(StateChangeListener* listener) const;
+	void distribute(const StateChange& event) const;
 
+private:
 	std::vector<StateChangeListener*> listeners; // unordered
-	StateChangeRecorder* recorder;
-	bool viewOnlyMode;
+	ReverseManager* recorder = nullptr;
+	bool viewOnlyMode = false;
+	bool blockNewEventsDuringReplay = false; // used when executing callbacks during replay
 };
 
 } // namespace openmsx

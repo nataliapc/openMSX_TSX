@@ -15,7 +15,10 @@
 
 #include "RomAscii8_8.hh"
 #include "SRAM.hh"
+#include "narrow.hh"
+#include "one_of.hh"
 #include "serialize.hh"
+#include "xrange.hh"
 #include <memory>
 
 namespace openmsx {
@@ -24,11 +27,10 @@ RomAscii8_8::RomAscii8_8(const DeviceConfig& config,
                          Rom&& rom_, SubType subType)
 	: Rom8kBBlocks(config, std::move(rom_))
 	, sramEnableBit((subType == WIZARDRY) ? 0x80
-	                                      : rom.getSize() / BANK_SIZE)
-	, sramPages(((subType == KOEI_8) || (subType == KOEI_32))
-	            ? 0x34 : 0x30)
+	                                      : narrow_cast<byte>(rom.size() / BANK_SIZE))
+	, sramPages((subType == one_of(KOEI_8, KOEI_32)) ? 0x34 : 0x30)
 {
-	unsigned size = (subType == KOEI_32 || subType == ASCII8_32) ? 0x8000  // 32kB
+	unsigned size = (subType == one_of(KOEI_32, ASCII8_32)) ? 0x8000  // 32kB
 	              : (subType == ASCII8_2) ? 0x0800  //  2kB
 	                                      : 0x2000; //  8kB
 	sram = std::make_unique<SRAM>(getName() + " SRAM", size, config);
@@ -39,7 +41,7 @@ void RomAscii8_8::reset(EmuTime::param /*time*/)
 {
 	setUnmapped(0);
 	setUnmapped(1);
-	for (int i = 2; i < 6; i++) {
+	for (auto i : xrange(2, 6)) {
 		setRom(i, 0);
 	}
 	setUnmapped(6);
@@ -50,11 +52,11 @@ void RomAscii8_8::reset(EmuTime::param /*time*/)
 
 byte RomAscii8_8::readMem(word address, EmuTime::param time)
 {
-	byte bank = address / BANK_SIZE;
+	auto bank = narrow<byte>(address / BANK_SIZE);
 	if ((1 << bank) & sramEnabled) {
 		// read from SRAM (possibly mirror)
-		word addr = (sramBlock[bank] * BANK_SIZE)
-		          + (address & (sram->getSize() - 1) & BANK_MASK);
+		auto addr = (sramBlock[bank] * BANK_SIZE)
+		          + (address & (sram->size() - 1) & BANK_MASK);
 		return (*sram)[addr];
 	} else {
 		return Rom8kBBlocks::readMem(address, time);
@@ -63,11 +65,11 @@ byte RomAscii8_8::readMem(word address, EmuTime::param time)
 
 const byte* RomAscii8_8::getReadCacheLine(word address) const
 {
-	byte bank = address / BANK_SIZE;
+	auto bank = narrow<byte>(address / BANK_SIZE);
 	if ((1 << bank) & sramEnabled) {
 		// read from SRAM (possibly mirror)
-		word addr = (sramBlock[bank] * BANK_SIZE)
-		          + (address & (sram->getSize() - 1) & BANK_MASK);
+		auto addr = (sramBlock[bank] * BANK_SIZE)
+		          + (address & (sram->size() - 1) & BANK_MASK);
 		return &(*sram)[addr];
 	} else {
 		return Rom8kBBlocks::getReadCacheLine(address);
@@ -80,20 +82,23 @@ void RomAscii8_8::writeMem(word address, byte value, EmuTime::param /*time*/)
 		// bank switching
 		byte region = ((address >> 11) & 3) + 2;
 		if (value & sramEnableBit) {
-			unsigned numBlocks = (sram->getSize() + BANK_MASK) / BANK_SIZE; // round up;
+			auto mask = narrow_cast<byte>((sram->size() + BANK_MASK) / BANK_SIZE - 1); // round up;
 			sramEnabled |= (1 << region) & sramPages;
-			sramBlock[region] = value & (numBlocks - 1);
+			sramBlock[region] = value & mask;
 			setBank(region, &(*sram)[sramBlock[region] * BANK_SIZE], value);
+			invalidateDeviceRCache(0x2000 * region, 0x2000); // do not cache
 		} else {
-			sramEnabled &= ~(1 << region);
+			sramEnabled &= byte(~(1 << region));
 			setRom(region, value);
 		}
+		// 'R' is already handled
+		invalidateDeviceWCache(0x2000 * region, 0x2000);
 	} else {
-		byte bank = address / BANK_SIZE;
+		auto bank = narrow<byte>(address / BANK_SIZE);
 		if ((1 << bank) & sramEnabled) {
 			// write to SRAM (possibly mirror)
-			word addr = (sramBlock[bank] * BANK_SIZE)
-			          + (address & (sram->getSize() - 1) & BANK_MASK);
+			auto addr = (sramBlock[bank] * BANK_SIZE)
+			          + (address & (sram->size() - 1) & BANK_MASK);
 			sram->write(addr, value);
 		}
 	}
@@ -108,7 +113,7 @@ byte* RomAscii8_8::getWriteCacheLine(word address) const
 		// write to SRAM
 		return nullptr;
 	} else {
-		return unmappedWrite;
+		return unmappedWrite.data();
 	}
 }
 
@@ -116,8 +121,8 @@ template<typename Archive>
 void RomAscii8_8::serialize(Archive& ar, unsigned /*version*/)
 {
 	ar.template serializeBase<Rom8kBBlocks>(*this);
-	ar.serialize("sramEnabled", sramEnabled);
-	ar.serialize("sramBlock", sramBlock);
+	ar.serialize("sramEnabled", sramEnabled,
+	             "sramBlock",   sramBlock);
 }
 INSTANTIATE_SERIALIZE_METHODS(RomAscii8_8);
 REGISTER_MSXDEVICE(RomAscii8_8, "RomAscii8_8");

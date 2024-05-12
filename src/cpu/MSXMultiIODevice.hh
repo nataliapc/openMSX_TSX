@@ -12,17 +12,17 @@ public:
 	using Devices = std::vector<MSXDevice*>;
 
 	explicit MSXMultiIODevice(const HardwareConfig& hwConf);
-	~MSXMultiIODevice();
+	~MSXMultiIODevice() override;
 
 	void addDevice(MSXDevice* device);
 	void removeDevice(MSXDevice* device);
-	Devices& getDevices() { return devices; }
+	[[nodiscard]] Devices& getDevices() { return devices; }
 
 	// MSXDevice
-	std::string getName() const override;
+	[[nodiscard]] const std::string& getName() const override;
 	void getNameList(TclObject& result) const override;
-	byte readIO(word port, EmuTime::param time) override;
-	byte peekIO(word port, EmuTime::param time) const override;
+	[[nodiscard]] byte readIO(word port, EmuTime::param time) override;
+	[[nodiscard]] byte peekIO(word port, EmuTime::param time) const override;
 	void writeIO(word port, byte value, EmuTime::param time) override;
 
 private:

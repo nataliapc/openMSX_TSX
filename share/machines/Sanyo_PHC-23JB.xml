@@ -5,21 +5,26 @@
   <info>
     <manufacturer>Sanyo</manufacturer>
     <code>PHC-23J(B)</code>
-    <release_year></release_year>
-    <description>A blue MSX2...</description>
+    <release_year>1987</release_year>
+    <description>A basic blue MSX2...</description>
     <type>MSX2</type>
+    <region>jp</region>
   </info>
+
+ <!-- Confirmed (except RAM pattern) by Peter Hanraets on serial number
+      61265468
+   -->
 
   <CassettePort/>
 
   <devices>
 
-    <S1985 id="S1985">
+    <S1985 id="S1985"> <!-- includes 5 bits mapper-read-back -->
       <sramname>phc-23jb_s1985.sram</sramname>
     </S1985>
 
     <PPI id="ppi">
-      <io base="0xA8" num="4"/>
+      <io base="0xA8" num="8"/> <!-- S-1985 mirrors -->
       <sound>
         <volume>16000</volume>
       </sound>
@@ -43,18 +48,19 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="8" type="IO"/> <!-- S-1985 mirrors -->
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <RTC id="Real time clock">
       <sramname>phc-23jb.cmos</sramname>
-      <io base="0xB4" num="2" type="O"/>
-      <io base="0xB5" num="1" type="I"/>
+      <io base="0xB4" num="4" type="IO"/> <!-- S-1985 mirrors -->
     </RTC>
 
     <PrinterPort id="Printer Port">
-      <io base="0x90" num="2"/>
+      <io base="0x90" num="8" type="IO"/> <!-- S-1985 mirrors -->
+      <bidirectional>true</bidirectional> <!-- S-1985 feature (but not used, nor implemented) -->
+      <unused_bits>0x00</unused_bits>
     </PrinterPort>
 
     <primary slot="0">
@@ -89,6 +95,7 @@
         <RAM id="Main RAM">
           <mem base="0x0000" size="0x10000"/>
           <initialContent encoding="hex">0000FFFFFFFF0000</initialContent>
+          <!-- on serial number 61265468 the pattern is like this, but after 256 bytes the pattern inverts for another 256 bytes. Then starts again. -->
         </RAM>
       </secondary>
 

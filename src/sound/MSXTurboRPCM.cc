@@ -1,6 +1,7 @@
 #include "MSXTurboRPCM.hh"
 #include "MSXMotherBoard.hh"
 #include "MSXMixer.hh"
+#include "narrow.hh"
 #include "serialize.hh"
 #include "unreachable.hh"
 
@@ -12,7 +13,6 @@ MSXTurboRPCM::MSXTurboRPCM(const DeviceConfig& config)
 	, connector(getPluggingController(), "pcminput")
 	, dac("PCM", "Turbo-R PCM", config)
 	, reference(getCurrentTime())
-	, hwMute(false)
 {
 	reset(getCurrentTime());
 }
@@ -39,13 +39,11 @@ byte MSXTurboRPCM::readIO(word port, EmuTime::param time)
 
 byte MSXTurboRPCM::peekIO(word port, EmuTime::param time) const
 {
-	byte result;
 	switch (port & 0x01) {
 	case 0:
-		// bit 0-1  15.75kHz counter
+		// bit 0-1  15.700kHz counter
 		// bit 2-7  not used
-		result = reference.getTicksTill(time) & 0x03;
-		break;
+		return reference.getTicksTill(time) & 0x03;
 	case 1:
 		// bit 0   BUFF  0->D/A    TODO check this bit
 		//               1->A/D
@@ -59,12 +57,10 @@ byte MSXTurboRPCM::peekIO(word port, EmuTime::param time) const
 		// bit 5-6       not used
 		// bit 7   COMP  comparator result 0->greater
 		//                                 1->smaller
-		result = (getComp(time) ? 0x80 : 0x00) | (status & 0x1F);
-		break;
-	default: // unreachable, avoid warning
-		UNREACHABLE; result = 0;
+		return (getComp(time) ? 0x80 : 0x00) | (status & 0x1F);
+	default:
+		UNREACHABLE;
 	}
-	return result;
 }
 
 void MSXTurboRPCM::writeIO(word port, byte value, EmuTime::param time)
@@ -76,8 +72,13 @@ void MSXTurboRPCM::writeIO(word port, byte value, EmuTime::param time)
 		// Resets counter
 		reference.advance(time);
 		DValue = value;
-		if (status & 0x02) {
-			dac.writeDAC(DValue, time);
+		if (status & 0x02) { // not muted
+			assert(reference.getTime() <= time);
+			auto time2 = (status & 0x01) // BUFF
+			           ? reference.getFastAdd(1) // value only updates on the next clock
+			           : time;
+			assert(time <= time2);
+			dac.writeDAC(DValue, time2);
 		}
 		break;
 
@@ -106,7 +107,7 @@ void MSXTurboRPCM::writeIO(word port, byte value, EmuTime::param time)
 byte MSXTurboRPCM::getSample(EmuTime::param time) const
 {
 	return (status & 0x04)
-		? (connector.readSample(time) / 256) + 0x80
+		? narrow<byte>((connector.readSample(time) / 256) + 0x80)
 		: 0x80; // TODO check
 }
 
@@ -134,13 +135,12 @@ template<typename Archive>
 void MSXTurboRPCM::serialize(Archive& ar, unsigned /*version*/)
 {
 	ar.template serializeBase<MSXDevice>(*this);
-
-	ar.serialize("audioConnector", connector);
-	ar.serialize("reference", reference);
-	ar.serialize("status", status);
-	ar.serialize("DValue", DValue);
-	ar.serialize("hold", hold);
-	ar.serialize("DAC", dac);
+	ar.serialize("audioConnector", connector,
+	             "reference",      reference,
+	             "status",         status,
+	             "DValue",         DValue,
+	             "hold",           hold,
+	             "DAC",            dac);
 
 	hardwareMute(!(status & 0x02));  // restore hwMute
 }

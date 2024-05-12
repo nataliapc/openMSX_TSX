@@ -1,20 +1,21 @@
 #include "StdioMessages.hh"
 #include <iostream>
 
-using std::string;
-
 namespace openmsx {
 
-void StdioMessages::log(CliComm::LogLevel level, string_view message)
+void StdioMessages::log(CliComm::LogLevel level, std::string_view message, float fraction) noexcept
 {
 	auto levelStr = CliComm::getLevelStrings();
-	((level == CliComm::INFO) ? std::cout : std::cerr) <<
-		levelStr[level] << ": " << message << std::endl;
-
+	auto& out = (level == CliComm::INFO) ? std::cout : std::cerr;
+	out << levelStr[level] << ": " << message;
+	if (level == CliComm::PROGRESS && fraction >= 0.0f) {
+		out << "... " << int(100.0f * fraction) << '%';
+	}
+	out << '\n' << std::flush;
 }
 
-void StdioMessages::update(CliComm::UpdateType /*type*/, string_view /*machine*/,
-                           string_view /*name*/, string_view /*value*/)
+void StdioMessages::update(CliComm::UpdateType /*type*/, std::string_view /*machine*/,
+                           std::string_view /*name*/, std::string_view /*value*/) noexcept
 {
 	// ignore
 }

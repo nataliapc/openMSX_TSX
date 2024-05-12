@@ -1,10 +1,15 @@
 #include "CliServer.hh"
-#include "GlobalCliComm.hh"
+
 #include "CliConnection.hh"
 #include "FileOperations.hh"
+#include "GlobalCliComm.hh"
 #include "MSXException.hh"
+
+#include "one_of.hh"
 #include "random.hh"
-#include "statp.hh"
+#include "xrange.hh"
+
+#include <bit>
 #include <memory>
 #include <string>
 
@@ -17,39 +22,36 @@
 #include <fcntl.h>
 #endif
 
-using std::string;
-
-
 namespace openmsx {
 
-static string getUserName()
+[[nodiscard]] static std::string getUserName()
 {
 #if defined(_WIN32)
 	return "default";
 #else
 	struct passwd* pw = getpwuid(getuid());
-	return pw->pw_name ? pw->pw_name : string{};
+	return pw->pw_name ? pw->pw_name : std::string{};
 #endif
 }
 
-static bool checkSocketDir(const string& dir)
+[[nodiscard]] static bool checkSocketDir(zstring_view dir)
 {
-	struct stat st;
-	if (stat(dir.c_str(), &st)) {
-		// cannot stat
+	auto st = FileOperations::getStat(dir);
+	if (!st) {
+		// error during stat()
 		return false;
 	}
-	if (!S_ISDIR(st.st_mode)) {
+	if (!FileOperations::isDirectory(*st)) {
 		// not a directory
 		return false;
 	}
 #ifndef _WIN32
 	// only do permission and owner checks on *nix
-	if ((st.st_mode & 0777) != 0700) {
+	if ((st->st_mode & 0777) != 0700) {
 		// wrong permissions
 		return false;
 	}
-	if (st.st_uid != getuid()) {
+	if (st->st_uid != getuid()) {
 		// wrong uid
 		return false;
 	}
@@ -57,37 +59,37 @@ static bool checkSocketDir(const string& dir)
 	return true;
 }
 
-static bool checkSocket(const string& socket)
+[[nodiscard]] static bool checkSocket(zstring_view socket)
 {
-	string_view name = FileOperations::getFilename(socket);
-	if (!name.starts_with("socket.")) {
+	if (auto name = FileOperations::getFilename(socket);
+	    !name.starts_with("socket.")) {
 		return false; // wrong name
 	}
 
-	struct stat st;
-	if (stat(socket.c_str(), &st)) {
-		// cannot stat
+	auto st = FileOperations::getStat(socket);
+	if (!st) {
+		// error during stat()
 		return false;
 	}
 #ifdef _WIN32
-	if (!S_ISREG(st.st_mode)) {
+	if (!FileOperations::isRegularFile(*st)) {
 		// not a regular file
 		return false;
 	}
 #else
-	if (!S_ISSOCK(st.st_mode)) {
+	if (!S_ISSOCK(st->st_mode)) {
 		// not a socket
 		return false;
 	}
 #endif
 #ifndef _WIN32
 	// only do permission and owner checks on *nix
-	if ((st.st_mode & 0777) != 0600) {
+	if ((st->st_mode & 0777) != 0600) {
 		// check will be different on win32 (!= 777) thus actually useless
 		// wrong permissions
 		return false;
 	}
-	if (st.st_uid != getuid()) {
+	if (st->st_uid != getuid()) {
 		// does this work on win32? is this check meaningful?
 		// wrong uid
 		return false;
@@ -97,21 +99,21 @@ static bool checkSocket(const string& socket)
 }
 
 #ifdef _WIN32
-static int openPort(SOCKET listenSock)
+[[nodiscard]] static int openPort(SOCKET listenSock)
 {
 	const int BASE = 9938;
 	const int RANGE = 64;
 
 	int first = random_int(0, RANGE - 1); // [0, RANGE)
 
-	for (int n = 0; n < RANGE; ++n) {
+	for (auto n : xrange(RANGE)) {
 		int port = BASE + ((first + n) % RANGE);
 		sockaddr_in server_address;
 		memset(&server_address, 0, sizeof(server_address));
 		server_address.sin_family = AF_INET;
 		server_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 		server_address.sin_port = htons(port);
-		if (bind(listenSock, reinterpret_cast<sockaddr*>(&server_address),
+		if (bind(listenSock, std::bit_cast<sockaddr*>(&server_address),
 		         sizeof(server_address)) != -1) {
 			return port;
 		}
@@ -122,7 +124,7 @@ static int openPort(SOCKET listenSock)
 
 SOCKET CliServer::createSocket()
 {
-	string dir = strCat(FileOperations::getTempDir(), "/openmsx-", getUserName());
+	auto dir = tmpStrCat(FileOperations::getTempDir(), "/openmsx-", getUserName());
 	FileOperations::mkdir(dir, 0700);
 	if (!checkSocketDir(dir)) {
 		throw MSXException("Couldn't create socket directory.");
@@ -139,8 +141,8 @@ SOCKET CliServer::createSocket()
 	// write port number to file
 	FileOperations::unlink(socketName); // ignore error
 	std::ofstream out;
-	FileOperations::openofstream(out, socketName);
-	out << portNumber << std::endl;
+	FileOperations::openOfStream(out, socketName);
+	out << portNumber << '\n';
 	if (!out.good()) {
 		sock_close(sd);
 		throw MSXException("Couldn't write socket port file.");
@@ -159,7 +161,7 @@ SOCKET CliServer::createSocket()
 	addr.sun_path[sizeof(addr.sun_path) - 1] = '\0';
 	addr.sun_family = AF_UNIX;
 
-	if (bind(sd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == -1) {
+	if (bind(sd, std::bit_cast<sockaddr*>(&addr), sizeof(addr)) == -1) {
 		sock_close(sd);
 		throw MSXException("Couldn't bind socket.");
 	}
@@ -186,10 +188,10 @@ void CliServer::exitAcceptLoop()
 	poller.abort();
 }
 
-static void deleteSocket(const string& socket)
+static void deleteSocket(const std::string& socket)
 {
 	FileOperations::unlink(socket); // ignore errors
-	string dir = socket.substr(0, socket.find_last_of('/'));
+	auto dir = socket.substr(0, socket.find_last_of('/'));
 	FileOperations::rmdir(dir); // ignore errors
 }
 
@@ -202,7 +204,6 @@ CliServer::CliServer(CommandController& commandController_,
 	, cliComm(cliComm_)
 	, listenSock(OPENMSX_INVALID_SOCKET)
 {
-	sock_startup();
 	try {
 		listenSock = createSocket();
 		thread = std::thread([this]() { mainLoop(); });
@@ -219,7 +220,6 @@ CliServer::~CliServer()
 	}
 
 	deleteSocket(socketName);
-	sock_cleanup();
 }
 
 void CliServer::mainLoop()
@@ -246,7 +246,7 @@ void CliServer::mainLoop()
 			break;
 		}
 		if (sd == OPENMSX_INVALID_SOCKET) {
-			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+			if (errno == one_of(EAGAIN, EWOULDBLOCK)) {
 				continue;
 			} else {
 				break;

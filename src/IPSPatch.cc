@@ -2,104 +2,106 @@
 #include "File.hh"
 #include "Filename.hh"
 #include "MSXException.hh"
-#include "stl.hh"
-#include <algorithm>
-#include <cstring>
+#include "ranges.hh"
+#include "xrange.hh"
+#include <array>
 #include <cassert>
-
-using std::vector;
 
 namespace openmsx {
 
-static size_t getStop(const IPSPatch::PatchMap::const_iterator& it)
+std::vector<IPSPatch::Chunk> IPSPatch::parseChunks() const
 {
-	return it->first + it->second.size();
+	std::vector<Chunk> result;
+
+	File ipsFile(filename);
+
+	std::array<uint8_t, 5> header;
+	ipsFile.read(header);
+	if (!ranges::equal(header, std::string_view("PATCH"))) {
+		throw MSXException("Invalid IPS file: ", filename.getOriginal());
+	}
+	std::array<uint8_t, 3> offsetBuf;
+	ipsFile.read(offsetBuf);
+	while (!ranges::equal(offsetBuf, std::string_view("EOF"))) {
+		size_t offset = 0x10000 * offsetBuf[0] + 0x100 * offsetBuf[1] + offsetBuf[2];
+		std::array<uint8_t, 2> lenBuf;
+		ipsFile.read(lenBuf);
+		size_t length = 0x100 * lenBuf[0] + lenBuf[1];
+		std::vector<uint8_t> v;
+		if (length == 0) {
+			// RLE encoded
+			std::array<uint8_t, 3> rleBuf;
+			ipsFile.read(rleBuf);
+			length = 0x100 * rleBuf[0] + rleBuf[1];
+			v.resize(length, rleBuf[2]);
+		} else {
+			// patch bytes
+			v.resize(length);
+			ipsFile.read(v);
+		}
+		// find overlapping or adjacent patch regions
+		auto b = ranges::lower_bound(result, offset, {}, &Chunk::startAddress);
+		if (b != begin(result)) {
+			--b;
+			if (b->stopAddress() < offset) ++b;
+		}
+		if (auto e = ranges::upper_bound(result, offset + v.size(), {}, &Chunk::startAddress);
+		    b != e) {
+			// remove overlapping regions, merge adjacent regions
+			--e;
+			auto start = std::min(b->startAddress, offset);
+			auto stop  = std::max(offset + length, e->stopAddress());
+			auto length2 = stop - start;
+			++e;
+			std::vector<uint8_t> tmp(length2);
+			for (auto it : xrange(b, e)) {
+				ranges::copy(*it, subspan(tmp, it->startAddress - start));
+			}
+			ranges::copy(v, subspan(tmp, offset - start));
+			*b = Chunk{start, std::move(tmp)};
+			result.erase(b + 1, e);
+		} else {
+			// add new region
+			result.emplace(b, offset, std::move(v));
+		}
+
+		ipsFile.read(offsetBuf);
+	}
+	return result;
+}
+
+size_t IPSPatch::calcSize() const
+{
+	return chunks.empty()
+		? parent->getSize()
+		: std::max(parent->getSize(), chunks.back().stopAddress());
 }
 
 IPSPatch::IPSPatch(Filename filename_,
                    std::unique_ptr<const PatchInterface> parent_)
 	: filename(std::move(filename_))
 	, parent(std::move(parent_))
+	, chunks(parseChunks())
+	, size(calcSize())
 {
-	File ipsFile(filename);
-
-	byte buf[5];
-	ipsFile.read(buf, 5);
-	if (memcmp(buf, "PATCH", 5) != 0) {
-		throw MSXException("Invalid IPS file: ", filename.getOriginal());
-	}
-	ipsFile.read(buf, 3);
-	while (memcmp(buf, "EOF", 3) != 0) {
-		size_t offset = 0x10000 * buf[0] + 0x100 * buf[1] + buf[2];
-		ipsFile.read(buf, 2);
-		size_t length = 0x100 * buf[0] + buf[1];
-		vector<byte> v;
-		if (length == 0) {
-			// RLE encoded
-			ipsFile.read(buf, 3);
-			length = 0x100 * buf[0] + buf[1];
-			v.resize(length, buf[2]);
-		} else {
-			// patch bytes
-			v.resize(length);
-			ipsFile.read(&v.front(), length);
-		}
-		// find overlapping or adjacent patch regions
-		auto b = lower_bound(begin(patchMap), end(patchMap),
-		                     offset, LessTupleElement<0>());
-		if (b != begin(patchMap)) {
-			--b;
-			if (getStop(b) < offset) ++b;
-		}
-		auto e = upper_bound(begin(patchMap), end(patchMap),
-		                     offset + v.size(), LessTupleElement<0>());
-		if (b != e) {
-			// remove operlapping regions, merge adjacent regions
-			--e;
-			auto start = std::min(b->first, offset);
-			auto stop  = std::max(offset + length, getStop(e));
-			auto length2 = stop - start;
-			++e;
-			vector<byte> tmp(length2);
-			for (auto it = b; it != e; ++it) {
-				memcpy(&tmp[it->first - start], &it->second[0],
-				       it->second.size());
-			}
-			memcpy(&tmp[offset - start], v.data(), v.size());
-			*b = std::make_pair(start, std::move(tmp));
-			patchMap.erase(b + 1, e);
-		} else {
-			// add new region
-			patchMap.emplace(b, offset, std::move(v));
-		}
-
-		ipsFile.read(buf, 3);
-	}
-	if (patchMap.empty()) {
-		size = parent->getSize();
-	} else {
-		auto it = --end(patchMap);
-		size = std::max(parent->getSize(), getStop(it));
-	}
 }
 
-void IPSPatch::copyBlock(size_t src, byte* dst, size_t num) const
+void IPSPatch::copyBlock(size_t src, std::span<uint8_t> dst) const
 {
-	parent->copyBlock(src, dst, num);
+	parent->copyBlock(src, dst);
 
-	auto b = lower_bound(begin(patchMap), end(patchMap),
-	                     src, LessTupleElement<0>());
-	if (b != begin(patchMap)) --b;
-	auto e = upper_bound(begin(patchMap), end(patchMap),
-	                     src + num - 1, LessTupleElement<0>());
-	for (auto it = b; it != e; ++it) {
-		auto chunkStart = it->first;
-		int chunkSize = int(it->second.size());
+	auto b = ranges::lower_bound(chunks, src, {}, &Chunk::startAddress);
+	if (b != begin(chunks)) --b;
+	auto srcEnd = src + dst.size();
+	auto e = ranges::upper_bound(chunks, srcEnd - 1, {}, &Chunk::startAddress);
+	for (auto it : xrange(b, e)) {
+		auto chunkStart = it->startAddress;
+		auto chunkSize = int(it->size());
 		// calc chunkOffset, chunkStart
-		int chunkOffset = int(src - chunkStart);
+		auto chunkOffset = int(src - chunkStart);
 		if (chunkOffset < 0) {
 			// start after src
-			assert(-chunkOffset < int(num)); // dont start past end
+			assert(-chunkOffset < int(dst.size())); // dont start past end
 			chunkOffset = 0;
 		} else if (chunkOffset >= chunkSize) {
 			// chunk completely before src, skip
@@ -109,26 +111,21 @@ void IPSPatch::copyBlock(size_t src, byte* dst, size_t num) const
 			chunkSize  -= chunkOffset;
 			chunkStart += chunkOffset;
 		}
-		// calc chuncksize
+		// calc chunkSize
 		assert(src <= chunkStart);
-		int overflow = int(chunkStart - src + chunkSize - num);
-		if (overflow > 0) {
+		if (auto overflow = int(chunkStart - src + chunkSize - dst.size());
+		    overflow > 0) {
 			assert(chunkSize > overflow);
 			chunkSize -= overflow;
 		}
 		// copy
-		assert(chunkOffset < int(it->second.size()));
-		assert((chunkOffset + chunkSize) <= int(it->second.size()));
+		assert(chunkOffset < int(it->size()));
+		assert((chunkOffset + chunkSize) <= int(it->size()));
 		assert(src <= chunkStart);
-		assert((chunkStart + chunkSize) <= (src + num));
-		memcpy(dst + chunkStart - src, &it->second[chunkOffset],
-		       chunkSize);
+		assert((chunkStart + chunkSize) <= srcEnd);
+		ranges::copy(subspan(*it, chunkOffset, size_t(chunkSize)),
+		             subspan(dst, chunkStart - src));
 	}
-}
-
-size_t IPSPatch::getSize() const
-{
-	return size;
 }
 
 std::vector<Filename> IPSPatch::getFilenames() const

@@ -4,12 +4,12 @@
 
 namespace openmsx {
 
-static const char* const PAC_Header = "PAC2 BACKUP DATA";
+static constexpr const char* const PAC_Header = "PAC2 BACKUP DATA";
 
 MSXFmPac::MSXFmPac(const DeviceConfig& config)
 	: MSXMusicBase(config)
 	, sram(getName() + " SRAM", 0x1FFE, config, PAC_Header)
-	, romBlockDebug(*this, &bank, 0x4000, 0x4000, 14)
+	, romBlockDebug(*this, std::span{&bank, 1}, 0x4000, 0x4000, 14)
 {
 	reset(getCurrentTime());
 }
@@ -68,7 +68,7 @@ const byte* MSXFmPac::getReadCacheLine(word address) const
 		} else if (address == (0x1FFE & CacheLine::HIGH)) {
 			return nullptr;
 		} else {
-			return unmappedRead;
+			return unmappedRead.data();
 		}
 	} else {
 		return &rom[bank * 0x4000 + address];
@@ -93,11 +93,9 @@ void MSXFmPac::writeMem(word address, byte value, EmuTime::param time)
 			checkSramEnable();
 		}
 		break;
-	case 0x3FF4:
-		writeRegisterPort(value, time);
-		break;
-	case 0x3FF5:
-		writeDataPort(value, time);
+	case 0x3FF4: // address
+	case 0x3FF5: // data
+		writePort(address & 1, value, time);
 		break;
 	case 0x3FF6:
 		enable = value & 0x11;
@@ -107,10 +105,9 @@ void MSXFmPac::writeMem(word address, byte value, EmuTime::param time)
 		}
 		break;
 	case 0x3FF7: {
-		byte newBank = value & 0x03;
-		if (bank != newBank) {
+		if (byte newBank = value & 0x03; bank != newBank) {
 			bank = newBank;
-			invalidateMemCache(0x0000, 0x10000);
+			invalidateDeviceRCache();
 		}
 		break;
 	}
@@ -133,7 +130,7 @@ byte* MSXFmPac::getWriteCacheLine(word address) const
 	if (sramEnabled && (address < 0x1FFE)) {
 		return nullptr;
 	} else {
-		return unmappedWrite;
+		return unmappedWrite.data();
 	}
 }
 
@@ -142,7 +139,7 @@ void MSXFmPac::checkSramEnable()
 	bool newEnabled = (r1ffe == 0x4D) && (r1fff == 0x69);
 	if (sramEnabled != newEnabled) {
 		sramEnabled = newEnabled;
-		invalidateMemCache(0x0000, 0x10000);
+		invalidateDeviceRWCache();
 	}
 }
 
@@ -151,12 +148,12 @@ template<typename Archive>
 void MSXFmPac::serialize(Archive& ar, unsigned version)
 {
 	ar.template serializeInlinedBase<MSXMusicBase>(*this, version);
-	ar.serialize("sram", sram);
-	ar.serialize("enable", enable);
-	ar.serialize("bank", bank);
-	ar.serialize("r1ffe", r1ffe);
-	ar.serialize("r1fff", r1fff);
-	if (ar.isLoader()) {
+	ar.serialize("sram",   sram,
+	             "enable", enable,
+	             "bank",   bank,
+	             "r1ffe",  r1ffe,
+	             "r1fff",  r1fff);
+	if constexpr (Archive::IS_LOADER) {
 		// sramEnabled can be calculated
 		checkSramEnable();
 	}

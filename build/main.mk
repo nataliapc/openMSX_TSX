@@ -31,17 +31,7 @@ endif
 # Python Interpreter
 # ==================
 
-# We need Python from the 2.x series, version 2.6 or higher.
-# Usually this executable is available as just "python", but on some systems
-# you might have to be more specific, for example "python2" or "python2.6".
-# Or if the Python interpreter is not in the search path, you can specify its
-# full path.
-ifeq ($(PYTHON),)
-PYTHON:=$(shell build/python-search.sh)
-ifeq ($(PYTHON),)
-$(error No suitable Python interpreter found. Please install Python version 2.x where x >= 5. If your Python interpreter is installed in a non-standard location, please set the environment variable PYTHON to the full path of the interpreter binary.)
-endif
-endif
+PYTHON?=python3
 $(info Using Python: $(PYTHON))
 
 
@@ -101,7 +91,11 @@ COMPILE_FLAGS:=-pthread
 # Note: LDFLAGS are passed to the linker itself, LINK_FLAGS are passed to the
 #       compiler in the link phase.
 LDFLAGS:=
+ifneq ($(filter mingw%,$(OPENMSX_TARGET_OS)),)
 LINK_FLAGS:=-pthread
+else
+LINK_FLAGS:=-pthread -ldl
+endif
 # Flags that specify the target platform.
 # These should be inherited by the 3rd party libs Makefile.
 TARGET_FLAGS:=
@@ -221,7 +215,7 @@ BINDIST_PACKAGE:=
 
 ifeq ($(VERSION_EXEC),true)
   REVISION:=$(shell PYTHONPATH=build $(PYTHON) -c \
-    "import version; print version.extractRevisionString()" \
+    "import version; print(version.extractRevisionString())" \
     )
   BINARY_FULL:=$(BINARY_PATH)/openmsx-$(REVISION)$(EXEEXT)
 else
@@ -266,31 +260,10 @@ endif # goal requires dependencies
 SOURCE_DIRS:=$(sort $(shell find src -type d))
 
 SOURCES_FULL:=$(foreach dir,$(SOURCE_DIRS),$(sort $(wildcard $(dir)/*.cc)))
+ifeq ($(OPENMSX_TARGET_OS),darwin)
+SOURCES_FULL+=$(foreach dir,$(SOURCE_DIRS),$(sort $(wildcard $(dir)/*.mm)))
+endif
 SOURCES_FULL:=$(filter-out %Test.cc,$(SOURCES_FULL))
-SOURCES_FULL:=$(filter-out src/sound/generate%.cc,$(SOURCES_FULL))
-
-# TODO: This doesn't work since MAX_SCALE_FACTOR is not a Make variable,
-#       only a #define in build-info.hh.
-ifeq ($(MAX_SCALE_FACTOR),1)
-define SOURCES_UPSCALE
-	Scanline
-	Scaler2 Scaler3
-	Simple2xScaler Simple3xScaler
-	SaI2xScaler SaI3xScaler
-	Scale2xScaler Scale3xScaler
-	HQ2xScaler HQ2xLiteScaler
-	HQ3xScaler HQ3xLiteScaler
-	RGBTriplet3xScaler MLAAScaler
-	Multiply32
-endef
-SOURCES_FULL:=$(filter-out $(foreach src,$(strip $(SOURCES_UPSCALE)),src/video/scalers/$(src).cc),$(SOURCES_FULL))
-endif
-
-ifneq ($(COMPONENT_GL),true)
-SOURCES_FULL:=$(filter-out src/video/GL%.cc,$(SOURCES_FULL))
-SOURCES_FULL:=$(filter-out src/video/SDLGL%.cc,$(SOURCES_FULL))
-SOURCES_FULL:=$(filter-out src/video/scalers/GL%.cc,$(SOURCES_FULL))
-endif
 
 ifneq ($(COMPONENT_LASERDISC),true)
 SOURCES_FULL:=$(filter-out src/laserdisc/%.cc,$(SOURCES_FULL))
@@ -314,7 +287,7 @@ $(error Sources list empty $(if \
    $(OPENMSX_SUBSET),after applying subset "$(OPENMSX_SUBSET)*"))
 endif
 
-SOURCES:=$(SOURCES_FULL:$(SOURCES_PATH)/%.cc=%)
+SOURCES:=$(SOURCES_FULL:$(SOURCES_PATH)/%=%)
 
 DEPEND_PATH:=$(BUILD_PATH)/dep
 DEPEND_FULL:=$(addsuffix .d,$(addprefix $(DEPEND_PATH)/,$(SOURCES)))
@@ -343,13 +316,10 @@ CXX?=g++
 WINDRES?=windres
 DEPEND_FLAGS:=
 ifneq ($(filter %clang++,$(CXX))$(filter clang++%,$(CXX)),)
-  # Enable C++14 (supported since clang-3.5)
-  COMPILE_FLAGS+=-std=c++14
-  # Clang does support -Wunused-macros, but it triggers on SDL's headers,
-  # causing way too many false positives that we cannot fix.
-  COMPILE_FLAGS+=-Wall -Wextra -Wundef -Wno-invalid-offsetof -Wshadow
-  # TODO: Remove the overloading from the code instead.
-  COMPILE_FLAGS+=-Wno-overloaded-virtual
+  # Enable C++20 (partially supported since clang-8)
+  COMPILE_FLAGS+=-std=c++20 -fconstexpr-steps=2000000
+  #COMPILE_FLAGS+=-Wall -Wextra -Wundef -Wno-invalid-offsetof -Wunused-macros -Wdouble-promotion -Wmissing-declarations -Wshadow -Wold-style-cast -Wzero-as-null-pointer-constant
+  COMPILE_FLAGS+=-Wall -Wextra -Wundef -Wno-invalid-offsetof -Wunused-macros -Wdouble-promotion -Wmissing-declarations -Wshadow -Wconversion -Wno-sign-conversion
   # Hardware descriptions can contain constants that are not used in the code
   # but still useful as documentation.
   COMPILE_FLAGS+=-Wno-unused-const-variable
@@ -359,31 +329,14 @@ else
 ifneq ($(filter %g++,$(CXX))$(filter g++%,$(CXX))$(findstring /g++-,$(CXX)),)
   # Generic compilation flags.
   COMPILE_FLAGS+=-pipe
-  # Enable C++11
-  COMPILE_FLAGS+=-std=c++11
+  # Enable C++20  (good support since gcc-10)
+  COMPILE_FLAGS+=-std=c++20
   # Stricter warning and error reporting.
-  COMPILE_FLAGS+=-Wall -Wextra -Wundef -Wno-invalid-offsetof -Wunused-macros -Wdouble-promotion -Wmissing-declarations -Wshadow
-  # Flag that is not accepted by old GCC versions.
-  COMPILE_FLAGS+=$(shell \
-    echo | $(CXX) -E -Wno-missing-field-initializers - >/dev/null 2>&1 \
-    && echo -Wno-missing-field-initializers \
-    )
+  #COMPILE_FLAGS+=-Wall -Wextra -Wundef -Wno-invalid-offsetof -Wunused-macros -Wdouble-promotion -Wmissing-declarations -Wshadow -Wold-style-cast -Wzero-as-null-pointer-constant
 
-  # When supported use c++14 (gcc-4.8 does not yet support this)
-  COMPILE_FLAGS+=$(shell \
-    echo | $(CXX) -E -std=c++14 - >/dev/null 2>&1 \
-    && echo -std=c++14 \
-    )
-
-  # -Wzero-as-null-pointer-constant is available from gcc-4.7
-  ## IMHO this is a useful but not very important warning. It triggers in
-  ## quite a few places via macros defined in tcl8.5/tclDecls.h, so we can't
-  ## easily suppress it. So for now I'll disable this warning again.
-  ##COMPILE_FLAGS+=$(shell \
-  ##  echo | $(CXX) -E -Wzero-as-null-pointer-constant - >/dev/null 2>&1 \
-  ##  && echo -Wzero-as-null-pointer-constant \
-  ##  )
-
+  # Remove some flags until we resolve the 'Dear ImGui' warnings (ideally this should be treated as a 3rdpaty library with only standard warnings enabled)
+  #COMPILE_FLAGS+=-Wall -Wextra -Wundef -Wno-invalid-offsetof -Wunused-macros -Wdouble-promotion -Wmissing-declarations -Wshadow -Wold-style-cast -Wconversion -Wno-sign-conversion
+  COMPILE_FLAGS+=-Wall -Wextra -Wundef -Wno-invalid-offsetof -Wunused-macros -Wmissing-declarations -Wshadow -Wno-sign-conversion
   # Empty definition of used headers, so header removal doesn't break things.
   DEPEND_FLAGS+=-MP
   # Plain C compiler, for the 3rd party libs.
@@ -449,7 +402,7 @@ $(CONFIG_HEADER): $(BUILDINFO_SCRIPT) \
 		build/custom.mk build/platform-$(OPENMSX_TARGET_OS).mk
 	$(CMD)$(PYTHON) $(BUILDINFO_SCRIPT) $@ \
 		$(OPENMSX_TARGET_OS) $(OPENMSX_TARGET_CPU) $(OPENMSX_FLAVOUR) \
-		$(INSTALL_SHARE_DIR)
+		$(INSTALL_SHARE_DIR) $(INSTALL_DOC_DIR)
 	$(CMD)touch $@
 
 # Generate version header.
@@ -522,8 +475,8 @@ $(SUB_MAKEFILES):
 endif
 
 # Compile and generate dependency files in one go.
-DEPEND_SUBST=$(patsubst $(SOURCES_PATH)/%.cc,$(DEPEND_PATH)/%.d,$<)
-$(OBJECTS_FULL): $(OBJECTS_PATH)/%.o: $(SOURCES_PATH)/%.cc $(DEPEND_PATH)/%.d \
+DEPEND_SUBST=$(patsubst $(SOURCES_PATH)/%,$(DEPEND_PATH)/%.d,$<)
+$(OBJECTS_FULL): $(OBJECTS_PATH)/%.o: $(SOURCES_PATH)/% $(DEPEND_PATH)/%.d \
 		| config $(GENERATED_HEADERS)
 	$(SUM) "Compiling $(patsubst $(SOURCES_PATH)/%,%,$<)..."
 	$(CMD)mkdir -p $(@D)

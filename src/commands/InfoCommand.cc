@@ -1,17 +1,14 @@
 #include "InfoCommand.hh"
 #include "TclObject.hh"
 #include "CommandException.hh"
-#include "KeyRange.hh"
 #include "unreachable.hh"
+#include "view.hh"
 #include <iostream>
 #include <cassert>
 
-using std::string;
-using std::vector;
-
 namespace openmsx {
 
-InfoCommand::InfoCommand(CommandController& commandController_, const string& name_)
+InfoCommand::InfoCommand(CommandController& commandController_, const std::string& name_)
 	: Command(commandController_, name_)
 {
 }
@@ -21,39 +18,38 @@ InfoCommand::~InfoCommand()
 	assert(infoTopics.empty());
 }
 
-void InfoCommand::registerTopic(InfoTopic& topic)
+void InfoCommand::registerTopic(const InfoTopic& topic)
 {
 #ifndef NDEBUG
 	if (infoTopics.contains(topic.getName())) {
 		std::cerr << "INTERNAL ERROR: already have an info topic with "
-		             "name " << topic.getName() << std::endl;
-		UNREACHABLE;
+		             "name " << topic.getName() << '\n';
+		assert(false);
 	}
 #endif
 	infoTopics.insert_noDuplicateCheck(&topic);
 }
 
-void InfoCommand::unregisterTopic(InfoTopic& topic)
+void InfoCommand::unregisterTopic(const InfoTopic& topic)
 {
 	if (!infoTopics.contains(topic.getName())) {
 		std::cerr << "INTERNAL ERROR: can't unregister topic with name "
-		          << topic.getName() << ", not found!" << std::endl;
-		UNREACHABLE;
+		          << topic.getName() << ", not found!\n";
+		assert(false);
 	}
 	infoTopics.erase(topic.getName());
 }
 
 // Command
 
-void InfoCommand::execute(array_ref<TclObject> tokens,
+void InfoCommand::execute(std::span<const TclObject> tokens,
                           TclObject& result)
 {
 	switch (tokens.size()) {
 	case 1:
 		// list topics
-		for (auto* t : infoTopics) {
-			result.addListElement(t->getName());
-		}
+		result.addListElements(view::transform(
+			infoTopics, [](auto* t) { return t->getName(); }));
 		break;
 	default:
 		// show info about topic
@@ -68,9 +64,9 @@ void InfoCommand::execute(array_ref<TclObject> tokens,
 	}
 }
 
-string InfoCommand::help(const vector<string>& tokens) const
+std::string InfoCommand::help(std::span<const TclObject> tokens) const
 {
-	string result;
+	std::string result;
 	switch (tokens.size()) {
 	case 1:
 		// show help on info cmd
@@ -80,9 +76,10 @@ string InfoCommand::help(const vector<string>& tokens) const
 	default:
 		// show help on a certain topic
 		assert(tokens.size() >= 2);
-		auto it = infoTopics.find(tokens[1]);
+		auto topic = tokens[1].getString();
+		auto it = infoTopics.find(topic);
 		if (it == end(infoTopics)) {
-			throw CommandException("No info on: ", tokens[1]);
+			throw CommandException("No info on: ", topic);
 		}
 		result = (*it)->help(tokens);
 		break;
@@ -90,23 +87,19 @@ string InfoCommand::help(const vector<string>& tokens) const
 	return result;
 }
 
-void InfoCommand::tabCompletion(vector<string>& tokens) const
+void InfoCommand::tabCompletion(std::vector<std::string>& tokens) const
 {
 	switch (tokens.size()) {
 	case 2: {
 		// complete topic
-		vector<string_view> topics;
-		for (auto* t : infoTopics) {
-			topics.emplace_back(t->getName());
-		}
-		completeString(tokens, topics);
+		completeString(tokens, view::transform(infoTopics,
+			[](auto* t) -> std::string_view { return t->getName(); }));
 		break;
 	}
 	default:
 		// show help on a certain topic
 		assert(tokens.size() >= 3);
-		auto it = infoTopics.find(tokens[1]);
-		if (it != end(infoTopics)) {
+		if (auto it = infoTopics.find(tokens[1]); it != end(infoTopics)) {
 			(*it)->tabCompletion(tokens);
 		}
 		break;

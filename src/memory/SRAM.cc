@@ -1,26 +1,24 @@
 #include "SRAM.hh"
+
 #include "DeviceConfig.hh"
 #include "File.hh"
 #include "FileContext.hh"
 #include "FileException.hh"
 #include "FileNotFoundException.hh"
+#include "MSXCliComm.hh"
 #include "Reactor.hh"
-#include "CliComm.hh"
-#include "serialize.hh"
 #include "openmsx.hh"
-#include "vla.hh"
-#include <cstring>
-#include <memory>
+#include "serialize.hh"
 
-using std::string;
+#include "vla.hh"
 
 namespace openmsx {
 
 // class SRAM
 
 // Like the constructor below, but doesn't create a debuggable.
-// For use in unittests.
-SRAM::SRAM(int size, const XMLElement& xml, DontLoadTag)
+// For use in unit-tests.
+SRAM::SRAM(size_t size, const XMLElement& xml, DontLoadTag)
 	: ram(xml, size)
 	, header(nullptr) // not used
 {
@@ -30,16 +28,16 @@ SRAM::SRAM(int size, const XMLElement& xml, DontLoadTag)
  * The only reason to use this (instead of a plain Ram object) is when you
  * dynamically need to decide whether load/save is needed.
  */
-SRAM::SRAM(const std::string& name, const std::string& description,
-           int size, const DeviceConfig& config_, DontLoadTag)
+SRAM::SRAM(const std::string& name, static_string_view description,
+           size_t size, const DeviceConfig& config_, DontLoadTag)
 	: ram(config_, name, description, size)
 	, header(nullptr) // not used
 {
 }
 
-SRAM::SRAM(const string& name, int size,
+SRAM::SRAM(const std::string& name, size_t size,
            const DeviceConfig& config_, const char* header_, bool* loaded)
-	: schedulable(std::make_unique<SRAMSchedulable>(config_.getReactor().getRTScheduler(), *this))
+	: schedulable(std::in_place, config_.getReactor().getRTScheduler(), *this)
 	, config(config_)
 	, ram(config, name, "sram", size)
 	, header(header_)
@@ -47,9 +45,9 @@ SRAM::SRAM(const string& name, int size,
 	load(loaded);
 }
 
-SRAM::SRAM(const string& name, const string& description, int size,
+SRAM::SRAM(const std::string& name, static_string_view description, size_t size,
 	   const DeviceConfig& config_, const char* header_, bool* loaded)
-	: schedulable(std::make_unique<SRAMSchedulable>(config_.getReactor().getRTScheduler(), *this))
+	: schedulable(std::in_place, config_.getReactor().getRTScheduler(), *this)
 	, config(config_)
 	, ram(config, name, description, size)
 	, header(header_)
@@ -64,43 +62,41 @@ SRAM::~SRAM()
 	}
 }
 
-void SRAM::write(unsigned addr, byte value)
+void SRAM::write(size_t addr, byte value)
 {
 	if (schedulable && !schedulable->isPendingRT()) {
 		schedulable->scheduleRT(5000000); // sync to disk after 5s
 	}
-	assert(addr < getSize());
+	assert(addr < size());
 	ram.write(addr, value);
 }
 
-void SRAM::memset(unsigned addr, byte c, unsigned size)
+void SRAM::memset(size_t addr, byte c, size_t aSize)
 {
 	if (schedulable && !schedulable->isPendingRT()) {
 		schedulable->scheduleRT(5000000); // sync to disk after 5s
 	}
-	assert((addr + size) <= getSize());
-	::memset(ram.getWriteBackdoor() + addr, c, size);
+	assert((addr + aSize) <= size());
+	ranges::fill(ram.getWriteBackdoor().subspan(addr, aSize), c);
 }
 
 void SRAM::load(bool* loaded)
 {
 	assert(config.getXML());
 	if (loaded) *loaded = false;
-	const string& filename = config.getChildData("sramname");
+	const auto& filename = config.getChildData("sramname");
 	try {
 		bool headerOk = true;
 		File file(config.getFileContext().resolveCreate(filename),
 			  File::LOAD_PERSISTENT);
 		if (header) {
 			size_t length = strlen(header);
-			VLA(char, temp, length);
-			file.read(temp, length);
-			if (memcmp(temp, header, length) != 0) {
-				headerOk = false;
-			}
+			VLA(char, buf, length);
+			file.read(buf);
+			headerOk = ranges::equal(buf, std::span{header, length});
 		}
 		if (headerOk) {
-			file.read(ram.getWriteBackdoor(), getSize());
+			file.read(ram.getWriteBackdoor());
 			loadedFilename = file.getURL();
 			if (loaded) *loaded = true;
 		} else {
@@ -118,18 +114,19 @@ void SRAM::load(bool* loaded)
 	}
 }
 
-void SRAM::save()
+void SRAM::save() const
 {
 	assert(config.getXML());
-	const string& filename = config.getChildData("sramname");
+	const auto& filename = config.getChildData("sramname");
 	try {
 		File file(config.getFileContext().resolveCreate(filename),
 			  File::SAVE_PERSISTENT);
 		if (header) {
-			int length = int(strlen(header));
-			file.write(header, length);
+			auto length = strlen(header);
+			file.write(std::span{header, length});
 		}
-		file.write(&ram[0], getSize());
+		//file.write(std::span{ram}); // TODO error with clang-15/libc++
+		file.write(std::span{ram.begin(), ram.end()});
 	} catch (FileException& e) {
 		config.getCliComm().printWarning(
 			"Couldn't save SRAM ", filename,

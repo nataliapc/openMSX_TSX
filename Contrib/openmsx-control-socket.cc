@@ -3,21 +3,23 @@
  *
  *  requires: libxml2
  *  compile:
- *    *nix:  g++ `xml2-config --cflags` `xml2-config --libs` openmsx-control-socket.cc
- *    win32: g++ `xml2-config --cflags` `xml2-config --libs` openmsx-control-socket.cc -lwsock32
+ *    *nix:  g++ -std=c++20 `xml2-config --cflags` `xml2-config --libs` openmsx-control-socket.cc
+ *    win32: g++ -std=c++20 `xml2-config --cflags` `xml2-config --libs` openmsx-control-socket.cc -lwsock32
  */
 
-#include <string>
+#include <libxml/parser.h>
+
+#include <array>
 #include <deque>
-#include <vector>
+#include <dirent.h>
 #include <iostream>
-#include <unistd.h>
-#include <sys/types.h>
+#include <string>
 #include <sys/select.h>
 #include <sys/stat.h>
-#include <libxml/parser.h>
+#include <sys/types.h>
 #include <unistd.h>
-#include <dirent.h>
+#include <unistd.h>
+#include <vector>
 
 #ifdef _WIN32
 #include <fstream>
@@ -29,19 +31,18 @@
 #include <pwd.h>
 #endif
 
-using std::cout;
-using std::endl;
-using std::deque;
-using std::string;
-using std::vector;
-
 
 class ReadDir
 {
 public:
-	ReadDir(const std::string& directory) {
-		dir = opendir(directory.c_str());
-	}
+	ReadDir(const ReadDir&) = delete;
+	ReadDir(ReadDir&&) = delete;
+	ReadDir& operator=(const ReadDir&) = delete;
+	ReadDir& operator=(ReadDir&&) = delete;
+
+	explicit ReadDir(const std::string& directory)
+		: dir(opendir(directory.c_str())) {}
+
 	~ReadDir() {
 		if (dir) {
 			closedir(dir);
@@ -50,7 +51,7 @@ public:
 
 	dirent* getEntry() {
 		if (!dir) {
-			return 0;
+			return nullptr;
 		}
 		return readdir(dir);
 	}
@@ -59,9 +60,9 @@ private:
 	DIR* dir;
 };
 
-static string getTempDir()
+static std::string getTempDir()
 {
-	const char* result = NULL;
+	const char* result = nullptr;
 	if (!result) result = getenv("TMPDIR");
 	if (!result) result = getenv("TMP");
 	if (!result) result = getenv("TEMP");
@@ -75,7 +76,7 @@ static string getTempDir()
 	return result;
 }
 
-static string getUserName()
+static std::string getUserName()
 {
 #ifdef _WIN32
 	return "default";
@@ -93,7 +94,7 @@ public:
 	void start(int sd);
 
 	// send a command to openmsx
-	void sendCommand(const string& command);
+	void sendCommand(const std::string& command);
 
 private:
 	// XML parsing call-back functions
@@ -107,11 +108,11 @@ private:
 	void parseUpdate(const char** attrs);
 
 	void doReply();
-	void doLog();
-	void doUpdate();
+	void doLog() const;
+	void doUpdate() const;
 
 	// commands being executed
-	deque<string> commandStack;
+	std::deque<std::string> commandStack;
 
 	// XML parsing
 	enum State {
@@ -122,7 +123,7 @@ private:
 		TAG_UPDATE,
 	} state;
 	unsigned unknownLevel;
-	string content;
+	std::string content;
 	xmlSAXHandler sax_handler;
 	xmlParserCtxt* parser_context;
 
@@ -138,8 +139,8 @@ private:
 		LOG_WARNING
 	} logLevel;
 
-	string updateType;
-	string updateName;
+	std::string updateType;
+	std::string updateName;
 
 	// communication with openmsx process
 	int sd;
@@ -228,7 +229,7 @@ void OpenMSXComm::parseUpdate(const char** attrs)
 	}
 }
 
-void OpenMSXComm::cb_end_element(OpenMSXComm* comm, const xmlChar* name)
+void OpenMSXComm::cb_end_element(OpenMSXComm* comm, const xmlChar* /*name*/)
 {
 	if (comm->unknownLevel) {
 		--(comm->unknownLevel);
@@ -259,35 +260,42 @@ void OpenMSXComm::doReply()
 {
 	switch (replyStatus) {
 		case REPLY_OK:
-			cout << "OK: ";
+			std::cout << "OK: ";
 			break;
 		case REPLY_NOK:
-			cout << "ERR: ";
+			std::cout << "ERR: ";
+			break;
+		case REPLY_UNKNOWN:
+			// ignore
 			break;
 	}
-	cout << commandStack.front() << endl;
+	std::cout << commandStack.front() << '\n';
 	commandStack.pop_front();
 	if (!content.empty()) {
-		cout << content << endl;
+		std::cout << content << '\n';
 	}
+	std::cout << std::flush;
 }
 
-void OpenMSXComm::doLog()
+void OpenMSXComm::doLog() const
 {
 	switch (logLevel) {
 		case LOG_INFO:
-			cout << "INFO: ";
+			std::cout << "INFO: ";
 			break;
 		case LOG_WARNING:
-			cout << "WARNING: ";
+			std::cout << "WARNING: ";
+			break;
+		case LOG_UNKNOWN:
+			// ignore
 			break;
 	}
-	cout << content << endl;
+	std::cout << content << '\n' << std::flush;
 }
 
-void OpenMSXComm::doUpdate()
+void OpenMSXComm::doUpdate() const
 {
-	cout << "UPDATE: " << updateType << " " << updateName << " " << content << endl;
+	std::cout << "UPDATE: " << updateType << " " << updateName << " " << content << '\n' << std::flush;
 }
 
 void OpenMSXComm::cb_text(OpenMSXComm* comm, const xmlChar* chars, int len)
@@ -304,7 +312,7 @@ void OpenMSXComm::cb_text(OpenMSXComm* comm, const xmlChar* chars, int len)
 }
 
 
-void OpenMSXComm::sendCommand(const string& command)
+void OpenMSXComm::sendCommand(const std::string& command)
 {
 	write(sd, "<command>", 9);
 	write(sd, command.c_str(), command.length());
@@ -323,43 +331,42 @@ void OpenMSXComm::start(int sd_)
 	sax_handler.startElement = (startElementSAXFunc)cb_start_element;
 	sax_handler.endElement   = (endElementSAXFunc)  cb_end_element;
 	sax_handler.characters   = (charactersSAXFunc)  cb_text;
-	parser_context = xmlCreatePushParserCtxt(&sax_handler, this, 0, 0, 0);
+	parser_context = xmlCreatePushParserCtxt(&sax_handler, this, nullptr, 0, nullptr);
 
 	write(sd, "<openmsx-control>", 17);
 
 	// event loop
-	string command; // (partial) input from STDIN
+	std::string command; // (partial) input from STDIN
 	while (true) {
-		char buf[4096];
-		fd_set rdfs;
-		FD_ZERO(&rdfs);
-		FD_SET(sd, &rdfs);
-		FD_SET(STDIN_FILENO, &rdfs);
-		select(sd + 1, &rdfs, NULL, NULL, NULL);
-		if (FD_ISSET(sd, &rdfs)) {
+		std::array<char, 4096> buf;
+		fd_set rdFs;
+		FD_ZERO(&rdFs);
+		FD_SET(sd, &rdFs);
+		FD_SET(STDIN_FILENO, &rdFs);
+		select(sd + 1, &rdFs, nullptr, nullptr, nullptr);
+		if (FD_ISSET(sd, &rdFs)) {
 			// data available from openMSX
-			ssize_t size = read(sd, buf, 4096);
+			ssize_t size = read(sd, buf.data(), buf.size());
 			if (size == 0) {
 				// openmsx process died
 				break;
 			}
-			xmlParseChunk(parser_context, buf, size, 0);
+			xmlParseChunk(parser_context, buf.data(), size, 0);
 		}
-		if (FD_ISSET(STDIN_FILENO, &rdfs)) {
+		if (FD_ISSET(STDIN_FILENO, &rdFs)) {
 			// data available from STDIN
-			ssize_t size = read(STDIN_FILENO, buf, 4096);
-			char* oldpos = buf;
+			ssize_t size = read(STDIN_FILENO, buf.data(), buf.size());
+			char* oldPos = buf.data();
 			while (true) {
-				char* pos = (char*)memchr(oldpos, '\n', size);
-				if (pos) {
-					unsigned num = pos - oldpos;
-					command.append(oldpos, num);
+				if (auto* pos = static_cast<char*>(memchr(oldPos, '\n', size))) {
+					auto num = pos - oldPos;
+					command.append(oldPos, num);
 					sendCommand(command);
 					command.clear();
-					oldpos = pos + 1;
+					oldPos = pos + 1;
 					size -= num + 1;
 				} else {
-					command.append(pos, size);
+					command.append(oldPos, size);
 					break;
 				}
 			}
@@ -371,7 +378,7 @@ void OpenMSXComm::start(int sd_)
 }
 
 
-static bool checkSocketDir(const string& dir)
+static bool checkSocketDir(const std::string& dir)
 {
 	struct stat st;
 	if (stat(dir.c_str(), &st)) {
@@ -396,12 +403,12 @@ static bool checkSocketDir(const string& dir)
 	return true;
 }
 
-static bool checkSocket(const string& socket)
+static bool checkSocket(const std::string& socket)
 {
-	string dir  = socket.substr(0, socket.find_last_of('/'));
-	string name = socket.substr(socket.find_last_of('/') + 1);
+	std::string dir  = socket.substr(0, socket.find_last_of('/'));
+	std::string name = socket.substr(socket.find_last_of('/') + 1);
 
-	if (name.substr(0, 7) != "socket.") {
+	if (!name.starts_with("socket.")) {
 		// wrong name
 		return false;
 	}
@@ -438,14 +445,14 @@ static bool checkSocket(const string& socket)
 	return true;
 }
 
-static void deleteSocket(const string& socket)
+static void deleteSocket(const std::string& socket)
 {
 	unlink(socket.c_str()); // ignore errors
-	string dir = socket.substr(0, socket.find_last_of('/'));
+	std::string dir = socket.substr(0, socket.find_last_of('/'));
 	rmdir(dir.c_str()); // ignore errors
 }
 
-static int openSocket(const string& socketName)
+static int openSocket(const std::string& socketName)
 {
 	if (!checkSocket(socketName)) {
 		return -1;
@@ -492,15 +499,15 @@ static int openSocket(const string& socketName)
 	return sd;
 }
 
-void collectServers(vector<string>& servers)
+void collectServers(std::vector<std::string>& servers)
 {
-	string dir = getTempDir() + "/openmsx-" + getUserName();
+	std::string dir = getTempDir() + "/openmsx-" + getUserName();
 	if (!checkSocketDir(dir)) {
 		return;
 	}
 	ReadDir readDir(dir);
 	while (dirent* entry = readDir.getEntry()) {
-		string socketName = dir + '/' + entry->d_name;
+		std::string socketName = dir + '/' + entry->d_name;
 		int sd = openSocket(socketName);
 		if (sd != -1) {
 			close(sd);
@@ -517,10 +524,10 @@ int main()
 	WSAStartup(MAKEWORD(1, 1), &wsaData);
 #endif
 
-	vector<string> servers;
+	std::vector<std::string> servers;
 	collectServers(servers);
 	if (servers.empty()) {
-		cout << "No running openmsx found." << endl;
+		std::cout << "No running openmsx found.\n";
 		return 0;
 	}
 

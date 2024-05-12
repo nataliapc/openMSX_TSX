@@ -8,6 +8,7 @@
     <release_year>1990</release_year>
     <description>MSX2 game console</description>
     <type>MSX2</type>
+    <region>kr</region>
   </info>
 
   <!-- the motherboard has a DW61MX1 chip, the system controller? -->
@@ -40,12 +41,12 @@
     </VDP>
 
     <PSG id="PSG">
-      <type>YM2149</type>
+      <type>AY8910</type>
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <RTC id="Real time clock">

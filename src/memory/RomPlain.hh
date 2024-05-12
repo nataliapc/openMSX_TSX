@@ -2,20 +2,21 @@
 #define ROMPLAIN_HH
 
 #include "RomBlocks.hh"
+#include "RomTypes.hh"
+
+#include <span>
 
 namespace openmsx {
 
 class RomPlain final : public Rom8kBBlocks
 {
 public:
-	enum MirrorType { MIRRORED, NOT_MIRRORED };
-
-	RomPlain(const DeviceConfig& config, Rom&& rom,
-	         MirrorType mirrored, int start = -1);
+	RomPlain(const DeviceConfig& config, Rom&& rom, RomType type);
+	[[nodiscard]] unsigned getBaseSizeAlignment() const override;
 
 private:
-	void guessHelper(unsigned offset, int* pages);
-	unsigned guessLocation(unsigned windowBase, unsigned windowSize);
+	void guessHelper(unsigned offset, std::span<int, 3> pages) const;
+	[[nodiscard]] unsigned guessLocation(unsigned windowBase, unsigned windowSize) const;
 };
 
 } // namespace openmsx

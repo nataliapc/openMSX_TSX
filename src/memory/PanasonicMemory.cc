@@ -7,40 +7,34 @@
 #include "HardwareConfig.hh"
 #include "XMLElement.hh"
 #include "MSXException.hh"
+#include "narrow.hh"
 #include <memory>
 
 namespace openmsx {
 
-static std::unique_ptr<Rom> createRom(MSXMotherBoard& motherBoard)
-{
-	const XMLElement* elem = motherBoard.getMachineConfig()->
-	                      getConfig().findChild("PanasonicRom");
-	if (!elem) return nullptr;
-
-	const HardwareConfig* hwConf = motherBoard.getMachineConfig();
-	assert(hwConf);
-	return std::make_unique<Rom>(
-		"PanasonicRom", "Turbor-R main ROM",
-		DeviceConfig(*hwConf, *elem));
-}
-
 PanasonicMemory::PanasonicMemory(MSXMotherBoard& motherBoard)
 	: msxcpu(motherBoard.getCPU())
-	, rom(createRom(motherBoard))
-	, ram(nullptr), ramSize(0)
-	, dram(false)
+	, rom([&]() -> std::optional<Rom> {
+		const auto* elem = motherBoard.getMachineConfig()->
+				getConfig().findChild("PanasonicRom");
+		if (!elem) return std::nullopt;
+
+		const HardwareConfig* hwConf = motherBoard.getMachineConfig();
+		assert(hwConf);
+		return std::optional<Rom>(std::in_place,
+			"PanasonicRom", "Turbor-R main ROM",
+			DeviceConfig(*hwConf, *elem));
+	}())
 {
 }
-
-PanasonicMemory::~PanasonicMemory() = default;
 
 void PanasonicMemory::registerRam(Ram& ram_)
 {
-	ram = &ram_[0];
-	ramSize = ram_.getSize();
+	ram = ram_.data();
+	ramSize = narrow<unsigned>(ram_.size());
 }
 
-const byte* PanasonicMemory::getRomBlock(unsigned block)
+std::span<const byte, 0x2000> PanasonicMemory::getRomBlock(unsigned block) const
 {
 	if (!rom) {
 		throw MSXException("Missing PanasonicRom.");
@@ -52,17 +46,17 @@ const byte* PanasonicMemory::getRomBlock(unsigned block)
 		unsigned offset = (block & 0x03) * 0x2000;
 		unsigned ramOffset = (block < 0x30) ? ramSize - 0x10000 :
 		                                      ramSize - 0x08000;
-		return ram + ramOffset + offset;
+		return std::span<const byte, 0x2000>{ram + ramOffset + offset, 0x2000};
 	} else {
 		unsigned offset = block * 0x2000;
-		if (offset >= rom->getSize()) {
-			offset &= rom->getSize() - 1;
+		if (offset >= rom->size()) {
+			offset &= narrow<unsigned>(rom->size() - 1);
 		}
-		return &(*rom)[offset];
+		return subspan<0x2000>(*rom, offset);
 	}
 }
 
-const byte* PanasonicMemory::getRomRange(unsigned first, unsigned last)
+std::span<const byte> PanasonicMemory::getRomRange(unsigned first, unsigned last) const
 {
 	if (!rom) {
 		throw MSXException("Missing PanasonicRom.");
@@ -72,16 +66,16 @@ const byte* PanasonicMemory::getRomRange(unsigned first, unsigned last)
 		                   "be smaller than lastblock");
 	}
 	unsigned start =  first     * 0x2000;
-	if (start >= rom->getSize()) {
+	if (start >= rom->size()) {
 		throw MSXException("Error in config file: firstblock lies "
 		                   "outside of rom image.");
 	}
 	unsigned stop  = (last + 1) * 0x2000;
-	if (stop > rom->getSize()) {
+	if (stop > rom->size()) {
 		throw MSXException("Error in config file: lastblock lies "
 		                   "outside of rom image.");
 	}
-	return &(*rom)[start];
+	return subspan(*rom, start, stop - start);
 }
 
 byte* PanasonicMemory::getRamBlock(unsigned block)
@@ -99,7 +93,7 @@ void PanasonicMemory::setDRAM(bool dram_)
 {
 	if (dram_ != dram) {
 		dram = dram_;
-		msxcpu.invalidateMemCache(0x0000, 0x10000);
+		msxcpu.invalidateAllSlotsRWCache(0x0000, 0x10000);
 	}
 }
 

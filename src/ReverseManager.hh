@@ -3,29 +3,35 @@
 
 #include "Schedulable.hh"
 #include "EventListener.hh"
-#include "StateChangeListener.hh"
 #include "Command.hh"
 #include "EmuTime.hh"
 #include "MemBuffer.hh"
 #include "DeltaBlock.hh"
-#include "array_ref.hh"
 #include "outer.hh"
-#include <vector>
+#include <cstdint>
+#include <deque>
+#include <span>
 #include <map>
 #include <memory>
-#include <cstdint>
+#include <string_view>
+#include <vector>
 
 namespace openmsx {
 
-class MSXMotherBoard;
-class Keyboard;
 class EventDelay;
 class EventDistributor;
-class TclObject;
 class Interpreter;
+class MSXMotherBoard;
+class Keyboard;
+class StateChange;
+class TclObject;
 
-class ReverseManager final : private EventListener, private StateChangeRecorder
+class ReverseManager final : private EventListener
 {
+public:
+	static constexpr std::string_view REPLAY_DIR = "replays";
+	static constexpr std::string_view REPLAY_EXTENSION = ".omr";
+
 public:
 	explicit ReverseManager(MSXMotherBoard& motherBoard);
 	~ReverseManager();
@@ -50,9 +56,27 @@ public:
 		reRecordCount = count;
 	}
 
+	[[nodiscard]] bool isReplaying() const;
+	void stopReplay(EmuTime::param time) noexcept;
+
+	template<typename T, typename... Args>
+	StateChange& record(EmuTime::param time, Args&& ...args) {
+		assert(!isReplaying());
+		++replayIndex;
+		history.events.push_back(std::make_unique<T>(time, std::forward<Args>(args)...));
+		return *history.events.back();
+	}
+
+	[[nodiscard]] bool isCollecting() const { return collecting; }
+	[[nodiscard]] bool isViewOnlyMode() const;
+	[[nodiscard]] double getBegin() const;
+	[[nodiscard]] double getEnd() const;
+	[[nodiscard]] double getCurrent() const;
+	[[nodiscard]] std::vector<double> getSnapshotTimes() const;
+
 private:
 	struct ReverseChunk {
-		ReverseChunk() : time(EmuTime::zero) {}
+		ReverseChunk() : time(EmuTime::zero()) {}
 
 		EmuTime time;
 		std::vector<std::shared_ptr<DeltaBlock>> deltaBlocks;
@@ -65,35 +89,33 @@ private:
 		unsigned eventCount;
 	};
 	using Chunks = std::map<unsigned, ReverseChunk>;
-	using Events = std::vector<std::shared_ptr<StateChange>>;
+	using Events = std::deque<std::unique_ptr<StateChange>>;
 
 	struct ReverseHistory {
-		void swap(ReverseHistory& other);
+		void swap(ReverseHistory& other) noexcept;
 		void clear();
-		unsigned getNextSeqNum(EmuTime::param time) const;
+		[[nodiscard]] unsigned getNextSeqNum(EmuTime::param time) const;
 
 		Chunks chunks;
 		Events events;
 		LastDeltaBlocks lastDeltaBlocks;
 	};
 
-	bool isCollecting() const { return collecting; }
-
 	void start();
 	void stop();
 	void status(TclObject& result) const;
 	void debugInfo(TclObject& result) const;
-	void goBack(array_ref<TclObject> tokens);
-	void goTo(array_ref<TclObject> tokens);
+	void goBack(std::span<const TclObject> tokens);
+	void goTo(std::span<const TclObject> tokens);
 	void saveReplay(Interpreter& interp,
-	                array_ref<TclObject> tokens, TclObject& result);
+	                std::span<const TclObject> tokens, TclObject& result);
 	void loadReplay(Interpreter& interp,
-	                array_ref<TclObject> tokens, TclObject& result);
+	                std::span<const TclObject> tokens, TclObject& result);
 
 	void signalStopReplay(EmuTime::param time);
-	EmuTime::param getEndTime(const ReverseHistory& history) const;
-	void goTo(EmuTime::param targetTime, bool novideo);
-	void goTo(EmuTime::param targetTime, bool novideo,
+	[[nodiscard]] EmuTime::param getEndTime(const ReverseHistory& history) const;
+	void goTo(EmuTime::param targetTime, bool noVideo);
+	void goTo(EmuTime::param targetTime, bool noVideo,
 	          ReverseHistory& history, bool sameTimeLine);
 	void transferHistory(ReverseHistory& oldHistory,
 	                     unsigned oldEventCount);
@@ -104,7 +126,7 @@ private:
 	template<unsigned N> void dropOldSnapshots(unsigned count);
 
 	// Schedulable
-	struct SyncNewSnapshot : Schedulable {
+	struct SyncNewSnapshot final : Schedulable {
 		friend class ReverseManager;
 		explicit SyncNewSnapshot(Scheduler& s) : Schedulable(s) {}
 		void executeUntil(EmuTime::param /*time*/) override {
@@ -112,7 +134,7 @@ private:
 			rm.execNewSnapshot();
 		}
 	} syncNewSnapshot;
-	struct SyncInputEvent : Schedulable {
+	struct SyncInputEvent final : Schedulable {
 		friend class ReverseManager;
 		explicit SyncInputEvent(Scheduler& s) : Schedulable(s) {}
 		void executeUntil(EmuTime::param /*time*/) override {
@@ -123,34 +145,30 @@ private:
 
 	void execNewSnapshot();
 	void execInputEvent();
-	EmuTime::param getCurrentTime() const { return syncNewSnapshot.getCurrentTime(); }
+	[[nodiscard]] EmuTime::param getCurrentTime() const { return syncNewSnapshot.getCurrentTime(); }
 
 	// EventListener
-	int signalEvent(const std::shared_ptr<const Event>& event) override;
+	int signalEvent(const Event& event) override;
 
-	// StateChangeRecorder
-	void signalStateChange(const std::shared_ptr<StateChange>& event) override;
-	void stopReplay(EmuTime::param time) override;
-	bool isReplaying() const override;
-
+private:
 	MSXMotherBoard& motherBoard;
 	EventDistributor& eventDistributor;
 
 	struct ReverseCmd final : Command {
 		explicit ReverseCmd(CommandController& controller);
-		void execute(array_ref<TclObject> tokens, TclObject& result) override;
-		std::string help(const std::vector<std::string>& tokens) const override;
+		void execute(std::span<const TclObject> tokens, TclObject& result) override;
+		[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override;
 		void tabCompletion(std::vector<std::string>& tokens) const override;
 	} reverseCmd;
 
-	Keyboard* keyboard;
-	EventDelay* eventDelay;
+	Keyboard* keyboard = nullptr;
+	EventDelay* eventDelay = nullptr;
 	ReverseHistory history;
-	unsigned replayIndex;
-	bool collecting;
-	bool pendingTakeSnapshot;
+	unsigned replayIndex = 0;
+	bool collecting = false;
+	bool pendingTakeSnapshot = false;
 
-	unsigned reRecordCount;
+	unsigned reRecordCount = 0;
 
 	friend struct Replay;
 };

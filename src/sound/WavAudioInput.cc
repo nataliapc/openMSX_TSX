@@ -1,10 +1,9 @@
 #include "WavAudioInput.hh"
 #include "CommandController.hh"
+#include "FileOperations.hh"
 #include "PlugException.hh"
 #include "CliComm.hh"
 #include "serialize.hh"
-
-using std::string;
 
 namespace openmsx {
 
@@ -13,7 +12,7 @@ WavAudioInput::WavAudioInput(CommandController& commandController)
 		commandController, "audio-inputfilename",
 		"filename of the file where the sampler reads data from",
 		"audio-input.wav")
-	, reference(EmuTime::zero)
+	, reference(EmuTime::zero())
 {
 	audioInputFilenameSetting.attach(*this);
 }
@@ -25,19 +24,19 @@ WavAudioInput::~WavAudioInput()
 
 void WavAudioInput::loadWave()
 {
-	wav = WavData(audioInputFilenameSetting.getString().str(), 16, 0);
+	wav = WavData(FileOperations::expandTilde(std::string(
+		audioInputFilenameSetting.getString())));
 }
 
-const string& WavAudioInput::getName() const
+std::string_view WavAudioInput::getName() const
 {
-	static const string name("wavinput");
-	return name;
+	return "wavinput";
 }
 
-string_view WavAudioInput::getDescription() const
+std::string_view WavAudioInput::getDescription() const
 {
 	return "Read .wav files. Can for example be used as input for "
-		"samplers.";
+	       "samplers.";
 }
 
 void WavAudioInput::plugHelper(Connector& /*connector*/, EmuTime::param time)
@@ -56,7 +55,7 @@ void WavAudioInput::unplugHelper(EmuTime::param /*time*/)
 {
 }
 
-void WavAudioInput::update(const Setting& setting)
+void WavAudioInput::update(const Setting& setting) noexcept
 {
 	(void)setting;
 	assert(&setting == &audioInputFilenameSetting);
@@ -75,10 +74,7 @@ int16_t WavAudioInput::readSample(EmuTime::param time)
 {
 	if (wav.getSize()) {
 		unsigned pos = (time - reference).getTicksAt(wav.getFreq());
-		if (pos < wav.getSize()) {
-			auto buf = static_cast<const int16_t*>(wav.getData());
-			return buf[pos];
-		}
+		return wav.getSample(pos);
 	}
 	return 0;
 }
@@ -87,7 +83,7 @@ template<typename Archive>
 void WavAudioInput::serialize(Archive& ar, unsigned /*version*/)
 {
 	ar.serialize("reference", reference);
-	if (ar.isLoader()) {
+	if constexpr (Archive::IS_LOADER) {
 		update(audioInputFilenameSetting);
 	}
 }

@@ -1,5 +1,5 @@
 #include "ChakkariCopy.hh"
-#include "CliComm.hh"
+#include "MSXCliComm.hh"
 #include "serialize.hh"
 
 // The cartridge has 2 buttons with 2 LEDs, marked PAUSE and COPY. It also has
@@ -29,7 +29,7 @@
 // The memory at 6800-7FFF is unused by the cartridge.
 //
 // Internal handling: during cartridge initialisation Chakkari Copy copies the
-// contents of BIOS page 0 into it's own RAM and patches some entries to
+// contents of BIOS page 0 into its own RAM and patches some entries to
 // capture the input of PAUSE and COPY buttons of the cartridge. Afterwards the
 // patched memory is set to read-only.
 // PAUSE and COPY itself are processed by the routines in the ROM. In case the
@@ -37,8 +37,8 @@
 // buttons are no longer working. In this case CALL SCHANGE switches the BIOS
 // to the patched version again.
 //
-// In case a program switches screen modes in a way that prevents Chakkara Copy
-// from detecting the correct parameters Chakkara Copy can be started by
+// In case a program switches screen modes in a way that prevents Chakkari Copy
+// from detecting the correct parameters Chakkari Copy can be started by
 // keeping the COPY button pressed. In this case the screen-mode autodetect
 // will be skipped and the parameters can be entered manually.
 // This appears to be an undocumented feature, confirmed by typos and a very
@@ -47,7 +47,7 @@
 // In case the printer is not ready or not available the printing can be
 // aborted by pressing Ctrl+Stop.
 //
-// The Chakkari Copy cartridge has one register, which controls it's complete
+// The Chakkari Copy cartridge has one register, which controls its complete
 // behavior. This register is available at MSX port &H7F.
 //
 // READ only:
@@ -97,7 +97,6 @@ ChakkariCopy::ChakkariCopy(const DeviceConfig& config)
 		"in RAM mode you just have a 16kB RAM expansion", ChakkariCopy::COPY,
 		EnumSetting<ChakkariCopy::Mode>::Map{
 			{"COPY", ChakkariCopy::COPY}, {"RAM", ChakkariCopy::RAM}})
-	, reg(0xFF) // avoid UMR in initial writeIO()
 {
 	reset(getCurrentTime());
 	modeSetting.attach(*this);
@@ -129,7 +128,7 @@ void ChakkariCopy::writeIO(word /*port*/, byte value, EmuTime::param /*time*/)
 	if (diff & 0x04) {
 		if (modeSetting.getEnum() == COPY) {
 			// page 0 toggles writable/read-only
-			invalidateMemCache(0x0000, 0x4000);
+			invalidateDeviceRWCache(0x0000, 0x4000);
 		}
 	}
 }
@@ -178,7 +177,7 @@ const byte* ChakkariCopy::getReadCacheLine(word address) const
 			return &biosRam[address & 0x3FFF];
 		}
 	}
-	return unmappedRead;
+	return unmappedRead.data();
 }
 
 void ChakkariCopy::writeMem(word address, byte value, EmuTime::param /*time*/)
@@ -204,23 +203,23 @@ byte* ChakkariCopy::getWriteCacheLine(word address) const
 			return const_cast<byte*>(&biosRam[address & 0x3FFF]);
 		}
 	}
-	return unmappedWrite;
+	return unmappedWrite.data();
 }
 
-void ChakkariCopy::update(const Setting& /*setting*/)
+void ChakkariCopy::update(const Setting& /*setting*/) noexcept
 {
 	// switch COPY <-> RAM mode, memory layout changes
-	invalidateMemCache(0x0000, 0x10000);
+	invalidateDeviceRWCache();
 }
 
 template<typename Archive>
 void ChakkariCopy::serialize(Archive& ar, unsigned /*version*/)
 {
 	ar.template serializeBase<MSXDevice>(*this);
-	ar.serialize("biosRam", biosRam);
-	ar.serialize("workRam", workRam);
-	ar.serialize("reg", reg);
-	if (ar.isLoader()) {
+	ar.serialize("biosRam", biosRam,
+	             "workRam", workRam,
+	             "reg", reg);
+	if constexpr (Archive::IS_LOADER) {
 		writeIO(0, reg, getCurrentTime());
 	}
 

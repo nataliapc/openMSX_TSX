@@ -2,7 +2,8 @@
 #define JOYSTICKPORT_HH
 
 #include "Connector.hh"
-#include "openmsx.hh"
+#include <cstdint>
+#include <string>
 
 namespace openmsx {
 
@@ -13,8 +14,8 @@ class JoystickPortIf
 {
 public:
 	virtual ~JoystickPortIf() = default;
-	virtual byte read(EmuTime::param time) = 0;
-	virtual void write(byte value, EmuTime::param time) = 0;
+	[[nodiscard]] virtual uint8_t read(EmuTime::param time) = 0;
+	virtual void write(uint8_t value, EmuTime::param time) = 0;
 protected:
 	JoystickPortIf() = default;
 };
@@ -25,31 +26,32 @@ public:
 	JoystickPort(PluggingController& pluggingController,
 	             std::string name, std::string description);
 
-	JoystickDevice& getPluggedJoyDev() const;
+	[[nodiscard]] JoystickDevice& getPluggedJoyDev() const;
 
 	// Connector
-	const std::string getDescription() const override;
-	string_view getClass() const override;
+	[[nodiscard]] std::string_view getDescription() const override;
+	[[nodiscard]] std::string_view getClass() const override;
 	void plug(Pluggable& device, EmuTime::param time) override;
 
-	byte read(EmuTime::param time) override;
-	void write(byte value, EmuTime::param time) override;
+	[[nodiscard]] uint8_t read(EmuTime::param time) override;
+	void write(uint8_t value, EmuTime::param time) override;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 private:
-	void writeDirect(byte value, EmuTime::param time);
+	void writeDirect(uint8_t value, EmuTime::param time);
 
-	byte lastValue;
-	const std::string description;
+private:
+	uint8_t lastValue = 255; // != 0
+	std::string description;
 };
 
 class DummyJoystickPort final : public JoystickPortIf
 {
 public:
-	byte read(EmuTime::param time) override;
-	void write(byte value, EmuTime::param time) override;
+	[[nodiscard]] uint8_t read(EmuTime::param time) override;
+	void write(uint8_t value, EmuTime::param time) override;
 };
 
 } // namespace openmsx

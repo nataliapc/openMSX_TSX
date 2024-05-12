@@ -1,35 +1,57 @@
 #include "LocalFileReference.hh"
+
 #include "File.hh"
 #include "Filename.hh"
 #include "FileOperations.hh"
 #include "FileException.hh"
+
 #include "build-info.hh"
+
 #include <cstdio>
 #include <cassert>
 
-using std::string;
-
 namespace openmsx {
-
-LocalFileReference::LocalFileReference(const Filename& filename)
-{
-	init(filename.getResolved());
-}
-
-LocalFileReference::LocalFileReference(const string& url)
-{
-	init(url);
-}
 
 LocalFileReference::LocalFileReference(File& file)
 {
 	init(file);
 }
 
-void LocalFileReference::init(const string& url)
+LocalFileReference::LocalFileReference(std::string filename)
 {
-	File file(url);
+	File file(std::move(filename));
 	init(file);
+}
+
+LocalFileReference::LocalFileReference(const Filename& filename)
+	: LocalFileReference(filename.getResolved())
+{
+}
+
+LocalFileReference::LocalFileReference(Filename&& filename)
+	: LocalFileReference(std::move(filename).getResolved())
+{
+}
+
+LocalFileReference::LocalFileReference(LocalFileReference&& other) noexcept
+	: tmpFile(std::move(other.tmpFile))
+	, tmpDir (std::move(other.tmpDir ))
+{
+	other.tmpDir.clear();
+}
+
+LocalFileReference& LocalFileReference::operator=(LocalFileReference&& other) noexcept
+{
+	cleanup();
+	tmpFile = std::move(other.tmpFile);
+	tmpDir  = std::move(other.tmpDir);
+	other.tmpDir.clear();
+	return *this;
+}
+
+LocalFileReference::~LocalFileReference()
+{
+	cleanup();
 }
 
 void LocalFileReference::init(File& file)
@@ -60,14 +82,13 @@ void LocalFileReference::init(File& file)
 	}
 
 	// write temp file
-	size_t size;
-	const byte* buf = file.mmap(size);
-	if (fwrite(buf, 1, size, fp.get()) != size) {
+	auto mmap = file.mmap();
+	if (fwrite(mmap.data(), 1, mmap.size(), fp.get()) != mmap.size()) {
 		throw FileException("Couldn't write temp file");
 	}
 }
 
-LocalFileReference::~LocalFileReference()
+void LocalFileReference::cleanup() const
 {
 	if (!tmpDir.empty()) {
 		FileOperations::unlink(tmpFile);
@@ -77,7 +98,7 @@ LocalFileReference::~LocalFileReference()
 	}
 }
 
-const string LocalFileReference::getFilename() const
+const std::string& LocalFileReference::getFilename() const
 {
 	assert(!tmpFile.empty());
 	return tmpFile;

@@ -5,9 +5,10 @@
   <info>
     <manufacturer>Sanyo</manufacturer>
     <code>PHC-28L</code>
-    <release_year>?</release_year>
-    <description>French MSX machine (upgrade of the PHC-28S).</description>
+    <release_year>1985</release_year>
+    <description>Basic French MSX1 (upgrade of the PHC-28S), with 64kB RAM.</description>
     <type>MSX</type>
+    <region>fr</region>
   </info>
 
   <CassettePort/>
@@ -37,8 +38,8 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <PrinterPort id="Printer Port">

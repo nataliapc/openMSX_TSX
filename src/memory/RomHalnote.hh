@@ -2,6 +2,7 @@
 #define ROMHALNOTE_HH
 
 #include "RomBlocks.hh"
+#include <array>
 
 namespace openmsx {
 
@@ -11,16 +12,16 @@ public:
 	RomHalnote(const DeviceConfig& config, Rom&& rom);
 
 	void reset(EmuTime::param time) override;
-	byte readMem(word address, EmuTime::param time) override;
-	const byte* getReadCacheLine(word address) const override;
+	[[nodiscard]] byte readMem(word address, EmuTime::param time) override;
+	[[nodiscard]] const byte* getReadCacheLine(word address) const override;
 	void writeMem(word address, byte value, EmuTime::param time) override;
-	byte* getWriteCacheLine(word address) const override;
+	[[nodiscard]] byte* getWriteCacheLine(word address) const override;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 private:
-	byte subBanks[2];
+	std::array<byte, 2> subBanks;
 	bool sramEnabled;
 	bool subMapperEnabled;
 };

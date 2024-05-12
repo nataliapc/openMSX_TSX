@@ -6,8 +6,9 @@
     <manufacturer>Panasonic</manufacturer>
     <code>FS-A1ST</code>
     <release_year>1990</release_year>
-    <description/>
+    <description>The first released MSXturboR. With built in disk drive, sampler, Ren-sha turbo, MSX-MUSIC, MSX-DOS2 and software.</description>
     <type>MSXturboR</type>
+    <region>jp</region>
   </info>
 
   <RenShaTurbo>
@@ -68,11 +69,12 @@
 
     <PSG id="PSG">
       <keyboardlayout>JIS</keyboardlayout>
+      <mirrored_registers>false</mirrored_registers>
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <RTC id="Real time clock">
@@ -129,6 +131,7 @@
           <sound>
             <volume>9000</volume>
           </sound>
+          <ym2413-core>NukeYKT</ym2413-core>
           <io base="0x7C" num="2" type="O"/>
           <mem base="0x4000" size="0x4000"/>
         </MSX-MUSIC>
@@ -156,6 +159,7 @@
         <PanasonicRAM id="Main RAM">
           <size>256</size>
           <mem base="0x0000" size="0x10000"/>
+          <initialContent encoding="gz-base64">eJxjYPgPBAxAMDLpweCGgaQBkHH/AQ==</initialContent> <!-- 0000FFFFFFFF0000*32 + FFFF00000000FFFF*32, as found in the machine of Peter Hanraets with serial 0LNMD14115 -->
         </PanasonicRAM>
       </secondary>
 

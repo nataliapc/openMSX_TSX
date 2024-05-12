@@ -5,30 +5,29 @@
 #include "PlugException.hh"
 #include "EventDistributor.hh"
 #include "Scheduler.hh"
+#include "one_of.hh"
 #include "serialize.hh"
+#include "xrange.hh"
 #include <cstring>
 #include <cerrno>
 #include "Midi_w32.hh"
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
-#include <windows.h>
+#include <Windows.h>
 #include <mmsystem.h>
 #include <memory>
 #include <sys/types.h>
 #include <sys/stat.h>
 
-using std::string;
-
 namespace openmsx {
 
 void MidiInWindows::registerAll(EventDistributor& eventDistributor,
-                               Scheduler& scheduler,
-                               PluggingController& controller)
+                                Scheduler& scheduler,
+                                PluggingController& controller)
 {
 	w32_midiInInit();
-	unsigned devnum = w32_midiInGetVFNsNum();
-	for (unsigned i = 0 ; i <devnum; ++i) {
+	for (auto i : xrange(w32_midiInGetVFNsNum())) {
 		controller.registerPluggable(std::make_unique<MidiInWindows>(
 			eventDistributor, scheduler, i));
 	}
@@ -36,19 +35,19 @@ void MidiInWindows::registerAll(EventDistributor& eventDistributor,
 
 
 MidiInWindows::MidiInWindows(EventDistributor& eventDistributor_,
-                           Scheduler& scheduler_, unsigned num)
+                             Scheduler& scheduler_, unsigned num)
 	: eventDistributor(eventDistributor_), scheduler(scheduler_)
 	, devIdx(unsigned(-1))
 {
 	name = w32_midiInGetVFN(num);
 	desc = w32_midiInGetRDN(num);
 
-	eventDistributor.registerEventListener(OPENMSX_MIDI_IN_WINDOWS_EVENT, *this);
+	eventDistributor.registerEventListener(EventType::MIDI_IN_WINDOWS, *this);
 }
 
 MidiInWindows::~MidiInWindows()
 {
-	eventDistributor.unregisterEventListener(OPENMSX_MIDI_IN_WINDOWS_EVENT, *this);
+	eventDistributor.unregisterEventListener(EventType::MIDI_IN_WINDOWS, *this);
 
 	//w32_midiInClean(); // TODO
 }
@@ -63,14 +62,14 @@ void MidiInWindows::plugHelper(Connector& connector_, EmuTime::param /*time*/)
 
 	setConnector(&connector_); // base class will do this in a moment,
 	                           // but thread already needs it
-	thread = std::thread([this]() { run(); });
 
 	{
-		std::unique_lock<std::mutex> threadIdLock(threadIdMutex);
+		std::unique_lock threadIdLock(threadIdMutex);
+		thread = std::thread([this]() { run(); });
 		threadIdCond.wait(threadIdLock);
 	}
 	{
-		std::lock_guard<std::mutex> devIdxLock(devIdxMutex);
+		std::scoped_lock devIdxLock(devIdxMutex);
 		devIdx = w32_midiInOpen(name.c_str(), threadId);
 	}
 	devIdxCond.notify_all();
@@ -87,12 +86,12 @@ void MidiInWindows::unplugHelper(EmuTime::param /*time*/)
 	thread.join();
 }
 
-const string& MidiInWindows::getName() const
+std::string_view MidiInWindows::getName() const
 {
 	return name;
 }
 
-string_view MidiInWindows::getDescription() const
+std::string_view MidiInWindows::getDescription() const
 {
 	return desc;
 }
@@ -101,13 +100,12 @@ void MidiInWindows::procLongMsg(LPMIDIHDR p)
 {
 	if (p->dwBytesRecorded) {
 		{
-			std::lock_guard<std::mutex> lock(queueMutex);
-			for (unsigned i = 0; i < p->dwBytesRecorded; ++i) {
+			std::scoped_lock lock(queueMutex);
+			for (auto i : xrange(p->dwBytesRecorded)) {
 				queue.push_back(p->lpData[i]);
 			}
 		}
-		eventDistributor.distributeEvent(
-			std::make_shared<SimpleEvent>(OPENMSX_MIDI_IN_WINDOWS_EVENT));
+		eventDistributor.distributeEvent(MidiInWindowsEvent());
 	}
 }
 
@@ -122,13 +120,12 @@ void MidiInWindows::procShortMsg(DWORD param)
 		default:
 			num = 1; break;
 	}
-	std::lock_guard<std::mutex> lock(queueMutex);
+	std::scoped_lock lock(queueMutex);
 	while (num--) {
 		queue.push_back(param & 0xFF);
 		param >>= 8;
 	}
-	eventDistributor.distributeEvent(
-		std::make_shared<SimpleEvent>(OPENMSX_MIDI_IN_WINDOWS_EVENT));
+	eventDistributor.distributeEvent(MidiInWindowsEvent());
 }
 
 void MidiInWindows::run()
@@ -136,21 +133,20 @@ void MidiInWindows::run()
 	assert(isPluggedIn());
 
 	{
-		std::lock_guard<std::mutex> threadIdLock(threadIdMutex);
+		std::scoped_lock threadIdLock(threadIdMutex);
 		threadId = GetCurrentThreadId();
 	}
-	threadIdCond.notify_all();
 
 	{
-		std::unique_lock<std::mutex> devIdxLock(devIdxMutex);
+		std::unique_lock devIdxLock(devIdxMutex);
+		threadIdCond.notify_all();
 		devIdxCond.wait(devIdxLock);
 	}
 
 	bool fexit = devIdx == unsigned(-1);
 	while (!fexit) {
 		MSG msg;
-		int gmer = GetMessage(&msg, nullptr, 0, 0);
-		if (gmer == 0 || gmer == -1) {
+		if (GetMessage(&msg, nullptr, 0, 0) == one_of(0, -1)) {
 			break;
 		}
 		switch (msg.message) {
@@ -180,7 +176,7 @@ void MidiInWindows::signal(EmuTime::param time)
 {
 	auto* conn = static_cast<MidiInConnector*>(getConnector());
 	if (!conn->acceptsData()) {
-		std::lock_guard<std::mutex> lock(queueMutex);
+		std::scoped_lock lock(queueMutex);
 		queue.clear();
 		return;
 	}
@@ -188,7 +184,7 @@ void MidiInWindows::signal(EmuTime::param time)
 
 	byte data;
 	{
-		std::lock_guard<std::mutex> lock(queueMutex);
+		std::scoped_lock lock(queueMutex);
 		if (queue.empty()) return;
 		data = queue.pop_front();
 	}
@@ -196,12 +192,12 @@ void MidiInWindows::signal(EmuTime::param time)
 }
 
 // EventListener
-int MidiInWindows::signalEvent(const std::shared_ptr<const Event>& /*event*/)
+int MidiInWindows::signalEvent(const Event& /*event*/)
 {
 	if (isPluggedIn()) {
 		signal(scheduler.getCurrentTime());
 	} else {
-		std::lock_guard<std::mutex> lock(queueMutex);
+		std::scoped_lock lock(queueMutex);
 		queue.clear();
 	}
 	return 0;

@@ -1,15 +1,16 @@
 #include "PluggableFactory.hh"
+
 #include "PluggingController.hh"
 #include "MSXMotherBoard.hh"
 #include "Reactor.hh"
-#include "Joystick.hh"
 #include "JoyMega.hh"
 #include "ArkanoidPad.hh"
+#include "InputEventGenerator.hh"
 #include "JoyTap.hh"
 #include "NinjaTap.hh"
 #include "SETetrisDongle.hh"
 #include "MagicKey.hh"
-#include "KeyJoystick.hh"
+#include "MSXJoystick.hh"
 #include "MidiInReader.hh"
 #include "MidiOutLogger.hh"
 #include "Mouse.hh"
@@ -20,6 +21,7 @@
 #include "PrinterPortSimpl.hh"
 #include "Printer.hh"
 #include "RS232Tester.hh"
+#include "RS232Net.hh"
 #include "WavAudioInput.hh"
 #include "components.hh"
 #if	defined(_WIN32)
@@ -46,12 +48,12 @@ void PluggableFactory::createAll(PluggingController& controller,
 	auto& msxEventDistributor    = motherBoard.getMSXEventDistributor();
 	auto& stateChangeDistributor = motherBoard.getStateChangeDistributor();
 	auto& eventDistributor       = reactor.getEventDistributor();
-	auto& globalSettings         = reactor.getGlobalSettings();
+	auto& joystickManager         = reactor.getInputEventGenerator().getJoystickManager();
 	auto& display                = reactor.getDisplay();
 	// Input devices:
 	// TODO: Support hot-plugging of input devices:
 	// - additional key joysticks can be created by the user
-	// - real joysticks and mice can be hotplugged (USB)
+	// - real joysticks and mice can be hot-plugged (USB)
 	controller.registerPluggable(std::make_unique<ArkanoidPad>(
 		msxEventDistributor, stateChangeDistributor));
 	controller.registerPluggable(std::make_unique<Mouse>(
@@ -67,16 +69,18 @@ void PluggableFactory::createAll(PluggingController& controller,
 		controller, "joytap"));
 	controller.registerPluggable(std::make_unique<NinjaTap>(
 		controller, "ninjatap"));
-	controller.registerPluggable(std::make_unique<KeyJoystick>(
+	controller.registerPluggable(std::make_unique<MSXJoystick>(
 		commandController, msxEventDistributor,
-		stateChangeDistributor, "keyjoystick1"));
-	controller.registerPluggable(std::make_unique<KeyJoystick>(
+		stateChangeDistributor, joystickManager, 1)); // msxjoystick1
+	controller.registerPluggable(std::make_unique<MSXJoystick>(
 		commandController, msxEventDistributor,
-		stateChangeDistributor, "keyjoystick2"));
-	Joystick::registerAll(msxEventDistributor, stateChangeDistributor,
-	                      commandController, globalSettings, controller);
-	JoyMega::registerAll(msxEventDistributor, stateChangeDistributor,
-	                      controller);
+		stateChangeDistributor, joystickManager, 2)); // msxjoystick2
+	controller.registerPluggable(std::make_unique<JoyMega>(
+		commandController, msxEventDistributor,
+		stateChangeDistributor, joystickManager, 1)); // joymega1
+	controller.registerPluggable(std::make_unique<JoyMega>(
+		commandController, msxEventDistributor,
+		stateChangeDistributor, joystickManager, 2)); // joymega2
 
 	// Dongles
 	controller.registerPluggable(std::make_unique<SETetrisDongle>());
@@ -90,6 +94,8 @@ void PluggableFactory::createAll(PluggingController& controller,
 
 	// Serial communication:
 	controller.registerPluggable(std::make_unique<RS232Tester>(
+		eventDistributor, scheduler, commandController));
+	controller.registerPluggable(std::make_unique<RS232Net>(
 		eventDistributor, scheduler, commandController));
 
 	// Sampled audio:
@@ -118,7 +124,7 @@ void PluggableFactory::createAll(PluggingController& controller,
 	MidiOutCoreMIDI::registerAll(controller);
 #endif
 #if COMPONENT_ALSAMIDI
-	MidiSessionALSA::registerAll(controller, reactor.getCliComm());
+	MidiSessionALSA::registerAll(controller, reactor.getCliComm(), eventDistributor, scheduler);
 #endif
 
 	// Printers

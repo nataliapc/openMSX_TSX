@@ -66,15 +66,17 @@ proc vu_meters_init {} {
 
 	dict for {soundchip channel_dict} $volume_expr {
 		set nof_channels [dict size $channel_dict]
+		# make sure OSD widget name doesn't contain dots...
+		set chipname [string map {. _} $soundchip]
 		# create surrounding widget for this chip
-		osd create rectangle vu_meters.$soundchip \
+		osd create rectangle vu_meters.$chipname \
 			-rgba 0x00000080 \
 			-x ${vu_meter_offset} \
 			-y 0 \
 			-w $bar_length \
 			-h [expr {$vu_meter_title_height + 1 + $nof_channels * ($bar_width + 1)}] \
 			-clip true
-		osd create text vu_meters.${soundchip}.title \
+		osd create text vu_meters.${chipname}.title \
 			-x 1 \
 			-y 1 \
 			-rgba 0xffffffff \
@@ -83,7 +85,7 @@ proc vu_meters_init {} {
 
 		# create vu meters for this sound chip
 		dict for {channel volExpr} $channel_dict {
-			osd create rectangle vu_meters.${soundchip}.ch${channel} \
+			osd create rectangle vu_meters.${chipname}.ch${channel} \
 				-rgba 0xff0000ff \
 				-x 0 \
 				-y [expr {$vu_meter_title_height + 1 + (($bar_width + 1) * $channel)}] \
@@ -106,14 +108,21 @@ proc update_meters {} {
 	# update meters with the volumes
 	if {!$vu_meters_active} return
 
-	dict for {soundchip channel_dict} $volume_expr {
-		dict for {channel volExpr} $channel_dict {
-			set new_volume [eval $volExpr]
-			if {[dict get $volume_cache $soundchip $channel] != $new_volume} {
-				dict set volume_cache $soundchip $channel $new_volume
-				update_meter "vu_meters.${soundchip}.ch${channel}" $new_volume
+	if {[catch {
+		dict for {soundchip channel_dict} $volume_expr {
+			# make sure OSD widget name doesn't contain dots...
+			set chipname [string map {. _} $soundchip]
+			dict for {channel volExpr} $channel_dict {
+				set new_volume [eval $volExpr]
+				if {[dict get $volume_cache $soundchip $channel] != $new_volume} {
+					dict set volume_cache $soundchip $channel $new_volume
+					update_meter "vu_meters.${chipname}.ch${channel}" $new_volume
+				}
 			}
 		}
+	}]} {
+		# a chip disappeared probably, let's reinit to see which there are now
+		vu_meters_reinit
 	}
 	# here you can customize the update frequency (to reduce CPU load)
 	#set frame_trigger_id [after time 0.05 [namespace code update_meters]]
@@ -161,6 +170,11 @@ proc toggle_vu_meters {} {
 		update_meters
 	}
 	return ""
+}
+
+proc vu_meters_reinit {} {
+	toggle_vu_meters
+	toggle_vu_meters
 }
 
 namespace export toggle_vu_meters

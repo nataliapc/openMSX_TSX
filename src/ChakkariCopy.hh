@@ -15,25 +15,26 @@ public:
 	enum Mode { COPY, RAM };
 
 	explicit ChakkariCopy(const DeviceConfig& config);
-	~ChakkariCopy();
+	~ChakkariCopy() override;
 
 	void reset(EmuTime::param time) override;
 	void writeIO(word port, byte value, EmuTime::param time) override;
-	byte readIO(word port, EmuTime::param time) override;
-	byte peekIO(word port, EmuTime::param time) const override;
-	byte readMem(word address, EmuTime::param time) override;
-	byte peekMem(word address, EmuTime::param time) const override;
-	const byte* getReadCacheLine(word address) const override;
+	[[nodiscard]] byte readIO(word port, EmuTime::param time) override;
+	[[nodiscard]] byte peekIO(word port, EmuTime::param time) const override;
+	[[nodiscard]] byte readMem(word address, EmuTime::param time) override;
+	[[nodiscard]] byte peekMem(word address, EmuTime::param time) const override;
+	[[nodiscard]] const byte* getReadCacheLine(word address) const override;
 	void writeMem(word address, byte value, EmuTime::param time) override;
-	byte* getWriteCacheLine(word address) const override;
+	[[nodiscard]] byte* getWriteCacheLine(word address) const override;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 private:
 	// Observer<Setting>
-	void update(const Setting& setting) override;
+	void update(const Setting& setting) noexcept override;
 
+private:
 	Ram biosRam;
 	Ram workRam;
 	Rom rom;
@@ -42,7 +43,7 @@ private:
 	BooleanSetting copyButtonPressedSetting;
 	EnumSetting<Mode> modeSetting;
 
-	byte reg;
+	byte reg = 0xFF; // avoid UMR in initial writeIO()
 };
 
 } // namespace openmsx

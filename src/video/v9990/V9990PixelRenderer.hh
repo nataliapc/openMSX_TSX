@@ -26,10 +26,10 @@ class V9990PixelRenderer final : public V9990Renderer
 {
 public:
 	explicit V9990PixelRenderer(V9990& vdp);
-	~V9990PixelRenderer();
+	~V9990PixelRenderer() override;
 
 	// V9990Renderer interface:
-	PostProcessor* getPostProcessor() const override;
+	[[nodiscard]] PostProcessor* getPostProcessor() const override;
 	void reset(EmuTime::param time) override;
 	void frameStart(EmuTime::param time) override;
 	void frameEnd(EmuTime::param time) override;
@@ -56,6 +56,20 @@ private:
 		DRAW_DISPLAY
 	};
 
+	/**
+	  */
+	void draw(int fromX, int fromY, int toX, int toY, DrawType type);
+
+	/** Subdivide an area specified by two scan positions into a series of
+	  * rectangles
+	  */
+	void subdivide(int fromX, int fromY, int toX, int toY,
+	               int clipL, int clipR, DrawType drawType);
+
+	// Observer<Setting>
+	void update(const Setting& setting) noexcept override;
+
+private:
 	/** The V9990 VDP
 	  */
 	V9990& vdp;
@@ -74,8 +88,8 @@ private:
 
 	/** Frameskip
 	  */
-	float finishFrameDuration;
-	int frameSkipCounter;
+	float finishFrameDuration{0.0f};
+	int frameSkipCounter{999}; // force drawing of frame;
 
 	/** Accuracy setting for current frame.
 	 */
@@ -111,21 +125,8 @@ private:
 
 	/** Should current frame be draw or can it be skipped.
 	  */
-	bool drawFrame;
-	bool prevDrawFrame;
-
-	/**
-	  */
-	void draw(int fromX, int fromY, int toX, int toY, DrawType type);
-
-	/** Subdivide an area specified by two scan positions into a series of
-	  * rectangles
-	  */
-	void subdivide(int fromX, int fromY, int toX, int toY,
-	               int clipL, int clipR, DrawType drawType);
-
-	// Observer<Setting>
-	void update(const Setting& setting) override;
+	bool drawFrame{false}; // don't draw before frameStart is called
+	bool prevDrawFrame{false};
 };
 
 } // namespace openmsx

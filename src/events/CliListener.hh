@@ -8,15 +8,20 @@ namespace openmsx {
 class CliListener
 {
 public:
-	virtual ~CliListener() {}
+	CliListener(const CliListener&) = delete;
+	CliListener(CliListener&&) = delete;
+	CliListener& operator=(const CliListener&) = delete;
+	CliListener& operator=(CliListener&&) = delete;
 
-	virtual void log(CliComm::LogLevel level, string_view message) = 0;
+	virtual ~CliListener() = default;
 
-	virtual void update(CliComm::UpdateType type, string_view machine,
-	                    string_view name, string_view value) = 0;
+	virtual void log(CliComm::LogLevel level, std::string_view message, float fraction) noexcept = 0;
+
+	virtual void update(CliComm::UpdateType type, std::string_view machine,
+	                    std::string_view name, std::string_view value) noexcept = 0;
 
 protected:
-	CliListener() {}
+	CliListener() = default;
 };
 
 } // namespace openmsx

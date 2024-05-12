@@ -5,10 +5,9 @@
 #include "EventListener.hh"
 #include "FilenameSetting.hh"
 #include "FileOperations.hh"
-#include "openmsx.hh"
 #include "circular_buffer.hh"
 #include "Poller.hh"
-#include <cstdio>
+#include <cstdint>
 #include <mutex>
 #include <thread>
 
@@ -23,13 +22,13 @@ class MidiInReader final : public MidiInDevice, private EventListener
 public:
 	MidiInReader(EventDistributor& eventDistributor, Scheduler& scheduler,
 	             CommandController& commandController);
-	~MidiInReader();
+	~MidiInReader() override;
 
 	// Pluggable
 	void plugHelper(Connector& connector, EmuTime::param time) override;
 	void unplugHelper(EmuTime::param time) override;
-	const std::string& getName() const override;
-	string_view getDescription() const override;
+	[[nodiscard]] std::string_view getName() const override;
+	[[nodiscard]] std::string_view getDescription() const override;
 
 	// MidiInDevice
 	void signal(EmuTime::param time) override;
@@ -41,13 +40,14 @@ private:
 	void run();
 
 	// EventListener
-	int signalEvent(const std::shared_ptr<const Event>& event) override;
+	int signalEvent(const Event& event) override;
 
+private:
 	EventDistributor& eventDistributor;
 	Scheduler& scheduler;
 	std::thread thread;
 	FileOperations::FILE_t file;
-	cb_queue<byte> queue;
+	cb_queue<uint8_t> queue;
 	std::mutex mutex; // to protect queue
 	Poller poller;
 

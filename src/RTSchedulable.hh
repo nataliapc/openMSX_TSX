@@ -11,13 +11,15 @@ class RTSchedulable
 {
 public:
 	RTSchedulable(const RTSchedulable&) = delete;
+	RTSchedulable(RTSchedulable&&) = delete;
 	RTSchedulable& operator=(const RTSchedulable&) = delete;
+	RTSchedulable& operator=(RTSchedulable&&) = delete;
 
 	virtual void executeRT() = 0;
 
 	void scheduleRT(uint64_t delta);
 	bool cancelRT();
-	bool isPendingRT() const;
+	[[nodiscard]] bool isPendingRT() const;
 
 protected:
 	explicit RTSchedulable(RTScheduler& scheduler);

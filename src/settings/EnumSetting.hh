@@ -2,6 +2,8 @@
 #define ENUMSETTING_HH
 
 #include "Setting.hh"
+#include "view.hh"
+#include <concepts>
 #include <iterator>
 #include <utility>
 #include <vector>
@@ -13,106 +15,126 @@ class TclObject;
 // non-templatized base class
 class EnumSettingBase
 {
+public:
+	struct MapEntry {
+		template<typename Enum>
+		MapEntry(std::string_view name_, Enum value_)
+			: name(name_), value(static_cast<int>(value_)) {}
+
+		std::string name; // cannot be string_view because of the 'default_machine' setting
+		int value;
+	};
+	using Map = std::vector<MapEntry>;
+	[[nodiscard]] const auto& getMap() const { return baseMap; }
+
 protected:
-	// cannot be string_view because of the 'default_machine' setting
-	using BaseMap = std::vector<std::pair<std::string, int>>;
-	explicit EnumSettingBase(BaseMap&& m);
 
-	int fromStringBase(string_view str) const;
-	string_view toStringBase(int value) const;
+	explicit EnumSettingBase(Map&& m);
 
-	std::vector<string_view> getPossibleValues() const;
+	[[nodiscard]] int fromStringBase(std::string_view str) const;
+	[[nodiscard]] std::string_view toStringBase(int value) const;
+
+	[[nodiscard]] auto getPossibleValues() const {
+		return view::transform(baseMap,
+			[](const auto& e) -> std::string_view { return e.name; });
+	}
+
 	void additionalInfoBase(TclObject& result) const;
 	void tabCompletionBase(std::vector<std::string>& tokens) const;
 
 private:
-	BaseMap baseMap;
+	Map baseMap;
 };
 
-template<typename T> class EnumSetting final : private EnumSettingBase, public Setting
+template<typename T>
+concept EnumSettingValue = requires(T t, int i) {
+	static_cast<T>(i);
+	static_cast<int>(t);
+};
+
+template<EnumSettingValue T> class EnumSetting final : public EnumSettingBase, public Setting
 {
 public:
-	using Map = std::vector<std::pair<std::string, T>>;
+	using Map = EnumSettingBase::Map;
 
-	EnumSetting(CommandController& commandController, string_view name,
-	            string_view description, T initialValue,
+	EnumSetting(CommandController& commandController, std::string_view name,
+	            static_string_view description, T initialValue,
 	            Map&& map_, SaveSetting save = SAVE);
 
-	string_view getTypeString() const override;
+	[[nodiscard]] std::string_view getTypeString() const override;
 	void additionalInfo(TclObject& result) const override;
 	void tabCompletion(std::vector<std::string>& tokens) const override;
 
-	T getEnum() const;
+	[[nodiscard]] T getEnum() const noexcept;
 	void setEnum(T e);
-	string_view getString() const;
+	[[nodiscard]] std::string_view getString() const;
 
 private:
-	string_view toString(T e) const;
+	std::string_view toString(T e) const;
 };
 
 
 //-------------
 
 
-template <typename T>
+template<EnumSettingValue T>
 EnumSetting<T>::EnumSetting(
-		CommandController& commandController_, string_view name,
-		string_view description_, T initialValue,
+		CommandController& commandController_, std::string_view name,
+		static_string_view description_, T initialValue,
 		Map&& map, SaveSetting save_)
-	: EnumSettingBase(BaseMap(std::make_move_iterator(begin(map)),
-	                          std::make_move_iterator(end(map))))
+	: EnumSettingBase(std::move(map))
 	, Setting(commandController_, name, description_,
-	          TclObject(toString(initialValue)), save_)
+	          TclObject(EnumSettingBase::toStringBase(static_cast<int>(initialValue))), save_)
 {
-	setChecker([this](TclObject& newValue) {
-		fromStringBase(newValue.getString()); // may throw
+	setChecker([this](const TclObject& newValue) {
+		(void)fromStringBase(newValue.getString()); // may throw
 	});
 	init();
 }
 
-template<typename T>
-string_view EnumSetting<T>::getTypeString() const
+template<EnumSettingValue T>
+std::string_view EnumSetting<T>::getTypeString() const
 {
 	return "enumeration";
 }
 
-template<typename T>
+template<EnumSettingValue T>
 void EnumSetting<T>::additionalInfo(TclObject& result) const
 {
 	additionalInfoBase(result);
 }
 
-template<typename T>
+template<EnumSettingValue T>
 void EnumSetting<T>::tabCompletion(std::vector<std::string>& tokens) const
 {
 	tabCompletionBase(tokens);
 }
 
-template<typename T>
-T EnumSetting<T>::getEnum() const
+template<EnumSettingValue T>
+T EnumSetting<T>::getEnum() const noexcept
 {
 	return static_cast<T>(fromStringBase(getValue().getString()));
 }
-template<> inline bool EnumSetting<bool>::getEnum() const
+template<> inline bool EnumSetting<bool>::getEnum() const noexcept
 {
 	// _exactly_ the same functionality as above, but suppress VS warning
 	return fromStringBase(getValue().getString()) != 0;
 }
 
-template<typename T>
+template<EnumSettingValue T>
 void EnumSetting<T>::setEnum(T e)
 {
 	setValue(TclObject(toString(e)));
 }
 
-template<typename T>
-string_view EnumSetting<T>::getString() const
+template<EnumSettingValue T>
+std::string_view EnumSetting<T>::getString() const
 {
 	return getValue().getString();
 }
 
-template<typename T>
-string_view EnumSetting<T>::toString(T e) const
+template<EnumSettingValue T>
+std::string_view EnumSetting<T>::toString(T e) const
 {
 	return toStringBase(static_cast<int>(e));
 }

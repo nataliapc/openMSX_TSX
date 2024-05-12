@@ -2,20 +2,24 @@
 #include "LocalFileReference.hh"
 #include "MSXException.hh"
 #include "StringOp.hh"
+#include "ranges.hh"
 #include "stl.hh"
 #include "xrange.hh"
+#include "zstring_view.hh"
 #include <SDL_ttf.h>
-#include <algorithm>
 #include <cassert>
 #include <vector>
-
-using std::string;
 
 namespace openmsx {
 
 class SDLTTF
 {
 public:
+	SDLTTF(const SDLTTF&) = delete;
+	SDLTTF(SDLTTF&&) = delete;
+	SDLTTF& operator=(const SDLTTF&) = delete;
+	SDLTTF& operator=(SDLTTF&&) = delete;
+
 	static SDLTTF& instance();
 
 private:
@@ -26,8 +30,13 @@ private:
 class TTFFontPool
 {
 public:
+	TTFFontPool(const TTFFontPool&) = delete;
+	TTFFontPool(TTFFontPool&&) = delete;
+	TTFFontPool& operator=(const TTFFontPool&) = delete;
+	TTFFontPool& operator=(TTFFontPool&&) = delete;
+
 	static TTFFontPool& instance();
-	TTF_Font* get(const string& filename, int ptSize);
+	TTF_Font* get(const std::string& filename, int ptSize);
 	void release(TTF_Font* font);
 
 private:
@@ -93,12 +102,11 @@ TTFFontPool& TTFFontPool::instance()
 	return oneInstance;
 }
 
-TTF_Font* TTFFontPool::get(const string& filename, int ptSize)
+TTF_Font* TTFFontPool::get(const std::string& filename, int ptSize)
 {
-	auto it = find_if(begin(pool), end(pool),
-		[&](const FontInfo& i) {
-			return (i.name == filename) && (i.size == ptSize); });
-	if (it != end(pool)) {
+	if (auto it = ranges::find(pool, std::tuple(filename, ptSize),
+	        [](auto& info) { return std::tuple(info.name, info.size); });
+	    it != end(pool)) {
 		++it->count;
 		return it->font;
 	}
@@ -120,8 +128,7 @@ TTF_Font* TTFFontPool::get(const string& filename, int ptSize)
 
 void TTFFontPool::release(TTF_Font* font)
 {
-	auto it = rfind_if_unguarded(pool,
-		[&](const FontInfo& i) { return i.font == font; });
+	auto it = rfind_unguarded(pool, font, &FontInfo::font);
 	--it->count;
 	if (it->count == 0) {
 		TTF_CloseFont(it->font);
@@ -133,8 +140,8 @@ void TTFFontPool::release(TTF_Font* font)
 // class TTFFont
 
 TTFFont::TTFFont(const std::string& filename, int ptSize)
+	: font(TTFFontPool::instance().get(filename, ptSize))
 {
-	font = TTFFontPool::instance().get(filename, ptSize);
 }
 
 TTFFont::~TTFFont()
@@ -143,7 +150,7 @@ TTFFont::~TTFFont()
 	TTFFontPool::instance().release(static_cast<TTF_Font*>(font));
 }
 
-SDLSurfacePtr TTFFont::render(std::string text, byte r, byte g, byte b) const
+SDLSurfacePtr TTFFont::render(std::string text, uint8_t r, uint8_t g, uint8_t b) const
 {
 	SDL_Color color = { r, g, b, 0 };
 
@@ -152,10 +159,14 @@ SDLSurfacePtr TTFFont::render(std::string text, byte r, byte g, byte b) const
 	if (text.empty()) return SDLSurfacePtr(nullptr);
 
 	// Split on newlines
-	auto lines = StringOp::split(text, '\n');
-	assert(!lines.empty());
+	auto lines_view = StringOp::split_view(text, '\n');
+	auto lines_it = lines_view.begin();
+	auto lines_end = lines_view.end();
+	assert(lines_it != lines_end);
 
-	if (lines.size() == 1) {
+	auto current_line = *lines_it;
+	++lines_it;
+	if (lines_it == lines_end) {
 		// Special case for a single line: we can avoid the
 		// copy to an extra SDL_Surface
 		assert(!text.empty());
@@ -169,19 +180,24 @@ SDLSurfacePtr TTFFont::render(std::string text, byte r, byte g, byte b) const
 	}
 
 	// Determine maximum width and lineHeight
-	unsigned width = 0;
-	unsigned lineHeight = 0; // initialize to avoid warning
-	for (auto& s : lines) {
-		unsigned w;
-		getSize(s.str(), w, lineHeight);
+	int width = 0;
+	int lineHeight = 0; // initialize to avoid warning
+	int numLines = 1;
+	while (true) {
+		auto [w, h] = getSize(std::string(current_line));
 		width = std::max(width, w);
+		lineHeight = h;
+		if (lines_it == lines_end) break;
+		current_line = *lines_it;
+		++lines_it;
+		++numLines;
 	}
 	// There might be extra space between two successive lines
 	// (so lineSkip might be bigger than lineHeight).
-	unsigned lineSkip = getHeight();
+	int lineSkip = getHeight();
 	// We assume that height is the same for all lines.
 	// For the last line we don't include spacing between two lines.
-	auto height = unsigned((lines.size() - 1) * lineSkip + lineHeight);
+	auto height = (numLines - 1) * lineSkip + lineHeight;
 
 	// Create destination surface (initial surface is fully transparent)
 	SDLSurfacePtr destination(SDL_CreateRGBSurface(SDL_SWSURFACE, width, height,
@@ -191,17 +207,20 @@ SDLSurfacePtr TTFFont::render(std::string text, byte r, byte g, byte b) const
 	}
 
 	// Actually render the text:
-	for (auto i : xrange(lines.size())) {
+	// TODO use enumerate() in the future (c++20)
+	int i = -1;
+	for (auto line : lines_view) {
+		++i;
 		// Render single line
-		if (lines[i].empty()) {
+		if (line.empty()) {
 			// SDL_TTF gives an error on empty lines, but we can
 			// simply skip such lines
 			continue;
 		}
-		SDLSurfacePtr line(TTF_RenderUTF8_Blended(
+		SDLSurfacePtr surf(TTF_RenderUTF8_Blended(
 			static_cast<TTF_Font*>(font),
-			lines[i].str().c_str(), color));
-		if (!line) {
+			std::string(line).c_str(), color));
+		if (!surf) {
 			throw MSXException(TTF_GetError());
 		}
 
@@ -209,13 +228,13 @@ SDLSurfacePtr TTFFont::render(std::string text, byte r, byte g, byte b) const
 		SDL_Rect rect;
 		rect.x = 0;
 		rect.y = Sint16(i * lineSkip);
-		SDL_SetAlpha(line.get(), 0, 0); // no blending during copy
-		SDL_BlitSurface(line.get(), nullptr, destination.get(), &rect);
+		SDL_SetSurfaceBlendMode(surf.get(), SDL_BLENDMODE_NONE); // no blending during copy
+		SDL_BlitSurface(surf.get(), nullptr, destination.get(), &rect);
 	}
 	return destination;
 }
 
-unsigned TTFFont::getHeight() const
+int TTFFont::getHeight() const
 {
 	return TTF_FontLineSkip(static_cast<TTF_Font*>(font));
 }
@@ -225,7 +244,7 @@ bool TTFFont::isFixedWidth() const
 	return TTF_FontFaceIsFixedWidth(static_cast<TTF_Font*>(font)) != 0;
 }
 
-unsigned TTFFont::getWidth() const
+int TTFFont::getWidth() const
 {
 	int advance;
 	if (TTF_GlyphMetrics(static_cast<TTF_Font*>(font), Uint16('M'),
@@ -238,14 +257,14 @@ unsigned TTFFont::getWidth() const
 	return advance;
 }
 
-void TTFFont::getSize(const std::string& text,
-                      unsigned& width, unsigned& height) const
+gl::ivec2 TTFFont::getSize(zstring_view text) const
 {
+	int width, height;
 	if (TTF_SizeUTF8(static_cast<TTF_Font*>(font), text.c_str(),
-	                 reinterpret_cast<int*>(&width),
-	                 reinterpret_cast<int*>(&height))) {
+	                 &width, &height)) {
 		throw MSXException(TTF_GetError());
 	}
+	return {width, height};
 }
 
 } // namespace openmsx

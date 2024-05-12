@@ -2,9 +2,9 @@
 #define SCHEDULERQUEUE_HH
 
 #include "MemBuffer.hh"
-#include "likely.hh"
 #include <algorithm>
 #include <cassert>
+#include <concepts>
 #include <cstdlib>
 
 namespace openmsx {
@@ -19,8 +19,8 @@ namespace openmsx {
 template<typename T> class SchedulerQueue
 {
 public:
-	static const int CAPACITY = 32; // initial capacity
-	static const int SPARE_FRONT = 1;
+	static constexpr int CAPACITY = 32; // initial capacity
+	static constexpr int SPARE_FRONT = 1;
 	SchedulerQueue()
 		: storage   (CAPACITY + 1) // one extra for sentinel
 		, storageEnd(storage.data() + CAPACITY)
@@ -29,31 +29,30 @@ public:
 	{
 	}
 
-	size_t capacity()   const { return storageEnd - storage.data(); }
-	size_t spareFront() const { return useBegin   - storage.data(); }
-	size_t spareBack()  const { return storageEnd - useEnd;       }
-	size_t size()  const { return useEnd -  useBegin; }
-	bool   empty() const { return useEnd == useBegin; }
+	[[nodiscard]] size_t capacity()   const { return storageEnd - storage.data(); }
+	[[nodiscard]] size_t spareFront() const { return useBegin   - storage.data(); }
+	[[nodiscard]] size_t spareBack()  const { return storageEnd - useEnd;       }
+	[[nodiscard]] size_t size()  const { return useEnd -  useBegin; }
+	[[nodiscard]] bool   empty() const { return useEnd == useBegin; }
 
 	// Returns reference to the first element, This is the smallest element
 	// according to the sorting criteria, see insert().
-	      T& front()       { return *useBegin; }
-	const T& front() const { return *useBegin; }
+	[[nodiscard]]       T& front()       { return *useBegin; }
+	[[nodiscard]] const T& front() const { return *useBegin; }
 
-	      T* begin()       { return useBegin; }
-	const T* begin() const { return useBegin; }
-	      T* end()         { return useEnd;   }
-	const T* end()   const { return useEnd;   }
+	[[nodiscard]]       T* begin()       { return useBegin; }
+	[[nodiscard]] const T* begin() const { return useBegin; }
+	[[nodiscard]]       T* end()         { return useEnd;   }
+	[[nodiscard]] const T* end()   const { return useEnd;   }
 
 	// Insert new element.
 	// Elements are sorted according to the given LESS predicate.
-	// SET_SENTINEL must set an element to it's maximum value (so that
+	// SET_SENTINEL must set an element to its maximum value (so that
 	// 'less(x, sentinel)' is true for any x).
 	// (Important) two elements that are equivalent according to 'less'
 	// keep their relative order, IOW newly inserted elements are inserted
 	// after existing equivalent elements.
-	template<typename SET_SENTINEL, typename LESS>
-	void insert(const T& t, SET_SENTINEL setSentinel, LESS less)
+	void insert(const T& t, std::invocable<T&> auto setSentinel, std::equivalence_relation<T, T> auto less)
 	{
 		setSentinel(*useEnd); // put sentinel at the end
 		assert(less(t, *useEnd));
@@ -62,7 +61,7 @@ public:
 		while (!less(t, *it)) ++it;
 
 		if ((it - useBegin) <= (useEnd - it)) {
-			if (likely(useBegin != storage.data())) {
+			if (useBegin != storage.data()) [[likely]] {
 				insertFront(it, t);
 			} else if (useEnd != storageEnd) {
 				insertBack(it, t);
@@ -70,7 +69,7 @@ public:
 				insertRealloc(it, t);
 			}
 		} else {
-			if (likely(useEnd != storageEnd)) {
+			if (useEnd != storageEnd) [[likely]] {
 				insertBack(it, t);
 			} else if (useBegin != storage.data()) {
 				insertFront(it, t);
@@ -88,12 +87,12 @@ public:
 	}
 
 	// Remove the first element for which the given predicate returns true.
-	template<typename PRED> bool remove(PRED p)
+	bool remove(std::predicate<T> auto p)
 	{
 		T* it = std::find_if(useBegin, useEnd, p);
 		if (it == useEnd) return false;
 
-		if (unlikely((it - useBegin) < (useEnd - it - 1))) {
+		if ((it - useBegin) < (useEnd - it - 1)) [[unlikely]] {
 			++useBegin;
 			std::copy_backward(useBegin - 1, it, it + 1);
 		} else {
@@ -104,7 +103,7 @@ public:
 	}
 
 	// Remove all elements for which the given predicate returns true.
-	template<typename PRED> void remove_all(PRED p)
+	void remove_all(std::predicate<T> auto p)
 	{
 		useEnd = std::remove_if(useBegin, useEnd, p);
 	}

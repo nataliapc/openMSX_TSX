@@ -2,7 +2,6 @@
 #include "I8255Interface.hh"
 #include "serialize.hh"
 #include "unreachable.hh"
-#include "CliComm.hh"
 
 namespace openmsx {
 
@@ -23,10 +22,10 @@ const int BIT_NR       = 0x0E;
 const int SET_RESET    = 0x01;
 
 
-I8255::I8255(I8255Interface& interf, EmuTime::param time, CliComm& cliComm_)
-	: interface(interf)
-	, cliComm(cliComm_)
-	, warningPrinted(false)
+I8255::I8255(I8255Interface& interface_, EmuTime::param time,
+             StringSetting& invalidPpiModeSetting)
+	: interface(interface_)
+	, ppiModeCallback(invalidPpiModeSetting)
 {
 	reset(time);
 }
@@ -53,7 +52,6 @@ byte I8255::read(byte port, EmuTime::param time)
 		return readControlPort(time);
 	default:
 		UNREACHABLE;
-		return 0; // avoid warning
 	}
 }
 
@@ -70,7 +68,6 @@ byte I8255::peek(byte port, EmuTime::param time) const
 		return readControlPort(time);
 	default:
 		UNREACHABLE;
-		return 0; // avoid warning
 	}
 }
 
@@ -192,7 +189,7 @@ byte I8255::readC1(EmuTime::param time)
 {
 	if (control & DIRECTION_C1) {
 		// input
-		return interface.readC1(time) << 4;	// input not latched
+		return byte(interface.readC1(time) << 4); // input not latched
 	} else {
 		// output
 		return latchPortC & 0xf0;		// output is latched
@@ -202,7 +199,7 @@ byte I8255::readC1(EmuTime::param time)
 byte I8255::peekC1(EmuTime::param time) const
 {
 	if (control & DIRECTION_C1) {
-		return interface.peekC1(time) << 4;	// input not latched
+		return byte(interface.peekC1(time) << 4); // input not latched
 	} else {
 		return latchPortC & 0xf0;		// output is latched
 	}
@@ -318,18 +315,19 @@ void I8255::writeControlPort(byte value, EmuTime::param time)
 	if (value & SET_MODE) {
 		// set new control mode
 		control = value;
-		if ((control & (MODE_A | MODE_B)) && !warningPrinted) {
-			warningPrinted = true;
-			cliComm.printWarning("Invalid PPI mode selected. "
-			"This is not yet correctly emulated. "
-			"On a real MSX this will most likely hang.");
+		if (control & (MODE_A | MODE_B)) {
+			ppiModeCallback.execute();
 		}
+		// Some PPI datasheets state that port A and C (and sometimes
+		// also B) are reset to zero on a mode change. But the
+		// documentation is not consistent.
+		// TODO investigate this further.
 		outputPortA(latchPortA, time);
 		outputPortB(latchPortB, time);
 		outputPortC(latchPortC, time);
 	} else {
 		// (re)set bit of port C
-		byte bitmask = 1 << ((value & BIT_NR) >> 1);
+		auto bitmask = byte(1 << ((value & BIT_NR) >> 1));
 		if (value & SET_RESET) {
 			// set
 			latchPortC |= bitmask;
@@ -339,7 +337,7 @@ void I8255::writeControlPort(byte value, EmuTime::param time)
 		}
 		outputPortC(latchPortC, time);
 		// check for special (re)set commands
-		// not releant for mode 0
+		// not relevant for mode 0
 		switch (control & MODE_A) {
 		case MODEA_0:
 			// do nothing
@@ -360,13 +358,49 @@ void I8255::writeControlPort(byte value, EmuTime::param time)
 	}
 }
 
+// Returns the value that's current being output on port A.
+// Or a floating value if port A is actually programmed as input.
+byte I8255::getPortA() const
+{
+	byte result = latchPortA;
+	if (control & DIRECTION_A) {
+		// actually set as input -> return floating value
+		result = 255; // real floating value not yet supported
+	}
+	return result;
+}
+
+byte I8255::getPortB() const
+{
+	byte result = latchPortB;
+	if (control & DIRECTION_B) {
+		// actually set as input -> return floating value
+		result = 255; // real floating value not yet supported
+	}
+	return result;
+}
+
+byte I8255::getPortC() const
+{
+	byte result = latchPortC;
+	if (control & DIRECTION_C0) {
+		// actually set as input -> return floating value
+		result |= 0x0f; // real floating value not yet supported
+	}
+	if (control & DIRECTION_C1) {
+		// actually set as input -> return floating value
+		result |= 0xf0; // real floating value not yet supported
+	}
+	return result;
+}
+
 template<typename Archive>
 void I8255::serialize(Archive& ar, unsigned /*version*/)
 {
-	ar.serialize("latchPortA", latchPortA);
-	ar.serialize("latchPortB", latchPortB);
-	ar.serialize("latchPortC", latchPortC);
-	ar.serialize("control",    control);
+	ar.serialize("latchPortA", latchPortA,
+	             "latchPortB", latchPortB,
+	             "latchPortC", latchPortC,
+	             "control",    control);
 
 	// note: don't write to any output ports (is handled elsewhere)
 	//       don't serialize 'warningPrinted'

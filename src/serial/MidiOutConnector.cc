@@ -5,23 +5,22 @@
 #include "serialize.hh"
 #include <memory>
 
-using std::string;
-
 namespace openmsx {
 
 MidiOutConnector::MidiOutConnector(PluggingController& pluggingController_,
                                    std::string name_)
-	: Connector(pluggingController_, std::move(name_),
+	: Connector(pluggingController_, name_,
 	            std::make_unique<DummyMidiOutDevice>())
+	, description(std::move(name_))
 {
 }
 
-const string MidiOutConnector::getDescription() const
+std::string_view MidiOutConnector::getDescription() const
 {
-	return "MIDI-out connector";
+	return description;
 }
 
-string_view MidiOutConnector::getClass() const
+std::string_view MidiOutConnector::getClass() const
 {
 	return "midi out";
 }

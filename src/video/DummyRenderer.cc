@@ -23,22 +23,22 @@ void DummyRenderer::updateSuperimposing(const RawFrame* /*videoSource*/,
                                         EmuTime::param /*time*/) {
 }
 
-void DummyRenderer::updateForegroundColor(int /*color*/, EmuTime::param /*time*/) {
+void DummyRenderer::updateForegroundColor(byte /*color*/, EmuTime::param /*time*/) {
 }
 
-void DummyRenderer::updateBackgroundColor(int /*color*/, EmuTime::param /*time*/) {
+void DummyRenderer::updateBackgroundColor(byte /*color*/, EmuTime::param /*time*/) {
 }
 
-void DummyRenderer::updateBlinkForegroundColor(int /*color*/, EmuTime::param /*time*/) {
+void DummyRenderer::updateBlinkForegroundColor(byte /*color*/, EmuTime::param /*time*/) {
 }
 
-void DummyRenderer::updateBlinkBackgroundColor(int /*color*/, EmuTime::param /*time*/) {
+void DummyRenderer::updateBlinkBackgroundColor(byte /*color*/, EmuTime::param /*time*/) {
 }
 
 void DummyRenderer::updateBlinkState(bool /*enabled*/, EmuTime::param /*time*/) {
 }
 
-void DummyRenderer::updatePalette(int /*index*/, int /*grb*/, EmuTime::param /*time*/) {
+void DummyRenderer::updatePalette(unsigned /*index*/, int /*grb*/, EmuTime::param /*time*/) {
 }
 
 void DummyRenderer::updateVerticalScroll(int /*scroll*/, EmuTime::param /*time*/) {
@@ -65,13 +65,13 @@ void DummyRenderer::updateDisplayEnabled(bool /*enabled*/, EmuTime::param /*time
 void DummyRenderer::updateDisplayMode(DisplayMode /*mode*/, EmuTime::param /*time*/) {
 }
 
-void DummyRenderer::updateNameBase(int /*addr*/, EmuTime::param /*time*/) {
+void DummyRenderer::updateNameBase(unsigned /*addr*/, EmuTime::param /*time*/) {
 }
 
-void DummyRenderer::updatePatternBase(int /*addr*/, EmuTime::param /*time*/) {
+void DummyRenderer::updatePatternBase(unsigned /*addr*/, EmuTime::param /*time*/) {
 }
 
-void DummyRenderer::updateColorBase(int /*addr*/, EmuTime::param /*time*/) {
+void DummyRenderer::updateColorBase(unsigned /*addr*/, EmuTime::param /*time*/) {
 }
 
 void DummyRenderer::updateSpritesEnabled(bool /*enabled*/, EmuTime::param /*time*/) {

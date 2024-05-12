@@ -9,17 +9,18 @@ namespace openmsx {
 
 MidiInConnector::MidiInConnector(PluggingController& pluggingController_,
                                  std::string name_)
-	: Connector(pluggingController_, std::move(name_),
+	: Connector(pluggingController_, name_,
 	            std::make_unique<DummyMidiInDevice>())
+	, description(std::move(name_))
 {
 }
 
-const std::string MidiInConnector::getDescription() const
+std::string_view MidiInConnector::getDescription() const
 {
-	return "MIDI-in connector";
+	return description;
 }
 
-string_view MidiInConnector::getClass() const
+std::string_view MidiInConnector::getClass() const
 {
 	return "midi in";
 }

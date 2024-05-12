@@ -5,32 +5,28 @@
 #include "SettingsConfig.hh"
 #include "TclObject.hh"
 #include "CliComm.hh"
-#include "XMLElement.hh"
 #include "MSXException.hh"
 #include "checked_cast.hh"
-
-using std::string;
 
 namespace openmsx {
 
 // class BaseSetting
 
-BaseSetting::BaseSetting(string_view name_)
-	: fullName(name_)
+BaseSetting::BaseSetting(std::string_view name)
+	: fullName(name)
 	, baseName(fullName)
 {
 }
 
-BaseSetting::BaseSetting(const TclObject& name_)
-	: fullName(name_)
+BaseSetting::BaseSetting(TclObject name)
+	: fullName(std::move(name))
 	, baseName(fullName)
 {
 }
 
 void BaseSetting::info(TclObject& result) const
 {
-	result.addListElement(getTypeString());
-	result.addListElement(getDefaultValue());
+	result.addListElement(getTypeString(), getDefaultValue());
 	additionalInfo(result);
 }
 
@@ -38,32 +34,28 @@ void BaseSetting::info(TclObject& result) const
 // class Setting
 
 Setting::Setting(CommandController& commandController_,
-                 string_view name_, string_view description_,
+                 std::string_view name, static_string_view description_,
                  const TclObject& initialValue, SaveSetting save_)
-	: BaseSetting(name_)
+	: BaseSetting(name)
 	, commandController(commandController_)
-	, description(description_.str())
+	, description(description_)
 	, value(initialValue)
 	, defaultValue(initialValue)
-	, restoreValue(initialValue)
 	, save(save_)
 {
-	checkFunc = [](TclObject&) { /* nothing */ };
+	checkFunc = [](const TclObject&) { /* nothing */ };
 }
 
 void Setting::init()
 {
 	if (needLoadSave()) {
-		auto& settingsConfig = getGlobalCommandController()
-			.getSettingsConfig().getXMLElement();
-		if (auto* config = settingsConfig.findChild("settings")) {
-			if (auto* elem = config->findChildWithAttribute(
-			                                "setting", "id", getBaseName())) {
-				try {
-					setValueDirect(TclObject(elem->getData()));
-				} catch (MSXException&) {
-					// saved value no longer valid, just keep default
-				}
+		if (const auto* savedValue =
+		            getGlobalCommandController().getSettingsConfig()
+		                    .getValueForSetting(getBaseName())) {
+			try {
+				setValueDirect(TclObject(*savedValue));
+			} catch (MSXException&) {
+				// saved value no longer valid, just keep default
 			}
 		}
 	}
@@ -81,7 +73,7 @@ Setting::~Setting()
 }
 
 
-string_view Setting::getDescription() const
+std::string_view Setting::getDescription() const
 {
 	return description;
 }
@@ -102,27 +94,17 @@ void Setting::notify() const
 	//  - SettingsConfig (keeps values, also of not yet created settings)
 	// This method takes care of the last 3 in this list.
 	Subject<Setting>::notify();
+	auto base = getBaseName();
 	TclObject val = getValue();
-	commandController.getCliComm().update(
-		CliComm::SETTING, getBaseName(), val.getString());
+	commandController.getCliComm().updateFiltered(
+		CliComm::SETTING, base, val.getString());
 
 	// Always keep SettingsConfig in sync.
-	auto& config = getGlobalCommandController().getSettingsConfig().getXMLElement();
-	auto& settings = config.getCreateChild("settings");
+	auto& config = getGlobalCommandController().getSettingsConfig();
 	if (!needLoadSave() || (val == getDefaultValue())) {
-		// remove setting
-		if (auto* elem = settings.findChildWithAttribute(
-				"setting", "id", getBaseName())) {
-			settings.removeChild(*elem);
-		}
+		config.removeValueForSetting(base);
 	} else {
-		// add (or overwrite) setting
-		auto& elem = settings.getCreateChildWithAttribute(
-				"setting", "id", getBaseName());
-		// check for non-saveable value
-		// (mechanism can be generalize later when needed)
-		if (val == dontSaveValue) val = getRestoreValue();
-		elem.setData(val.getString());
+		config.setValueForSetting(base, val.getString());
 	}
 }
 
@@ -130,8 +112,8 @@ void Setting::notifyPropertyChange() const
 {
 	TclObject result;
 	info(result);
-	commandController.getCliComm().update(
-		CliComm::SETTINGINFO, getBaseName(), result.getString());
+	commandController.getCliComm().updateFiltered(
+		CliComm::SETTING_INFO, getBaseName(), result.getString());
 }
 
 bool Setting::needLoadSave() const
@@ -141,11 +123,6 @@ bool Setting::needLoadSave() const
 bool Setting::needTransfer() const
 {
 	return save != DONT_TRANSFER;
-}
-
-void Setting::setDontSaveValue(const TclObject& dontSaveValue_)
-{
-	dontSaveValue = dontSaveValue_;
 }
 
 GlobalCommandController& Setting::getGlobalCommandController() const
@@ -164,7 +141,7 @@ Interpreter& Setting::getInterpreter() const
 	return commandController.getInterpreter();
 }
 
-void Setting::tabCompletion(std::vector<string>& /*tokens*/) const
+void Setting::tabCompletion(std::vector<std::string>& /*tokens*/) const
 {
 	// nothing
 }

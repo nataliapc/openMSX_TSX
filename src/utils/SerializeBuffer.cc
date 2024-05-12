@@ -1,13 +1,10 @@
 #include "SerializeBuffer.hh"
-#include "likely.hh"
-#include <new> // for bad_alloc
 #include <cstdlib>
+#include <utility>
 
 namespace openmsx {
 
 // class OutputBuffer
-
-size_t OutputBuffer::lastSize = 50000; // initial estimate
 
 OutputBuffer::OutputBuffer()
 	: buf(lastSize)
@@ -21,7 +18,7 @@ OutputBuffer::OutputBuffer()
 	// allocate any initial buffer at all). But it can make a difference in
 	// performance. If later we discover the buffer is too small, we have
 	// to reallocate (and thus make a copy). In profiling this reallocation
-	// step was noticable.
+	// step was noticeable.
 
 	// Slowly drop the estimated required size. This makes sure that when
 	// we've overestimated the size once, we don't forever keep this too
@@ -33,8 +30,8 @@ OutputBuffer::OutputBuffer()
 #ifdef __GNUC__
 template<size_t LEN> void OutputBuffer::insertN(const void* __restrict data)
 {
-	byte* newEnd = end + LEN;
-	if (likely(newEnd <= finish)) {
+	uint8_t* newEnd = end + LEN;
+	if (newEnd <= finish) [[likely]] {
 		memcpy(end, data, LEN);
 		end = newEnd;
 	} else {
@@ -50,8 +47,8 @@ template void OutputBuffer::insertN<8>(const void* __restrict data);
 
 void OutputBuffer::insertN(const void* __restrict data, size_t len)
 {
-	byte* newEnd = end + len;
-	if (likely(newEnd <= finish)) {
+	uint8_t* newEnd = end + len;
+	if (newEnd <= finish) [[likely]] {
 		memcpy(end, data, len);
 		end = newEnd;
 	} else {
@@ -59,7 +56,7 @@ void OutputBuffer::insertN(const void* __restrict data, size_t len)
 	}
 }
 
-MemBuffer<byte> OutputBuffer::release(size_t& size)
+MemBuffer<uint8_t> OutputBuffer::release(size_t& size)
 {
 	size = end - buf.data();
 
@@ -70,26 +67,34 @@ MemBuffer<byte> OutputBuffer::release(size_t& size)
 	return std::move(buf);
 }
 
-void OutputBuffer::insertGrow(const void* __restrict data, size_t len)
-{
-	byte* pos = allocateGrow(len);
-	memcpy(pos, data, len);
-}
-
-byte* OutputBuffer::allocateGrow(size_t len)
+void OutputBuffer::grow(size_t len)
 {
 	size_t oldSize = end - buf.data();
 	size_t newSize = std::max(oldSize + len, oldSize + oldSize / 2);
 	buf.resize(newSize);
-	end = buf.data() + oldSize + len;
+	end    = buf.data() + oldSize;
 	finish = buf.data() + newSize;
-	return buf.data() + oldSize;
 }
+
+uint8_t* OutputBuffer::allocateGrow(size_t len)
+{
+	grow(len);
+	auto* result = end;
+	end += len;
+	return result;
+}
+
+void OutputBuffer::insertGrow(const void* __restrict data, size_t len)
+{
+	uint8_t* pos = allocateGrow(len);
+	memcpy(pos, data, len);
+}
+
 
 
 // class InputBuffer
 
-InputBuffer::InputBuffer(const byte* data, size_t size)
+InputBuffer::InputBuffer(const uint8_t* data, size_t size)
 	: buf(data)
 #ifndef NDEBUG
 	, finish(buf + size)

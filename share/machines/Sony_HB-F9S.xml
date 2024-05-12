@@ -6,21 +6,24 @@
     <manufacturer>Sony</manufacturer>
     <code>HB-F9S</code>
     <release_year>1985</release_year>
-    <description>Spanish MSX2</description>
+    <description>Spanish version of the HB-F9P.</description>
     <type>MSX2</type>
+    <region>es</region>
   </info>
-
-  <MapperReadBackBits>largest</MapperReadBackBits>
 
   <CassettePort/>
 
   <devices>
 
+    <S1985 id="S1985"> <!-- includes 5 bits mapper-read-back -->
+      <sramname>hb-f9s_s1985.sram</sramname>
+    </S1985>
+
     <PPI id="ppi">
       <sound>
         <volume>16000</volume>
       </sound>
-      <io base="0xA8" num="4"/>
+      <io base="0xA8" num="8"/> <!-- S-1985 mirrors -->
       <keyboard_type>es</keyboard_type>
       <has_keypad>true</has_keypad>
       <key_ghosting_sgc_protected>true</key_ghosting_sgc_protected>
@@ -35,27 +38,24 @@
       <io base="0x98" num="8" type="I"/> <!-- S-1985 mirrors -->
     </VDP>
 
-    <S1985 id="S1985">
-      <sramname>hb-f9s_s1985.sram</sramname>
-    </S1985>
-
     <PSG id="PSG">
       <type>YM2149</type> <!-- in S-1985 MSX-ENGINE -->
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="8" type="IO"/> <!-- S-1985 mirrors -->
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <RTC id="Real time clock">
       <sramname>hb-f9s.cmos</sramname>
-      <io base="0xB4" num="2" type="O"/>
-      <io base="0xB5" num="1" type="I"/>
+      <io base="0xB4" num="4" type="IO"/> <!-- S-1985 mirrors -->
     </RTC>
 
     <PrinterPort id="Printer Port">
-      <io base="0x90" num="2"/>
+      <io base="0x90" num="8" type="IO"/> <!-- S-1985 mirrors -->
+      <bidirectional>true</bidirectional> <!-- S-1985 feature (but not used, nor implemented) -->
+      <unused_bits>0x00</unused_bits>
     </PrinterPort>
 
     <primary slot="0">

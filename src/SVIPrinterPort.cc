@@ -1,5 +1,3 @@
-// $Id:$
-
 #include "SVIPrinterPort.hh"
 #include "DummyPrinterPortDevice.hh"
 #include "checked_cast.hh"
@@ -20,8 +18,6 @@ SVIPrinterPort::SVIPrinterPort(const DeviceConfig& config)
 	, Connector(MSXDevice::getPluggingController(), "printerport",
 	            std::make_unique<DummyPrinterPortDevice>())
 {
-	data = 255;     // != 0;
-	strobe = false; // != true;
 	reset(getCurrentTime());
 }
 
@@ -31,18 +27,18 @@ void SVIPrinterPort::reset(EmuTime::param time)
 	setStrobe(true, time); // TODO check this
 }
 
-byte SVIPrinterPort::readIO(word port, EmuTime::param time)
+uint8_t SVIPrinterPort::readIO(uint16_t port, EmuTime::param time)
 {
 	return peekIO(port, time);
 }
 
-byte SVIPrinterPort::peekIO(word /*port*/, EmuTime::param time) const
+uint8_t SVIPrinterPort::peekIO(uint16_t /*port*/, EmuTime::param time) const
 {
 	// bit 1 = status / other bits always 1
 	return getPluggedPrintDev().getStatus(time) ? 0xFF : 0xFE;
 }
 
-void SVIPrinterPort::writeIO(word port, byte value, EmuTime::param time)
+void SVIPrinterPort::writeIO(uint16_t port, uint8_t value, EmuTime::param time)
 {
 	switch (port & 0x01) {
 	case 0:
@@ -63,7 +59,7 @@ void SVIPrinterPort::setStrobe(bool newStrobe, EmuTime::param time)
 		getPluggedPrintDev().setStrobe(strobe, time);
 	}
 }
-void SVIPrinterPort::writeData(byte newData, EmuTime::param time)
+void SVIPrinterPort::writeData(uint8_t newData, EmuTime::param time)
 {
 	if (newData != data) {
 		data = newData;
@@ -71,12 +67,12 @@ void SVIPrinterPort::writeData(byte newData, EmuTime::param time)
 	}
 }
 
-const std::string SVIPrinterPort::getDescription() const
+std::string_view SVIPrinterPort::getDescription() const
 {
 	return "Spectravideo SVI-328 Printer port";
 }
 
-string_view SVIPrinterPort::getClass() const
+std::string_view SVIPrinterPort::getClass() const
 {
 	return "Printer Port";
 }
@@ -98,8 +94,8 @@ void SVIPrinterPort::serialize(Archive& ar, unsigned /*version*/)
 {
 	ar.template serializeBase<MSXDevice>(*this);
 	ar.template serializeBase<Connector>(*this);
-	ar.serialize("strobe", strobe);
-	ar.serialize("data", data);
+	ar.serialize("strobe", strobe,
+	             "data",   data);
 	// TODO force writing data to port??
 }
 INSTANTIATE_SERIALIZE_METHODS(SVIPrinterPort);

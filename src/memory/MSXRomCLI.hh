@@ -10,31 +10,36 @@ class CommandLineParser;
 class MSXRomCLI final : public CLIOption, public CLIFileType
 {
 public:
+	static std::span<const std::string_view> getExtensions();
+
+public:
 	explicit MSXRomCLI(CommandLineParser& cmdLineParser);
 
 	void parseOption(const std::string& option,
-	                 array_ref<std::string>& cmdLine) override;
-	string_view optionHelp() const override;
+	                 std::span<std::string>& cmdLine) override;
+	[[nodiscard]] std::string_view optionHelp() const override;
 
 	void parseFileType(const std::string& arg,
-	                   array_ref<std::string>& cmdLine) override;
-	string_view fileTypeHelp() const override;
+	                   std::span<std::string>& cmdLine) override;
+	[[nodiscard]] std::string_view fileTypeHelp() const override;
+	[[nodiscard]] std::string_view fileTypeCategoryName() const override;
 
 private:
-	void parse(const std::string& arg, const std::string& slotname,
-	           array_ref<std::string>& cmdLine);
+	void parse(const std::string& arg, const std::string& slotName,
+	           std::span<std::string>& cmdLine) const;
 
+private:
 	CommandLineParser& cmdLineParser;
 
 	struct IpsOption final : CLIOption {
 		void parseOption(const std::string& option,
-		                 array_ref<std::string>& cmdLine) override;
-		string_view optionHelp() const override;
+		                 std::span<std::string>& cmdLine) override;
+		[[nodiscard]] std::string_view optionHelp() const override;
 	} ipsOption;
 	struct RomTypeOption final : CLIOption {
 		void parseOption(const std::string& option,
-		                 array_ref<std::string>& cmdLine) override;
-		string_view optionHelp() const override;
+		                 std::span<std::string>& cmdLine) override;
+		[[nodiscard]] std::string_view optionHelp() const override;
 	} romTypeOption;
 };
 

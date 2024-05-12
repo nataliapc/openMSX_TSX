@@ -4,15 +4,18 @@
 
 #include "RomDooly.hh"
 #include "CacheLine.hh"
+#include "MSXException.hh"
 #include "serialize.hh"
 
 namespace openmsx {
 
 RomDooly::RomDooly(const DeviceConfig& config, Rom&& rom_)
 	: MSXRom(config, std::move(rom_))
-	, romBlockDebug(*this, &conversion, 0x4000, 0x8000, 15)
+	, romBlockDebug(*this, std::span{&conversion, 1}, 0x4000, 0x8000, 15)
 {
-	conversion = 0;
+	if (rom.size() != 0x8000) {
+		throw MSXException("Dooly ROM-size must be exactly 32kB");
+	}
 }
 
 void RomDooly::reset(EmuTime::param /*time*/)
@@ -45,7 +48,7 @@ byte RomDooly::peekMem(word address, EmuTime::param /*time*/) const
 				if (conversion == 2) return (value & 0xf8) | (((value << 2 & 0x04) | (value >> 1 & 0x03)) ^ 0x07);
 				if (conversion == 5) return value ^ 0x07;
 				if (conversion == 6) return (value & 0xf8) | (((value >> 2 & 0x01) | (value << 1 & 0x06)) ^ 0x07);
-				// fall-through
+				[[fallthrough]];
 			default:
 				return value;
 			}
@@ -63,7 +66,15 @@ byte RomDooly::readMem(word address, EmuTime::param time)
 
 void RomDooly::writeMem(word address, byte value, EmuTime::param /*time*/)
 {
-	if ((0x4000 <= address) && (address < 0xc000)) {
+	// TODO: To what region does the real cartridge react?
+	// * Using the full region [0x4000,0xc000) interferes with the
+	//   RAM-check routine of many MSX machines (game doesn't boot)
+	// * The game seems to write at many different addresses. The min/max
+	//   I've seen is 0x8780/0x8f86. So my best *guess* is to extend this
+	//   region to [0x8000,0x9000).
+	// * This smaller region seems to make the game work (on the above
+	//   machines that failed before).
+	if ((0x8000 <= address) && (address < 0x9000)) {
 		conversion = value & 0x07;
 	}
 }
@@ -73,7 +84,7 @@ byte* RomDooly::getWriteCacheLine(word address) const
 	if (((0x4000 & CacheLine::HIGH) <= address) && (address < (0xc000 & CacheLine::HIGH))) {
 		return nullptr;
 	} else {
-		return unmappedWrite;
+		return unmappedWrite.data();
 	}
 }
 

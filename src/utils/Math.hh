@@ -1,113 +1,78 @@
 #ifndef MATH_HH
 #define MATH_HH
 
-#include "likely.hh"
-#include <algorithm>
+#include "narrow.hh"
+#include <bit>
+#include <cassert>
+#include <climits>
 #include <cmath>
+#include <concepts>
 #include <cstdint>
+#include <numbers>
+#include <span>
 
 #ifdef _MSC_VER
 #include <intrin.h>
 #pragma intrinsic(_BitScanForward)
 #endif
 
-// These constants are very common extensions, but not guaranteed to be defined
-// by <cmath> when compiling in a strict standards compliant mode. Also e.g.
-// visual studio does not provide them.
-#ifndef M_E
-#define M_E    2.7182818284590452354
-#endif
-#ifndef M_LN2
-#define M_LN2  0.69314718055994530942 // log_e 2
-#endif
-#ifndef M_LN10
-#define M_LN10 2.30258509299404568402 // log_e 10
-#endif
-#ifndef M_PI
-#define M_PI   3.14159265358979323846
-#endif
-
 namespace Math {
 
-/** Is the given number an integer power of 2?
-  * Not correct for zero (according to this test 0 is a power of 2).
+inline constexpr double e    = std::numbers::e_v   <double>;
+inline constexpr double ln2  = std::numbers::ln2_v <double>;
+inline constexpr double ln10 = std::numbers::ln10_v<double>;
+inline constexpr double pi   = std::numbers::pi_v  <double>;
+
+/** Returns the smallest number of the form 2^n-1 that is greater or equal
+  * to the given number.
+  * The resulting number has the same number of leading zeros as the input,
+  * but starting from the first 1-bit in the input all bits more to the right
+  * are also 1.
   */
-constexpr bool isPowerOfTwo(unsigned a)
+[[nodiscard]] constexpr auto floodRight(std::unsigned_integral auto x) noexcept
 {
-	return (a & (a - 1)) == 0;
+	x |= x >> 1;
+	x |= x >> 2;
+	x |= x >> 4;
+	x |= x >> ((sizeof(x) >= 2) ?  8 : 0); // Written in a weird way to
+	x |= x >> ((sizeof(x) >= 4) ? 16 : 0); // suppress compiler warnings.
+	x |= x >> ((sizeof(x) >= 8) ? 32 : 0); // Generates equally efficient
+	return x;                              // code.
 }
 
-/** Returns the smallest number that is both >=a and a power of two.
-  */
-unsigned powerOfTwo(unsigned a);
-
-/** Clips x to the range [LO,HI].
-  * Slightly faster than    std::min(HI, std::max(LO, x))
-  * especially when no clipping is required.
-  */
-template <int LO, int HI>
-inline int clip(int x)
-{
-	static_assert(LO <= HI, "invalid clip range");
-	return unsigned(x - LO) <= unsigned(HI - LO) ? x : (x < HI ? LO : HI);
-}
-
-/** Clip x to range [-32768,32767]. Special case of the version above.
+/** Clip x to range [-32768,32767].
   * Optimized for the case when no clipping is needed.
   */
-inline int16_t clipIntToShort(int x)
+template<std::signed_integral T>
+[[nodiscard]] inline int16_t clipToInt16(T x)
 {
-	static_assert((-1 >> 1) == -1, "right-shift must preserve sign");
-	return likely(int16_t(x) == x) ? x : (0x7FFF - (x >> 31));
+	static_assert((T(-1) >> 1) == T(-1), "right-shift must preserve sign");
+	if (int16_t(x) == x) [[likely]] {
+		return narrow_cast<int16_t>(x);
+	} else {
+		constexpr int SHIFT = (sizeof(T) * CHAR_BIT) - 1;
+		return narrow_cast<int16_t>(0x7FFF - (x >> SHIFT));
+	}
 }
 
 /** Clip x to range [0,255].
   * Optimized for the case when no clipping is needed.
   */
-inline uint8_t clipIntToByte(int x)
+[[nodiscard]] inline uint8_t clipIntToByte(int x)
 {
 	static_assert((-1 >> 1) == -1, "right-shift must preserve sign");
-	return likely(uint8_t(x) == x) ? x : ~(x >> 31);
-}
-
-/** Calculate greatest common divider of two strictly positive integers.
-  * Classical implementation is like this:
-  *    while (unsigned t = b % a) { b = a; a = t; }
-  *    return a;
-  * The following implementation avoids the costly modulo operation. It
-  * is about 40% faster on my machine.
-  *
-  * require: a != 0  &&  b != 0
-  */
-inline unsigned gcd(unsigned a, unsigned b)
-{
-	unsigned k = 0;
-	while (((a & 1) == 0) && ((b & 1) == 0)) {
-		a >>= 1; b >>= 1; ++k;
+	if (uint8_t(x) == x) [[likely]] {
+		return narrow_cast<uint8_t>(x);
+	} else {
+		return narrow_cast<uint8_t>(~(x >> 31));
 	}
-
-	// either a or b (or both) is odd
-	while ((a & 1) == 0) a >>= 1;
-	while ((b & 1) == 0) b >>= 1;
-
-	// both a and b odd
-	while (a != b) {
-		if (a >= b) {
-			a -= b;
-			do { a >>= 1; } while ((a & 1) == 0);
-		} else {
-			b -= a;
-			do { b >>= 1; } while ((b & 1) == 0);
-		}
-	}
-	return b << k;
 }
 
 /** Reverse the lower N bits of a given value.
   * The upper 32-N bits from the input are ignored and will be returned as 0.
   * For example reverseNBits('xxxabcde', 5) returns '000edcba' (binary notation).
   */
-inline unsigned reverseNBits(unsigned x, unsigned bits)
+[[nodiscard]] constexpr unsigned reverseNBits(unsigned x, unsigned bits)
 {
 	unsigned ret = 0;
 	while (bits--) {
@@ -157,7 +122,7 @@ inline unsigned reverseNBits(unsigned x, unsigned bits)
 /** Reverse the bits in a byte.
   * This is equivalent to (but faster than) reverseNBits(x, 8);
   */
-inline uint8_t reverseByte(uint8_t a)
+[[nodiscard]] constexpr uint8_t reverseByte(uint8_t a)
 {
 	// Classical implementation (can be extended to 16 and 32 bits)
 	//   a = ((a & 0xF0) >> 4) | ((a & 0x0F) << 4);
@@ -170,46 +135,10 @@ inline uint8_t reverseByte(uint8_t a)
 	//    http://graphics.stanford.edu/~seander/bithacks.html
 #ifdef __x86_64
 	// on 64-bit systems this is slightly faster
-	return (((a * 0x80200802ULL) & 0x0884422110ULL) * 0x0101010101ULL) >> 32;
+	return narrow_cast<uint8_t>((((a * 0x80200802ULL) & 0x0884422110ULL) * 0x0101010101ULL) >> 32);
 #else
 	// on 32-bit systems this is faster
-	return (((a * 0x0802 & 0x22110) | (a * 0x8020 & 0x88440)) * 0x10101) >> 16;
-#endif
-}
-
-/** Returns the smallest number of the form 2^n-1 that is greater or equal
-  * to the given number.
-  * The resulting number has the same number of leading zeros as the input,
-  * but starting from the first 1-bit in the input all bits more to the right
-  * are also 1.
-  */
-template<typename T> inline T floodRight(T x)
-{
-	x |= x >> 1;
-	x |= x >> 2;
-	x |= x >> 4;
-	x |= x >> ((sizeof(x) >= 2) ?  8 : 0); // Written in a weird way to
-	x |= x >> ((sizeof(x) >= 4) ? 16 : 0); // suppress compiler warnings.
-	x |= x >> ((sizeof(x) >= 8) ? 32 : 0); // Generates equally efficient
-	return x;                              // code.
-}
-
-/** Count the number of leading zero-bits in the given word.
-  * The result is undefined when the input is zero (all bits are zero).
-  */
-inline unsigned countLeadingZeros(unsigned x)
-{
-#ifdef __GNUC__
-	// actually this only exists starting from gcc-3.4.x
-	return __builtin_clz(x); // undefined when x==0
-#else
-	// gives incorrect result for x==0, but that doesn't matter here
-	unsigned lz = 0;
-	if (x <= 0x0000ffff) { lz += 16; x <<= 16; }
-	if (x <= 0x00ffffff) { lz +=  8; x <<=  8; }
-	if (x <= 0x0fffffff) { lz +=  4; x <<=  4; }
-	lz += (0x55ac >> ((x >> 27) & 0x1e)) & 0x3;
-	return lz;
+	return narrow_cast<uint8_t>((((a * 0x0802 & 0x22110) | (a * 0x8020 & 0x88440)) * 0x10101) >> 16);
 #endif
 }
 
@@ -217,23 +146,59 @@ inline unsigned countLeadingZeros(unsigned x)
   * @return 0 if the input is zero (no bits are set),
   *   otherwise the index of the first set bit + 1.
   */
-inline unsigned findFirstSet(unsigned x)
+[[nodiscard]] inline /*constexpr*/ unsigned findFirstSet(uint32_t x)
 {
-#if defined(__GNUC__)
-	return __builtin_ffs(x);
-#elif defined(_MSC_VER)
-	unsigned long index;
-	return _BitScanForward(&index, x) ? index + 1 : 0;
-#else
-	if (x == 0) return 0;
-	int pos = 0;
-	if ((x & 0xffff) == 0) { pos += 16; x >>= 16; }
-	if ((x & 0x00ff) == 0) { pos +=  8; x >>=  8; }
-	if ((x & 0x000f) == 0) { pos +=  4; x >>=  4; }
-	if ((x & 0x0003) == 0) { pos +=  2; x >>=  2; }
-	if ((x & 0x0001) == 0) { pos +=  1; }
-	return pos + 1;
-#endif
+	return x ? std::countr_zero(x) + 1 : 0;
+}
+
+// Cubic Hermite Interpolation:
+//   Given 4 points: (-1, y[0]), (0, y[1]), (1, y[2]), (2, y[3])
+//   Fit a polynomial:  f(x) = a*x^3 + b*x^2 + c*x + d
+//     which passes through the given points at x=0 and x=1
+//       f(0) = y[0]
+//       f(1) = y[1]
+//     and which has specific derivatives at x=0 and x=1
+//       f'(0) = (y[1] - y[-1]) / 2
+//       f'(1) = (y[2] - y[ 0]) / 2
+//   Then evaluate this polynomial at the given x-position (x in [0, 1]).
+// For more details see:
+//   https://en.wikipedia.org/wiki/Cubic_Hermite_spline
+//   https://www.paulinternet.nl/?page=bicubic
+[[nodiscard]] constexpr float cubicHermite(std::span<const float, 4> y, float x)
+{
+	assert(0.0f <= x); assert(x <= 1.0f);
+	float a = -0.5f*y[0] + 1.5f*y[1] - 1.5f*y[2] + 0.5f*y[3];
+	float b =       y[0] - 2.5f*y[1] + 2.0f*y[2] - 0.5f*y[3];
+	float c = -0.5f*y[0]             + 0.5f*y[2];
+	float d =                   y[1];
+	float x2 = x * x;
+	float x3 = x * x2;
+	return a*x3 + b*x2 + c*x + d;
+}
+
+/** Divide one integer by another, rounding towards minus infinity.
+  * The normal C/C++ division rounds towards zero.
+  * Based on this article:
+  *   http://www.microhowto.info/howto/round_towards_minus_infinity_when_dividing_integers_in_c_or_c++.html
+  */
+struct QuotientRemainder {
+    int quotient;
+    int remainder;
+};
+constexpr QuotientRemainder div_mod_floor(int dividend, int divisor) {
+    int q = dividend / divisor;
+    int r = dividend % divisor;
+    if ((r != 0) && ((r < 0) != (divisor < 0))) {
+        --q;
+        r += divisor;
+    }
+    return {q, r};
+}
+constexpr int div_floor(int dividend, int divisor) {
+    return div_mod_floor(dividend, divisor).quotient;
+}
+constexpr int mod_floor(int dividend, int divisor) {
+    return div_mod_floor(dividend, divisor).remainder;
 }
 
 } // namespace Math

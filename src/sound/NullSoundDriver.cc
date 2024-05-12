@@ -20,7 +20,7 @@ unsigned NullSoundDriver::getSamples() const
 	return 0;
 }
 
-void NullSoundDriver::uploadBuffer(int16_t* /*buffer*/, unsigned /*len*/)
+void NullSoundDriver::uploadBuffer(std::span<const StereoFloat> /*buffer*/)
 {
 }
 

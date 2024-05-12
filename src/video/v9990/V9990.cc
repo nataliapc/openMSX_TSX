@@ -1,25 +1,25 @@
 #include "V9990.hh"
 #include "Display.hh"
 #include "RendererFactory.hh"
-#include "V9990VRAM.hh"
-#include "V9990CmdEngine.hh"
 #include "V9990Renderer.hh"
 #include "Reactor.hh"
+#include "narrow.hh"
 #include "serialize.hh"
 #include "unreachable.hh"
+#include "xrange.hh"
+#include <array>
 #include <cassert>
-#include <cstring>
 #include <memory>
 
 namespace openmsx {
 
-static const byte ALLOW_READ  = 1;
-static const byte ALLOW_WRITE = 2;
-static const byte NO_ACCESS = 0;
-static const byte RD_ONLY   = ALLOW_READ;
-static const byte WR_ONLY   = ALLOW_WRITE;
-static const byte RD_WR     = ALLOW_READ | ALLOW_WRITE;
-static const byte regAccess[64] = {
+static constexpr byte ALLOW_READ  = 1;
+static constexpr byte ALLOW_WRITE = 2;
+static constexpr byte NO_ACCESS = 0;
+static constexpr byte RD_ONLY   = ALLOW_READ;
+static constexpr byte WR_ONLY   = ALLOW_WRITE;
+static constexpr byte RD_WR     = ALLOW_READ | ALLOW_WRITE;
+static constexpr std::array<byte, 64> regAccess = {
 	WR_ONLY, WR_ONLY, WR_ONLY,          // VRAM Write Address
 	WR_ONLY, WR_ONLY, WR_ONLY,          // VRAM Read Address
 	RD_WR, RD_WR,                       // Screen Mode
@@ -31,7 +31,7 @@ static const byte regAccess[64] = {
 	RD_WR,                              // Display Adjust
 	RD_WR, RD_WR, RD_WR, RD_WR,         // Scroll Control A
 	RD_WR, RD_WR, RD_WR, RD_WR,         // Scroll Control B
-	RD_WR,                              // Sprite Pattern Table Adress
+	RD_WR,                              // Sprite Pattern Table Address
 	RD_WR,                              // LCD Control
 	RD_WR,                              // Priority Control
 	WR_ONLY,                            // Sprite Palette Control
@@ -58,45 +58,44 @@ V9990::V9990(const DeviceConfig& config)
 	, syncVScan(*this)
 	, syncHScan(*this)
 	, syncSetMode(*this)
+	, syncCmdEnd(*this)
 	, v9990RegDebug(*this)
 	, v9990PalDebug(*this)
 	, irq(getMotherBoard(), getName() + ".IRQ")
 	, display(getReactor().getDisplay())
+	, invalidRegisterReadCallback(getCommandController(),
+		tmpStrCat(getName(), "_invalid_register_read_callback"),
+		"Tcl proc to call when a write-only register was read from. "
+		"Input: register number (0-63)",
+                {}, Setting::SAVE)
+	, invalidRegisterWriteCallback(getCommandController(),
+		tmpStrCat(getName(), "_invalid_register_write_callback"),
+		"Tcl proc to call when a read-only register was written to. "
+		"Input: register number (0-63), 8-bit data",
+		{}, Setting::SAVE)
+	, vram(*this, getCurrentTime())
+	, cmdEngine(*this, getCurrentTime(), display.getRenderSettings())
 	, frameStartTime(getCurrentTime())
 	, hScanSyncTime(getCurrentTime())
-	, pendingIRQs(0)
-	, externalVideoSource(false)
 {
 	// clear regs TODO find realistic init values
-	memset(regs, 0, sizeof(regs));
-	calcDisplayMode();
+	setDisplayMode(calcDisplayMode());
 
 	// initialize palette
-	for (int i = 0; i < 64; ++i) {
+	for (auto i : xrange(64)) {
 		palette[4 * i + 0] = 0x9F;
 		palette[4 * i + 1] = 0x1F;
 		palette[4 * i + 2] = 0x1F;
 		palette[4 * i + 3] = 0x00;
 	}
 
-	// create VRAM
-	EmuTime::param time = getCurrentTime();
-	vram = std::make_unique<V9990VRAM>(*this, time);
-
-	// create Command Engine
-	cmdEngine = std::make_unique<V9990CmdEngine>(
-		*this, time, display.getRenderSettings());
-	vram->setCmdEngine(*cmdEngine);
+	vram.setCmdEngine(cmdEngine);
 
 	// Start with NTSC timing
-	palTiming = false;
-	interlaced = false;
 	setVerticalTiming();
 
 	// Initialise rendering system
-	isDisplayArea = false;
-	displayEnabled = false; // avoid UMR (used by createRenderer())
-	superimposing  = false; // avoid UMR
+	EmuTime::param time = getCurrentTime();
 	createRenderer(time);
 
 	powerUp(time);
@@ -119,7 +118,7 @@ PostProcessor* V9990::getPostProcessor() const
 
 void V9990::powerUp(EmuTime::param time)
 {
-	vram->clear();
+	vram.clear();
 	reset(time);
 }
 
@@ -130,16 +129,17 @@ void V9990::reset(EmuTime::param time)
 	syncVScan       .removeSyncPoint();
 	syncHScan       .removeSyncPoint();
 	syncSetMode     .removeSyncPoint();
+	syncCmdEnd      .removeSyncPoint();
 
 	// Clear registers / ports
-	memset(regs, 0, sizeof(regs));
+	ranges::fill(regs, 0);
 	status = 0;
 	regSelect = 0xFF; // TODO check value for power-on and reset
 	vramWritePtr = 0;
 	vramReadPtr = 0;
 	vramReadBuffer = 0;
 	systemReset = false; // verified on real MSX
-	calcDisplayMode();
+	setDisplayMode(calcDisplayMode());
 
 	isDisplayArea = false;
 	displayEnabled = false;
@@ -150,9 +150,9 @@ void V9990::reset(EmuTime::param time)
 
 	palTiming = false;
 	// Reset sub-systems
-	cmdEngine->sync(time);
+	cmdEngine.sync(time);
 	renderer->reset(time);
-	cmdEngine->reset(time);
+	cmdEngine.reset(time);
 
 	// Init scheduling
 	frameStart(time);
@@ -163,26 +163,25 @@ byte V9990::readIO(word port, EmuTime::param time)
 	port &= 0x0F;
 
 	// calculate return value (mostly uses peekIO)
-	byte result;
-	switch (port) {
-	case COMMAND_DATA:
-		result = cmdEngine->getCmdData(time);
-		break;
-
-	case VRAM_DATA:
-	case PALETTE_DATA:
-	case REGISTER_DATA:
-	case INTERRUPT_FLAG:
-	case STATUS:
-	case KANJI_ROM_0:
-	case KANJI_ROM_1:
-	case KANJI_ROM_2:
-	case KANJI_ROM_3:
-	case REGISTER_SELECT:
-	case SYSTEM_CONTROL:
-	default:
-		result = peekIO(port, time);
-	}
+	byte result = [&] {
+		switch (port) {
+		case COMMAND_DATA:
+			return cmdEngine.getCmdData(time);
+		case VRAM_DATA:
+		case PALETTE_DATA:
+		case REGISTER_DATA:
+		case INTERRUPT_FLAG:
+		case STATUS:
+		case KANJI_ROM_0:
+		case KANJI_ROM_1:
+		case KANJI_ROM_2:
+		case KANJI_ROM_3:
+		case REGISTER_SELECT:
+		case SYSTEM_CONTROL:
+		default:
+			return peekIO(port, time);
+		}
+	}();
 	// TODO verify this, especially REGISTER_DATA
 	if (systemReset) return result; // no side-effects
 
@@ -193,7 +192,7 @@ byte V9990::readIO(word port, EmuTime::param time)
 			vramReadPtr = getVRAMAddr(VRAM_READ_ADDRESS_0) + 1;
 			setVRAMAddr(VRAM_READ_ADDRESS_0, vramReadPtr);
 			// Update read buffer. TODO: timing?
-			vramReadBuffer = vram->readVRAMCPU(vramReadPtr, time);
+			vramReadBuffer = vram.readVRAMCPU(vramReadPtr, time);
 		}
 		break;
 
@@ -222,31 +221,25 @@ byte V9990::readIO(word port, EmuTime::param time)
 
 byte V9990::peekIO(word port, EmuTime::param time) const
 {
-	byte result;
 	switch (port & 0x0F) {
 	case VRAM_DATA: {
 		// TODO in 'systemReset' mode, this seems to hang the MSX
 		// V9990 fetches from read buffer instead of directly from VRAM.
 		// The read buffer is the reason why it is impossible to fill
 		// vram by copying a block from "addr" to "addr+1".
-		result = vramReadBuffer;
-		break;
+		return vramReadBuffer;
 	}
 	case PALETTE_DATA:
-		result = palette[regs[PALETTE_POINTER]];
-		break;
+		return palette[regs[PALETTE_POINTER]];
 
 	case COMMAND_DATA:
-		result = cmdEngine->peekCmdData(time);
-		break;
+		return cmdEngine.peekCmdData(time);
 
 	case REGISTER_DATA:
-		result = readRegister(regSelect & 0x3F, time);
-		break;
+		return readRegister(regSelect & 0x3F, time);
 
 	case INTERRUPT_FLAG:
-		result = pendingIRQs;
-		break;
+		return pendingIRQs;
 
 	case STATUS: {
 		unsigned left   = getLeftBorder();
@@ -259,17 +252,15 @@ byte V9990::peekIO(word port, EmuTime::param time) const
 		bool hr = (x < left) || (right  <= x);
 		bool vr = (y < top)  || (bottom <= y);
 
-		result = cmdEngine->getStatus(time) |
-		         (vr ? 0x40 : 0x00) |
-		         (hr ? 0x20 : 0x00) |
-		         (status & 0x06);
-		break;
+		return cmdEngine.getStatus(time) |
+		       (vr ? 0x40 : 0x00) |
+		       (hr ? 0x20 : 0x00) |
+		       (status & 0x06);
 	}
 	case KANJI_ROM_1:
 	case KANJI_ROM_3:
 		// not used in Gfx9000
-		result = 0xFF; // TODO check
-		break;
+		return 0xFF; // TODO check
 
 	case REGISTER_SELECT:
 	case SYSTEM_CONTROL:
@@ -277,10 +268,8 @@ byte V9990::peekIO(word port, EmuTime::param time) const
 	case KANJI_ROM_2:
 	default:
 		// write-only
-		result = 0xFF;
-		break;
+		return 0xFF;
 	}
-	return result;
 }
 
 void V9990::writeIO(word port, byte val, EmuTime::param time)
@@ -296,7 +285,7 @@ void V9990::writeIO(word port, byte val, EmuTime::param time)
 				return;
 			}
 			unsigned addr = getVRAMAddr(VRAM_WRITE_ADDRESS_0);
-			vram->writeVRAMCPU(addr, val, time);
+			vram.writeVRAMCPU(addr, val, time);
 			if (!(regs[VRAM_WRITE_ADDRESS_2] & 0x80)) {
 				setVRAMAddr(VRAM_WRITE_ADDRESS_0, addr + 1);
 			}
@@ -324,7 +313,7 @@ void V9990::writeIO(word port, byte val, EmuTime::param time)
 			// systemReset state doesn't matter:
 			//   command below has no effect in systemReset mode
 			//assert(cmdEngine);
-			cmdEngine->setCmdData(val, time);
+			cmdEngine.setCmdData(val, time);
 			break;
 
 		case REGISTER_DATA: {
@@ -375,17 +364,17 @@ void V9990::writeIO(word port, byte val, EmuTime::param time)
 		case SYSTEM_CONTROL: {
 			// TODO investigate: does switching overscan mode
 			//      happen at next line or next frame
-			status = (status & 0xFB) | ((val & 1) << 2);
+			status = byte((status & 0xFB) | ((val & 1) << 2));
 			syncAtNextLine(syncSetMode, time);
 
-			bool newSystemReset = (val & 2) != 0;
-			if (newSystemReset != systemReset) {
+			if (bool newSystemReset = (val & 2) != 0;
+			    newSystemReset != systemReset) {
 				systemReset = newSystemReset;
 				if (systemReset) {
 					// Enter systemReset mode
 					//   Verified on real MSX: palette data
 					//   and VRAM content are NOT reset.
-					for (int i = 0; i < 64; ++i) {
+					for (auto i : xrange(byte(64))) {
 						writeRegister(i, 0, time);
 					}
 					// TODO verify IRQ behaviour
@@ -446,21 +435,38 @@ void V9990::execHScan()
 
 void V9990::execSetMode(EmuTime::param time)
 {
-	calcDisplayMode();
-	renderer->setDisplayMode(getDisplayMode(), time);
+	auto newMode = calcDisplayMode();
+	renderer->setDisplayMode(newMode, time);
 	renderer->setColorMode(getColorMode(), time);
+	setDisplayMode(newMode);
+}
+
+void V9990::execCheckCmdEnd(EmuTime::param time)
+{
+	cmdEngine.sync(time);
+	scheduleCmdEnd(time); // in case of underestimation
+}
+
+void V9990::scheduleCmdEnd(EmuTime::param time)
+{
+	if (regs[INTERRUPT_0] & 4) {
+		auto next = cmdEngine.estimateCmdEnd();
+		if (next > time) {
+			syncCmdEnd.setSyncPoint(next);
+		}
+	}
 }
 
 // -------------------------------------------------------------------------
 // VideoSystemChangeListener
 // -------------------------------------------------------------------------
 
-void V9990::preVideoSystemChange()
+void V9990::preVideoSystemChange() noexcept
 {
 	renderer.reset();
 }
 
-void V9990::postVideoSystemChange()
+void V9990::postVideoSystemChange() noexcept
 {
 	EmuTime::param time = getCurrentTime();
 	createRenderer(time);
@@ -471,7 +477,7 @@ void V9990::postVideoSystemChange()
 // RegDebug
 // -------------------------------------------------------------------------
 
-V9990::RegDebug::RegDebug(V9990& v9990_)
+V9990::RegDebug::RegDebug(const V9990& v9990_)
 	: SimpleDebuggable(v9990_.getMotherBoard(),
 	                   v9990_.getName() + " regs", "V9990 registers", 0x40)
 {
@@ -486,14 +492,14 @@ byte V9990::RegDebug::read(unsigned address)
 void V9990::RegDebug::write(unsigned address, byte value, EmuTime::param time)
 {
 	auto& v9990 = OUTER(V9990, v9990RegDebug);
-	v9990.writeRegister(address, value, time);
+	v9990.writeRegister(narrow<byte>(address), value, time);
 }
 
 // -------------------------------------------------------------------------
 // PalDebug
 // -------------------------------------------------------------------------
 
-V9990::PalDebug::PalDebug(V9990& v9990_)
+V9990::PalDebug::PalDebug(const V9990& v9990_)
 	: SimpleDebuggable(v9990_.getMotherBoard(),
 	                   v9990_.getName() + " palette",
 	                   "V9990 palette (format is R, G, B, 0).", 0x100)
@@ -509,7 +515,7 @@ byte V9990::PalDebug::read(unsigned address)
 void V9990::PalDebug::write(unsigned address, byte value, EmuTime::param time)
 {
 	auto& v9990 = OUTER(V9990, v9990PalDebug);
-	v9990.writePaletteRegister(address, value, time);
+	v9990.writePaletteRegister(narrow<byte>(address), value, time);
 }
 
 // -------------------------------------------------------------------------
@@ -537,22 +543,22 @@ byte V9990::readRegister(byte reg, EmuTime::param time) const
 	if (systemReset) return 255; // verified on real MSX
 
 	assert(reg < 64);
-	byte result;
 	if (regAccess[reg] & ALLOW_READ) {
 		if (reg < CMD_PARAM_BORDER_X_0) {
-			result = regs[reg];
+			return regs[reg];
 		} else {
-			word borderX = cmdEngine->getBorderX(time);
-			result = (reg == CMD_PARAM_BORDER_X_0)
-			       ? (borderX & 0xFF) : (borderX >> 8);
+			word borderX = cmdEngine.getBorderX(time);
+			return (reg == CMD_PARAM_BORDER_X_0)
+			       ? narrow_cast<byte>(borderX & 0xFF)
+			       : narrow_cast<byte>(borderX >> 8);
 		}
 	} else {
-		result = 0xFF;
+		invalidRegisterReadCallback.execute(reg);
+		return 0xFF;
 	}
-	return result;
 }
 
-void V9990::syncAtNextLine(SyncBase& type, EmuTime::param time)
+void V9990::syncAtNextLine(SyncBase& type, EmuTime::param time) const
 {
 	int line = getUCTicksThisFrame(time) / V9990DisplayTiming::UC_TICKS_PER_LINE;
 	int ticks = (line + 1) * V9990DisplayTiming::UC_TICKS_PER_LINE;
@@ -564,7 +570,7 @@ void V9990::writeRegister(byte reg, byte val, EmuTime::param time)
 {
 	// Found this table by writing 0xFF to a register and reading
 	// back the value (only works for read/write registers)
-	static const byte regWriteMask[32] = {
+	static constexpr std::array<byte, 32> regWriteMask = {
 		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
 		0xFF, 0x87, 0xFF, 0x83, 0x0F, 0xFF, 0xFF, 0xFF,
 		0xFF, 0xFF, 0xDF, 0x07, 0xFF, 0xFF, 0xC1, 0x07,
@@ -574,10 +580,14 @@ void V9990::writeRegister(byte reg, byte val, EmuTime::param time)
 	assert(reg < 64);
 	if (!(regAccess[reg] & ALLOW_WRITE)) {
 		// register not writable
+		invalidRegisterWriteCallback.execute(reg, val);
 		return;
 	}
 	if (reg >= CMD_PARAM_SRC_ADDRESS_0) {
-		cmdEngine->setCmdReg(reg, val, time);
+		cmdEngine.setCmdReg(reg, val, time);
+		if (reg == CMD_PARAM_OPCODE) {
+			scheduleCmdEnd(time);
+		}
 		return;
 	}
 
@@ -633,10 +643,17 @@ void V9990::writeRegister(byte reg, byte val, EmuTime::param time)
 			// write pointer is only updated on R#5 write
 			vramReadPtr = getVRAMAddr(VRAM_READ_ADDRESS_0);
 			// update read buffer immediately after read pointer changes. TODO: timing?
-			vramReadBuffer = vram->readVRAMCPU(vramReadPtr, time);
+			vramReadBuffer = vram.readVRAMCPU(vramReadPtr, time);
+			break;
+		case SCREEN_MODE_0:
+		case SCREEN_MODE_1:
+		case CONTROL:
+			// These influence the command timing
+			scheduleCmdEnd(time);
 			break;
 		case INTERRUPT_0:
 			irq.set((pendingIRQs & val) != 0);
+			scheduleCmdEnd(time);
 			break;
 		case INTERRUPT_1:
 		case INTERRUPT_2:
@@ -665,12 +682,13 @@ void V9990::writePaletteRegister(byte reg, byte val, EmuTime::param time)
 	}
 }
 
-void V9990::getPalette(int index, byte& r, byte& g, byte& b, bool& ys) const
+V9990::GetPaletteResult V9990::getPalette(int index) const
 {
-	r = palette[4 * index + 0] & 0x1F;
-	g = palette[4 * index + 1];
-	b = palette[4 * index + 2];
-	ys = isSuperimposing() && (palette[4 * index + 0] & 0x80);
+	byte r = palette[4 * index + 0] & 0x1F;
+	byte g = palette[4 * index + 1];
+	byte b = palette[4 * index + 2];
+	bool ys = isSuperimposing() && (palette[4 * index + 0] & 0x80);
+	return {r, g, b, ys};
 }
 
 void V9990::createRenderer(EmuTime::param time)
@@ -691,8 +709,8 @@ void V9990::frameStart(EmuTime::param time)
 	setVerticalTiming();
 	status ^= 0x02; // flip EO bit
 
-	bool newSuperimposing = (regs[CONTROL] & 0x20) && externalVideoSource;
-	if (superimposing != newSuperimposing) {
+	if (bool newSuperimposing = (regs[CONTROL] & 0x20) && externalVideoSource;
+	    superimposing != newSuperimposing) {
 		superimposing = newSuperimposing;
 		renderer->updateSuperimposing(superimposing, time);
 	}
@@ -760,31 +778,24 @@ void V9990::setVerticalTiming()
 
 V9990ColorMode V9990::getColorMode(byte pal_ctrl) const
 {
-	V9990ColorMode cm = INVALID_COLOR_MODE;
-
 	if (!(regs[SCREEN_MODE_0] & 0x80)) {
-		cm = BP4;
+		return BP4;
 	} else {
 		switch (regs[SCREEN_MODE_0] & 0x03) {
-			case 0x00: cm = BP2; break;
-			case 0x01: cm = BP4; break;
+			case 0x00: return BP2;
+			case 0x01: return BP4;
 			case 0x02:
 				switch (pal_ctrl & 0xC0) {
-					case 0x00: cm = BP6; break;
-					case 0x40: cm = BD8; break;
-					case 0x80: cm = BYJK; break;
-					case 0xC0: cm = BYUV; break;
-					default: UNREACHABLE;
+					case 0x00: return BP6;
+					case 0x40: return BD8;
+					case 0x80: return BYJK;
+					case 0xC0: return BYUV;
 				}
 				break;
-			case 0x03: cm = BD16; break;
-			default: UNREACHABLE;
+			case 0x03: return BD16;
 		}
 	}
-
-	// TODO Check
-	if (cm == INVALID_COLOR_MODE) cm = BP4;
-	return cm;
+	UNREACHABLE;
 }
 
 V9990ColorMode V9990::getColorMode() const
@@ -792,42 +803,36 @@ V9990ColorMode V9990::getColorMode() const
 	return getColorMode(regs[PALETTE_CONTROL]);
 }
 
-void V9990::calcDisplayMode()
+V9990DisplayMode V9990::calcDisplayMode() const
 {
-	mode = INVALID_DISPLAY_MODE;
 	switch (regs[SCREEN_MODE_0] & 0xC0) {
 		case 0x00:
-			mode = P1;
-			break;
+			return P1;
 		case 0x40:
-			mode = P2;
-			break;
+			return P2;
 		case 0x80:
-			if(status & 0x04) { // MCLK timing
+			if (status & 0x04) { // MCLK timing
 				switch(regs[SCREEN_MODE_0] & 0x30) {
-				case 0x00: mode = B0; break;
-				case 0x10: mode = B2; break;
-				case 0x20: mode = B4; break;
-				case 0x30: mode = INVALID_DISPLAY_MODE; break;
-				default: UNREACHABLE;
+					case 0x00: return B0;
+					case 0x10: return B2;
+					case 0x20: return B4;
 				}
 			} else { // XTAL1 timing
 				switch(regs[SCREEN_MODE_0] & 0x30) {
-				case 0x00: mode = B1; break;
-				case 0x10: mode = B3; break;
-				case 0x20: mode = B7; break;
-				case 0x30: mode = INVALID_DISPLAY_MODE; break;
+					case 0x00: return B1;
+					case 0x10: return B3;
+					case 0x20: return B7;
 				}
 			}
 			break;
-		case 0xC0:
-			mode = INVALID_DISPLAY_MODE;
-			break;
 	}
+	// invalid display mode
+	return P1; // TODO Check
+}
 
-	// TODO Check
-	if (mode == INVALID_DISPLAY_MODE) mode = P1;
-
+void V9990::setDisplayMode(V9990DisplayMode newMode)
+{
+	mode = newMode;
 	setHorizontalTiming();
 }
 
@@ -844,16 +849,17 @@ void V9990::scheduleHscan(EmuTime::param time)
 		return;
 	}
 
-	int ticks = frameStartTime.getTicksTill_fast(time);
-	int offset;
-	if (regs[INTERRUPT_2] & 0x80) {
-		// every line
-		offset = ticks - (ticks % V9990DisplayTiming::UC_TICKS_PER_LINE);
-	} else {
-		int line = regs[INTERRUPT_1] + 256 * (regs[INTERRUPT_2] & 3) +
-		           getTopBorder();
-		offset = line * V9990DisplayTiming::UC_TICKS_PER_LINE;
-	}
+	int ticks = narrow<int>(frameStartTime.getTicksTill_fast(time));
+	int offset = [&] {
+		if (regs[INTERRUPT_2] & 0x80) {
+			// every line
+			return ticks - (ticks % V9990DisplayTiming::UC_TICKS_PER_LINE);
+		} else {
+			int line = regs[INTERRUPT_1] + 256 * (regs[INTERRUPT_2] & 3) +
+				   getTopBorder();
+			return line * V9990DisplayTiming::UC_TICKS_PER_LINE;
+		}
+	}();
 	int mult = (status & 0x04) ? 3 : 2; // MCLK / XTAL1
 	offset += (regs[INTERRUPT_3] & 0x0F) * 64 * mult;
 	if (offset <= ticks) {
@@ -864,7 +870,7 @@ void V9990::scheduleHscan(EmuTime::param time)
 	syncHScan.setSyncPoint(hScanSyncTime);
 }
 
-static std::initializer_list<enum_string<V9990DisplayMode>> displayModeInfo = {
+static constexpr std::initializer_list<enum_string<V9990DisplayMode>> displayModeInfo = {
 	{ "INVALID", INVALID_DISPLAY_MODE },
 	{ "P1", P1 }, { "P2", P2 },
 	{ "B0", B0 }, { "B1", B1 }, { "B2", B2 }, { "B3", B3 },
@@ -876,40 +882,44 @@ SERIALIZE_ENUM(V9990DisplayMode, displayModeInfo);
 // version 2: added systemReset
 // version 3: added vramReadPtr, vramWritePtr, vramReadBuffer
 // version 4: removed 'userData' from Schedulable
+// version 5: added syncCmdEnd
 template<typename Archive>
 void V9990::serialize(Archive& ar, unsigned version)
 {
 	ar.template serializeBase<MSXDevice>(*this);
 
 	if (ar.versionAtLeast(version, 4)) {
-		ar.serialize("syncVSync",        syncVSync);
-		ar.serialize("syncDisplayStart", syncDisplayStart);
-		ar.serialize("syncVScan",        syncVScan);
-		ar.serialize("syncHScan",        syncHScan);
-		ar.serialize("syncSetMode",      syncSetMode);
+		ar.serialize("syncVSync",        syncVSync,
+		             "syncDisplayStart", syncDisplayStart,
+		             "syncVScan",        syncVScan,
+		             "syncHScan",        syncHScan,
+		             "syncSetMode",      syncSetMode);
 	} else {
 		Schedulable::restoreOld(ar,
 			{&syncVSync, &syncDisplayStart, &syncVScan,
 			 &syncHScan, &syncSetMode});
 	}
+	if (ar.versionAtLeast(version, 5)) {
+		ar.serialize("syncCmdEnd", syncCmdEnd);
+	}
 
-	ar.serialize("vram", *vram);
 	ar.serialize("displayMode", mode); // must be deserialized before cmdEngine (because it's used to restore some derived state in cmdEngine)
-	ar.serialize("cmdEngine", *cmdEngine);
-	ar.serialize("irq", irq);
-	ar.serialize("frameStartTime", frameStartTime);
-	ar.serialize("hScanSyncTime", hScanSyncTime);
-	ar.serialize_blob("palette", palette, sizeof(palette));
-	ar.serialize("status", status);
-	ar.serialize("pendingIRQs", pendingIRQs);
-	ar.serialize_blob("registers", regs, sizeof(regs));
-	ar.serialize("regSelect", regSelect);
-	ar.serialize("palTiming", palTiming);
-	ar.serialize("interlaced", interlaced);
-	ar.serialize("isDisplayArea", isDisplayArea);
-	ar.serialize("displayEnabled", displayEnabled);
-	ar.serialize("scrollAYHigh", scrollAYHigh);
-	ar.serialize("scrollBYHigh", scrollBYHigh);
+	ar.serialize("vram",           vram,
+	             "cmdEngine",      cmdEngine,
+	             "irq",            irq,
+	             "frameStartTime", frameStartTime,
+	             "hScanSyncTime",  hScanSyncTime);
+	ar.serialize_blob("palette", palette);
+	ar.serialize("status",      status,
+	             "pendingIRQs", pendingIRQs);
+	ar.serialize_blob("registers", regs);
+	ar.serialize("regSelect",      regSelect,
+	             "palTiming",      palTiming,
+	             "interlaced",     interlaced,
+	             "isDisplayArea",  isDisplayArea,
+	             "displayEnabled", displayEnabled,
+	             "scrollAYHigh",   scrollAYHigh,
+	             "scrollBYHigh",   scrollBYHigh);
 
 	if (ar.versionBelow(version, 2)) {
 		systemReset = false;
@@ -920,11 +930,11 @@ void V9990::serialize(Archive& ar, unsigned version)
 	if (ar.versionBelow(version, 3)) {
 		vramReadPtr = getVRAMAddr(VRAM_READ_ADDRESS_0);
 		vramWritePtr = getVRAMAddr(VRAM_WRITE_ADDRESS_0);
-		vramReadBuffer = vram->readVRAMCPU(vramReadPtr, getCurrentTime());
+		vramReadBuffer = vram.readVRAMCPU(vramReadPtr, getCurrentTime());
 	} else {
-		ar.serialize("vramReadPtr", vramReadPtr);
-		ar.serialize("vramWritePtr", vramWritePtr);
-		ar.serialize("vramReadBuffer", vramReadBuffer);
+		ar.serialize("vramReadPtr",    vramReadPtr,
+		             "vramWritePtr",   vramWritePtr,
+		             "vramReadBuffer", vramReadBuffer);
 	}
 
 	// No need to serialize 'externalVideoSource', it will be restored when
@@ -934,7 +944,7 @@ void V9990::serialize(Archive& ar, unsigned version)
 	// of this frame). But it will be correct at the start of the next
 	// frame. Good enough?
 
-	if (ar.isLoader()) {
+	if constexpr (Archive::IS_LOADER) {
 		// TODO This uses 'mode' to calculate 'horTiming' and
 		//      'verTiming'. Are these always in sync? Or can for
 		//      example one change at any time and the other only

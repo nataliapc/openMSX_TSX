@@ -14,9 +14,9 @@
  *  Only the direct access device is supported now.
  *  Message system might be imperfect.
  *
- *  NOTE: this version only supports a non-removable harddisk, as the class
+ *  NOTE: this version only supports a non-removable hard disk, as the class
  *  name suggests. Refer to revision 6526 of this file to see what was removed
- *  from the generic/parameterised code.
+ *  from the generic/parameterized code.
  */
 
 #include "SCSIHD.hh"
@@ -26,7 +26,10 @@
 #include "MSXMotherBoard.hh"
 #include "DeviceConfig.hh"
 #include "endian.hh"
+#include "narrow.hh"
+#include "one_of.hh"
 #include "serialize.hh"
+#include "xrange.hh"
 #include <algorithm>
 #include <cstring>
 
@@ -35,44 +38,46 @@ using std::string;
 namespace openmsx {
 
 // Medium type (value like LS-120)
-static const byte MT_UNKNOWN   = 0x00;
-static const byte MT_2DD_UN    = 0x10;
-static const byte MT_2DD       = 0x11;
-static const byte MT_2HD_UN    = 0x20;
-static const byte MT_2HD_12_98 = 0x22;
-static const byte MT_2HD_12    = 0x23;
-static const byte MT_2HD_144   = 0x24;
-static const byte MT_LS120     = 0x31;
-static const byte MT_NO_DISK   = 0x70;
-static const byte MT_DOOR_OPEN = 0x71;
-static const byte MT_FMT_ERROR = 0x72;
+static constexpr uint8_t MT_UNKNOWN   = 0x00;
+static constexpr uint8_t MT_2DD_UN    = 0x10;
+static constexpr uint8_t MT_2DD       = 0x11;
+static constexpr uint8_t MT_2HD_UN    = 0x20;
+static constexpr uint8_t MT_2HD_12_98 = 0x22;
+static constexpr uint8_t MT_2HD_12    = 0x23;
+static constexpr uint8_t MT_2HD_144   = 0x24;
+static constexpr uint8_t MT_LS120     = 0x31;
+static constexpr uint8_t MT_NO_DISK   = 0x70;
+static constexpr uint8_t MT_DOOR_OPEN = 0x71;
+static constexpr uint8_t MT_FMT_ERROR = 0x72;
 
-static const byte inqdata[36] = {
+static constexpr std::array<uint8_t, 36> inqData = {
 	  0,   // bit5-0 device type code.
 	  0,   // bit7 = 1 removable device
 	  2,   // bit7,6 ISO version. bit5,4,3 ECMA version.
 	       // bit2,1,0 ANSI Version (001=SCSI1, 010=SCSI2)
 	  2,   // bit7 AENC. bit6 TrmIOP.
 	       // bit3-0 Response Data Format. (0000=SCSI1, 0001=CCS, 0010=SCSI2)
-	 51,   // addtional length
+	 51,   // additional length
 	  0, 0,// reserved
 	  0,   // bit7 RelAdr, bit6 WBus32, bit5 Wbus16, bit4 Sync, bit3 Linked,
-	       // bit2 reseved bit1 CmdQue, bit0 SftRe
+	       // bit2 reserved bit1 CmdQue, bit0 SftRe
 	'o', 'p', 'e', 'n', 'M', 'S', 'X', ' ',    // vendor ID (8bytes)
 	'S', 'C', 'S', 'I', '2', ' ', 'H', 'a',    // product ID (16bytes)
 	'r', 'd', 'd', 'i', 's', 'k', ' ', ' ',
 	'0', '1', '0', 'a'                         // product version (ASCII 4bytes)
 };
 
-static const unsigned BUFFER_BLOCK_SIZE = SCSIHD::BUFFER_SIZE /
-                                          SectorAccessibleDisk::SECTOR_SIZE;
+static constexpr unsigned BUFFER_BLOCK_SIZE = SCSIHD::BUFFER_SIZE /
+                                              SectorAccessibleDisk::SECTOR_SIZE;
 
-SCSIHD::SCSIHD(const DeviceConfig& targetconfig,
+SCSIHD::SCSIHD(const DeviceConfig& targetConfig,
                AlignedBuffer& buf, unsigned mode_)
-	: HD(targetconfig)
+	: HD(targetConfig)
 	, buffer(buf)
 	, mode(mode_)
-	, scsiId(targetconfig.getAttributeAsInt("id"))
+	, scsiId(narrow_cast<uint8_t>(targetConfig.getAttributeValueAsInt("id", 0)))
+	, message(0)
+	, lun(0) // move to reset() ?
 {
 	reset();
 }
@@ -108,10 +113,9 @@ unsigned SCSIHD::inquiry()
 
 	if (length == 0) return 0;
 
-	memcpy(buffer + 2, inqdata + 2, 34);
-
 	buffer[0] = SCSI::DT_DirectAccess;
 	buffer[1] = 0; // removable
+	ranges::copy(subspan(inqData, 2), &buffer[2]);
 
 	if (!(mode & BIT_SCSI2)) {
 		buffer[2] = 1;
@@ -138,26 +142,26 @@ unsigned SCSIHD::inquiry()
 	}
 
 	if (length > 36) {
-		string imageName = FileOperations::getFilename(
-		                       getImageName().getOriginal()).str();
+		std::string imageName(FileOperations::getFilename(
+		                       getImageName().getOriginal()));
 		imageName.resize(20, ' ');
-		memcpy(buffer + 36, imageName.data(), 20);
+		ranges::copy(imageName, &buffer[36]);
 	}
 	return length;
 }
 
 unsigned SCSIHD::modeSense()
 {
-	byte* pBuffer = buffer;
+	uint8_t* pBuffer = buffer;
 	if ((currentLength > 0) && (cdb[2] == 3)) {
 		// TODO check for too many sectors
 		auto total       = unsigned(getNbSectors());
-		byte media       = MT_UNKNOWN;
-		byte sectors     = 64;
-		byte blockLength = SECTOR_SIZE >> 8;
-		byte tracks      = 8;
-		byte size        = 4 + 24;
-		byte removable   = 0x80; // == not removable
+		uint8_t media       = MT_UNKNOWN;
+		uint8_t sectors     = 64;
+		uint8_t blockLength = SECTOR_SIZE >> 8;
+		uint8_t tracks      = 8;
+		uint8_t size        = 4 + 24;
+		uint8_t removable   = 0x80; // == not removable
 
 		memset(pBuffer + 2, 0, 34);
 
@@ -167,7 +171,7 @@ unsigned SCSIHD::modeSense()
 
 		// Mode Parameter Header 4bytes
 		pBuffer[1] = media; // Medium Type
-		pBuffer[3] = 8;     // block descripter length
+		pBuffer[3] = 8;     // block descriptor length
 		pBuffer += 4;
 
 		// Disable Block Descriptor check
@@ -274,7 +278,7 @@ unsigned SCSIHD::readSectors(unsigned& blocks)
 	unsigned counter = currentLength * SECTOR_SIZE;
 
 	try {
-		for (unsigned i = 0; i < numSectors; ++i) {
+		for (auto i : xrange(numSectors)) {
 			auto* sbuf = aligned_cast<SectorBuffer*>(buffer);
 			readSector(currentSector, sbuf[i]);
 			++currentSector;
@@ -308,8 +312,8 @@ unsigned SCSIHD::writeSectors(unsigned& blocks)
 	unsigned numSectors = std::min(currentLength, BUFFER_BLOCK_SIZE);
 
 	try {
-		for (unsigned i = 0; i < numSectors; ++i) {
-			auto* sbuf = aligned_cast<const SectorBuffer*>(buffer);
+		for (auto i : xrange(numSectors)) {
+			const auto* sbuf = aligned_cast<const SectorBuffer*>(buffer);
 			writeSector(currentSector, sbuf[i]);
 			++currentSector;
 			--currentLength;
@@ -351,21 +355,21 @@ void SCSIHD::formatUnit()
 	}
 }
 
-byte SCSIHD::getStatusCode()
+uint8_t SCSIHD::getStatusCode()
 {
 	return keycode ? SCSI::ST_CHECK_CONDITION : SCSI::ST_GOOD;
 }
 
-unsigned SCSIHD::executeCmd(const byte* cdb_, SCSI::Phase& phase, unsigned& blocks)
+unsigned SCSIHD::executeCmd(std::span<const uint8_t, 12> cdb_, SCSI::Phase& phase, unsigned& blocks)
 {
-	memcpy(cdb, cdb_, sizeof(cdb));
+	ranges::copy(cdb_, cdb);
 	message = 0;
 	phase = SCSI::STATUS;
 	blocks = 0;
 
 	// check unit attention
 	if (unitAttention && (mode & MODE_UNITATTENTION) &&
-	    (cdb[0] != SCSI::OP_INQUIRY) && (cdb[0] != SCSI::OP_REQUEST_SENSE)) {
+	    (cdb[0] != one_of(SCSI::OP_INQUIRY, SCSI::OP_REQUEST_SENSE))) {
 		unitAttention = false;
 		keycode = SCSI::SENSE_POWER_ON;
 		if (cdb[0] == SCSI::OP_TEST_UNIT_READY) {
@@ -441,7 +445,7 @@ unsigned SCSIHD::executeCmd(const byte* cdb_, SCSI::Phase& phase, unsigned& bloc
 		case SCSI::OP_SEEK6:
 			getMotherBoard().getLedStatus().setLed(LedStatus::FDD, true);
 			currentLength = 1;
-			checkAddress();
+			(void)checkAddress();
 			return 0;
 
 		case SCSI::OP_MODE_SENSE: {
@@ -502,7 +506,7 @@ unsigned SCSIHD::executeCmd(const byte* cdb_, SCSI::Phase& phase, unsigned& bloc
 		case SCSI::OP_SEEK10:
 			getMotherBoard().getLedStatus().setLed(LedStatus::FDD, true);
 			currentLength = 1;
-			checkAddress();
+			(void)checkAddress();
 			return 0;
 		}
 	}
@@ -519,9 +523,9 @@ unsigned SCSIHD::executingCmd(SCSI::Phase& phase, unsigned& blocks)
 	return 0; // Always for non-CD-ROM it seems
 }
 
-byte SCSIHD::msgIn()
+uint8_t SCSIHD::msgIn()
 {
-	byte result = message;
+	uint8_t result = message;
 	message = 0;
 	return result;
 }
@@ -531,11 +535,11 @@ scsiDeviceMsgOut()
 Notes:
     [out]
 	  -1: Busfree demand. (Please process it in the call origin.)
-	bit2: Status phase demand. Error happend.
+	bit2: Status phase demand. Error happened.
 	bit1: Make it to a busfree if ATN has not been released.
 	bit0: There is a message(MsgIn).
 */
-int SCSIHD::msgOut(byte value)
+int SCSIHD::msgOut(uint8_t value)
 {
 	if (value & 0x80) {
 		lun = value & 7;
@@ -549,7 +553,7 @@ int SCSIHD::msgOut(byte value)
 
 	case SCSI::MSG_BUS_DEVICE_RESET:
 		busReset();
-		// fall-through
+		[[fallthrough]];
 	case SCSI::MSG_ABORT:
 		return -1;
 
@@ -569,13 +573,13 @@ void SCSIHD::serialize(Archive& ar, unsigned /*version*/)
 	// don't serialize SCSIDevice, SectorAccessibleDisk, DiskContainer
 	// base classes
 	ar.template serializeBase<HD>(*this);
-	ar.serialize("keycode", keycode);
-	ar.serialize("currentSector", currentSector);
-	ar.serialize("currentLength", currentLength);
-	ar.serialize("unitAttention", unitAttention);
-	ar.serialize("message", message);
-	ar.serialize("lun", lun);
-	ar.serialize_blob("cdb", cdb, sizeof(cdb));
+	ar.serialize("keycode",       keycode,
+	             "currentSector", currentSector,
+	             "currentLength", currentLength,
+	             "unitAttention", unitAttention,
+	             "message",       message,
+	             "lun",           lun);
+	ar.serialize_blob("cdb", cdb);
 }
 INSTANTIATE_SERIALIZE_METHODS(SCSIHD);
 REGISTER_POLYMORPHIC_INITIALIZER(SCSIDevice, SCSIHD, "SCSIHD");

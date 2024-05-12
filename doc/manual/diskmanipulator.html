@@ -1,16 +1,13 @@
-<?xml version="1.0" encoding="iso-8859-1"?>
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
-    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
-
-<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<!DOCTYPE html>
+<html lang="en">
 <head>
+  <meta charset="utf-8">
   <link title="Purple" rel="stylesheet" href="manual-purple.css"
-  type="text/css" />
+  type="text/css">
   <link title="Minty" rel="alternate stylesheet" href=
-  "manual-minty.css" type="text/css" />
+  "manual-minty.css" type="text/css">
   <link title="Plain" rel="alternate stylesheet" href="manual.css"
-  type="text/css" />
-
+  type="text/css">
   <title>Using Diskmanipulator</title>
 </head>
 
@@ -21,7 +18,8 @@
   in openMSX. It implements the basic stuff needed to handle files
   and subdirectories on MSX media. It also helps one creating new disk
   image files, both simple 360 kB and 720 kB disks as well as
-  hard disk images containing up to 30 partitions of 32 MB each (only for Sunrise IDE!).
+  hard disk images containing partitions of 32 MB each for Sunrise IDE,
+  or up to 4 GB for Nextor.
   Creating disk images and manipulating the files on them can be
   done without the need of a running emulated MSX (<code>set power
   off</code>).</p>
@@ -47,7 +45,7 @@
   <p><code>&lt;command&gt;</code> specifies the action to be performed. The next section lists the commands available and explains them.</p>
 
   <p><code>&lt;disk name&gt;</code> specifies the disk to operate on. Typical values are: <code><a class="external" href="commands.html#disk">diska</a></code>, <code>diskb</code>, <code><a class="external" href="commands.html#hd">hda</a></code> or the special <code><a class="external" href="commands.html#disk">virtual_drive</a></code> device. <code>disk&lt;x&gt;</code> and <code>hd&lt;x&gt;</code> are the drives available to the running emulated MSX machine. This allows interaction with the currently used disk images.<br />
-  In case the disk contains a Sunrise IDE (or Beer IDE 1.9RC1) compatible partition table (FAT12 only!) you can add a partition number (from 1 till 31) to the disk name to specify on which partition the command will act. For example <code>hda2</code> is the second partition on the master IDE disk, <code>hdb3</code> is the third partition on the slave IDE disk.</p>
+  In case the disk contains a Sunrise IDE, Beer IDE 1.9RC1 or Nextor compatible partition table you can add a partition number (starting at 1) to the disk name to specify on which partition the command will act. For example <code>hda2</code> is the second partition on the master IDE disk, <code>hdb3</code> is the third partition on the slave IDE disk.</p>
 
   <p><code>&lt;command arguments&gt;</code> depend upon the command involved, see the detailed descriptions of the commands below.</p>
 
@@ -71,6 +69,8 @@
     <li><a class="internal" href="#import">import</a></li>
 
     <li><a class="internal" href="#mkdir">mkdir</a></li>
+
+    <li><a class="internal" href="#partition">partition</a></li>
 
     <li><a class="internal" href="#savedsk">savedsk</a></li>
   </ol>
@@ -103,7 +103,7 @@
   </div>
 
   <p><code>diskmanipulator create &lt;dskfilename&gt;
-  &lt;size|option&gt; &lt;size|option&gt; ...</code></p>
+  &lt;size|option&gt; [&lt;size|option&gt; ...]</code></p>
 
   <div class="subsectiontitle">
     explanation:
@@ -111,14 +111,19 @@
 
   <p>You can create new disk images using this command.</p>
 
-  <p>This new disk will be formatted using an MSX-DOS2 boot
-  sector, unless you specify the option <code>-dos1</code>.</p>
+  <p>This new disk will be formatted using an MSX-DOS2 boot sector by default,
+  an MSX-DOS boot sector if you specify the option <code>-dos1</code>,
+  or a Nextor boot sector if you specify the option <code>-nextor</code>.</p>
 
-  <p>You can specify multiple sizes in which case a Sunrise IDE compatible
-  partitioned image will be created (FAT12 only!), each partition will be
-  formatted as required. If a size of 360 kB or 720 kB is given, a normal
-  floppy disk image is created single or double sided, respectively. Any larger
-  value will result in a Sunrise IDE hard disk image.</p>
+  <p>If a size of 360 kB or 720 kB is given, a normal floppy disk image is
+  created, single or double sided respectively. Any larger value will result
+  in a Sunrise IDE hard disk image, or a Nextor one if the <code>-nextor</code>
+  option is specified.</p>
+
+  <p>You can specify multiple sizes in which case a Beer IDE 1.9, Sunrise IDE
+  or Nextor compatible partitioned image will be created, see
+  <code><a class="internal" href="#partition">partition</a></code> for more
+  information. Each partition will be formatted as required.</p>
 
   <p>You can specify the disk/partition sizes by using the
   following postfixes:</p>
@@ -172,7 +177,7 @@
     syntax:
   </div>
 
-  <p><code>diskmanipulator format &lt;disk name&gt;</code></p>
+  <p><code>diskmanipulator format &lt;disk name&gt; [&lt;size|option&gt;]</code></p>
 
   <div class="subsectiontitle">
     explanation:
@@ -180,7 +185,9 @@
 
   <p>The currently selected partition from <code>&lt;disk name&gt;</code> will
   be cleanly formatted with a MSX-DOS2 boot sector, unless the option
-  <code>-dos1</code> is specified.
+  <code>-dos1</code> is specified. If the <code>-nextor</code> option is
+  specified it will use the Nextor boot sector, and use FAT16 if the size is
+  larger than 32 MB.
   FAT and directory sectors will be correctly initialised.
   Any data on the disk image / partition is lost!</p>
 
@@ -251,6 +258,40 @@
     syntax:
   </div>
 
+  <p><code>diskmanipulator partition &lt;disk name&gt;
+    [&lt;size|option&gt; ...]</code></p>
+  
+    <div class="subsectiontitle">
+      explanation:
+    </div>
+  
+    <p>You can (re)partition existing disk images using this command.</p>
+  
+    <p>As many partitions as specified will be created, using one of the
+    following partition table formats according to the option given:</p>
+  
+    <ul>
+      <li><code>-dos1</code>: Standard MBR, Beer IDE 1.9 and Nextor compatible.
+          Max 4 partitions.</li>
+      <li><code>-dos2</code> (default): Sunrise IDE MBR, Sunrise IDE compatible.
+          Max 31 partitions.</li>
+      <li><code>-nextor</code>: Standard MBR / EBR, Nextor compatible.
+          Max 256 partitions.</li>
+    </ul>
+  
+    <p>After partitioning each partition will also be formatted appropriately,
+    see <a href="#format">format</a> for more details on that.</p>
+  
+    <p>You can specify the disk/partition sizes by using the following
+    postfixes:</p>
+  
+    <ul>
+      <li>S or s -&gt; size in sectors</li>
+      <li>B or b -&gt; size in bytes</li>
+      <li>K or k -&gt; size in kilobytes (default)</li>
+      <li>M or m -&gt; size in megabytes</li>
+    </ul>
+  
   <p><code>diskmanipulator savedsk &lt;disk name&gt;
   &lt;dskfilename&gt;</code></p>
 

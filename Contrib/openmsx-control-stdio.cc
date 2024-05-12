@@ -2,9 +2,11 @@
  * Example implementation for bidirectional communication with openMSX.
  *
  *   requires: libxml2
- *   compile: g++ `xml2-config --cflags` `xml2-config --libs` openmsx-control.cc
+ *   compile: g++ `xml2-config --cflags` `xml2-config --libs` openmsx-control-stdio.cc
  */
 
+#include <array>
+#include <cstring>
 #include <string>
 #include <list>
 #include <iostream>
@@ -12,11 +14,6 @@
 #include <sys/types.h>
 #include <sys/select.h>
 #include <libxml/parser.h>
-
-using std::cout;
-using std::endl;
-using std::list;
-using std::string;
 
 
 class OpenMSXComm
@@ -26,15 +23,15 @@ public:
 	void start();
 
 	// send a command to openmsx
-	void sendCommand(const string& command);
+	void sendCommand(const std::string& command);
 
 private:
-	// therse methods get called when openMSX has send the corresponding tag
-	void openmsx_cmd_ok(const string& msg);
-	void openmsx_cmd_nok(const string& msg);
-	void openmsx_cmd_info(const string& msg);
-	void openmsx_cmd_warning(const string& msg);
-	void openmsx_cmd_update(const string& name, const string& value);
+	// these methods get called when openMSX has send the corresponding tag
+	void openmsx_cmd_ok(const std::string& msg);
+	void openmsx_cmd_nok(const std::string& msg);
+	void openmsx_cmd_info(const std::string& msg) const;
+	void openmsx_cmd_warning(const std::string& msg) const;
+	void openmsx_cmd_update(const std::string& name, const std::string& value) const;
 
 	// XML parsing call-back functions
 	static void cb_start_element(OpenMSXComm* comm, const xmlChar* name,
@@ -47,13 +44,13 @@ private:
 	void parseUpdate(const char** attrs);
 
 	void doReply();
-	void doLog();
-	void doUpdate();
+	void doLog() const;
+	void doUpdate() const;
 
-	void deprecated();
+	void deprecated() const;
 
 	// commands being executed
-	list<string> commandStack;
+	std::list<std::string> commandStack;
 
 	// XML parsing
 	enum State {
@@ -68,7 +65,7 @@ private:
 		TAG_WARNING,
 	} state;
 	unsigned unknownLevel;
-	string content;
+	std::string content;
 	xmlSAXHandler sax_handler;
 	xmlParserCtxt* parser_context;
 
@@ -88,56 +85,58 @@ private:
 		UPDATE_UNKNOWN,
 		UPDATE_LED
 	} updateType;
-	string updateName;
+	std::string updateName;
 
 	// communication with openmsx process
 	int fd_out;
 };
 
 
-void OpenMSXComm::openmsx_cmd_ok(const string& msg)
+void OpenMSXComm::openmsx_cmd_ok(const std::string& msg)
 {
-	const string& command = commandStack.front();
-	cout << "CMD: '" << command << "' executed" << endl;
+	const std::string& command = commandStack.front();
+	std::cout << "CMD: '" << command << "' executed\n";
 	if (!msg.empty()) {
-		cout << msg << endl;
+		std::cout << msg << '\n';
 	}
+	std::cout << std::flush;
 	commandStack.pop_front();
 }
 
-void OpenMSXComm::openmsx_cmd_nok(const string& msg)
+void OpenMSXComm::openmsx_cmd_nok(const std::string& msg)
 {
-	const string& command = commandStack.front();
-	cout << "CMD: '" << command << "' failed" << endl;
+	const std::string& command = commandStack.front();
+	std::cout << "CMD: '" << command << "' failed\n";
 	if (!msg.empty()) {
-		cout << msg << endl;
+		std::cout << msg << '\n';
 	}
+	std::cout << std::flush;
 	commandStack.pop_front();
 }
 
-void OpenMSXComm::openmsx_cmd_info(const string& msg)
+void OpenMSXComm::openmsx_cmd_info(const std::string& msg) const
 {
-	cout << "INFO: " << msg << endl;
+	std::cout << "INFO: " << msg << '\n' << std::flush;
 }
 
-void OpenMSXComm::openmsx_cmd_warning(const string& msg)
+void OpenMSXComm::openmsx_cmd_warning(const std::string& msg) const
 {
-	cout << "WARNING: " << msg << endl;
+	std::cout << "WARNING: " << msg << '\n' << std::flush;
 }
 
-void OpenMSXComm::openmsx_cmd_update(const string& name, const string& value)
+void OpenMSXComm::openmsx_cmd_update(const std::string& name, const std::string& value) const
 {
-	cout << "UPDATE: " << name << " " << value << endl;
+	std::cout << "UPDATE: " << name << ' ' << value << '\n' << std::flush;
 }
 
-void OpenMSXComm::deprecated()
+void OpenMSXComm::deprecated() const
 {
 	static bool alreadyPrinted = false;
 	if (!alreadyPrinted) {
 		alreadyPrinted = true;
-		cout << "The openMSX you're running still uses the old communication protocol." << endl
-		     << "Because of this some stuff will not work (LED status for example)." << endl
-		     << "Please upgrade to openMSX 0.4.0 or higher." << endl;
+		std::cout << "The openMSX you're running still uses the old communication protocol.\n"
+		             "Because of this some stuff will not work (LED status for example).\n"
+		             "Please upgrade to openMSX 0.4.0 or higher.\n";
 	}
 }
 
@@ -166,8 +165,8 @@ void OpenMSXComm::cb_start_element(OpenMSXComm* comm, const xmlChar* name,
 			} else if (strcmp((const char*)name, "update") == 0) {
 				comm->state = TAG_UPDATE;
 				comm->parseUpdate((const char**)attrs);
-			} // backwards compatibilty stuff
-			  else if (strcmp((const char*)name, "ok") == 0) {
+			// backwards compatiblity stuff
+			} else if (strcmp((const char*)name, "ok") == 0) {
 				comm->state = TAG_OK;
 				comm->replyStatus = REPLY_OK;
 				comm->deprecated();
@@ -242,7 +241,7 @@ void OpenMSXComm::parseUpdate(const char** attrs)
 	}
 }
 
-void OpenMSXComm::cb_end_element(OpenMSXComm* comm, const xmlChar* name)
+void OpenMSXComm::cb_end_element(OpenMSXComm* comm, const xmlChar* /*name*/)
 {
 	if (comm->unknownLevel) {
 		--(comm->unknownLevel);
@@ -264,7 +263,7 @@ void OpenMSXComm::cb_end_element(OpenMSXComm* comm, const xmlChar* name)
 			comm->doUpdate();
 			comm->state = TAG_OPENMSX;
 			break;
-		// backwards compatibilty stuff
+		// backwards compatiblity stuff
 		case TAG_OK:
 			comm->openmsx_cmd_ok(comm->content);
 			comm->state = TAG_OPENMSX;
@@ -295,10 +294,13 @@ void OpenMSXComm::doReply()
 		case REPLY_NOK:
 			openmsx_cmd_nok(content);
 			break;
+		case REPLY_UNKNOWN:
+			// ignore
+			break;
 	}
 }
 
-void OpenMSXComm::doLog()
+void OpenMSXComm::doLog() const
 {
 	switch (logLevel) {
 		case LOG_INFO:
@@ -307,14 +309,20 @@ void OpenMSXComm::doLog()
 		case LOG_WARNING:
 			openmsx_cmd_warning(content);
 			break;
+		case LOG_UNKNOWN:
+			// ignore
+			break;
 	}
 }
 
-void OpenMSXComm::doUpdate()
+void OpenMSXComm::doUpdate() const
 {
 	switch (updateType) {
 		case UPDATE_LED:
 			openmsx_cmd_update(updateName, content);
+			break;
+		case UPDATE_UNKNOWN:
+			// ignore
 			break;
 	}
 }
@@ -337,7 +345,7 @@ void OpenMSXComm::cb_text(OpenMSXComm* comm, const xmlChar* chars, int len)
 }
 
 
-void OpenMSXComm::sendCommand(const string& command)
+void OpenMSXComm::sendCommand(const std::string& command)
 {
 	write(fd_out, "<command>", 9);
 	write(fd_out, command.c_str(), command.length());
@@ -355,25 +363,24 @@ void OpenMSXComm::start()
 	sax_handler.startElement = (startElementSAXFunc)cb_start_element;
 	sax_handler.endElement   = (endElementSAXFunc)  cb_end_element;
 	sax_handler.characters   = (charactersSAXFunc)  cb_text;
-	parser_context = xmlCreatePushParserCtxt(&sax_handler, this, 0, 0, 0);
+	parser_context = xmlCreatePushParserCtxt(&sax_handler, this, nullptr, 0, nullptr);
 
 	// create pipes
-	int pipe_to_child[2];
-	int pipe_from_child[2];
-	pipe(pipe_to_child);
-	pipe(pipe_from_child);
+	std::array<int, 2> pipe_to_child;
+	std::array<int, 2> pipe_from_child;
+	pipe(pipe_to_child.data());
+	pipe(pipe_from_child.data());
 	fd_out = pipe_to_child[1];
 
 	// start openmsx sub-process
-	pid_t pid = fork();
-	if (pid == 0) {
+	if (pid_t pid = fork(); pid == 0) {
 		dup2(pipe_to_child[0], STDIN_FILENO);
 		dup2(pipe_from_child[1], STDOUT_FILENO);
 		close(pipe_to_child[0]);
 		close(pipe_to_child[1]);
 		close(pipe_from_child[0]);
 		close(pipe_from_child[1]);
-		execlp("openmsx", "openmsx", "-control", "stdio:", 0);
+		execlp("openmsx", "openmsx", "-control", "stdio:", nullptr);
 		exit(0);
 	}
 	close(pipe_to_child[0]);
@@ -385,38 +392,37 @@ void OpenMSXComm::start()
 	sendCommand("restoredefault renderer");
 
 	// event loop
-	string command; // (partial) input from STDIN
+	std::string command; // (partial) input from STDIN
 	while (true) {
-		char buf[4096];
-		fd_set rdfs;
-		FD_ZERO(&rdfs);
-		FD_SET(pipe_from_child[0], &rdfs);
-		FD_SET(STDIN_FILENO, &rdfs);
-		select(pipe_from_child[0] + 1, &rdfs, NULL, NULL, NULL);
-		if (FD_ISSET(pipe_from_child[0], &rdfs)) {
+		std::array<char, 4096> buf;
+		fd_set rdFs;
+		FD_ZERO(&rdFs);
+		FD_SET(pipe_from_child[0], &rdFs);
+		FD_SET(STDIN_FILENO, &rdFs);
+		select(pipe_from_child[0] + 1, &rdFs, nullptr, nullptr, nullptr);
+		if (FD_ISSET(pipe_from_child[0], &rdFs)) {
 			// data available from openMSX
-			ssize_t size = read(pipe_from_child[0], buf, 4096);
+			ssize_t size = read(pipe_from_child[0], buf.data(), buf.size());
 			if (size == 0) {
 				// openmsx process died
 				break;
 			}
-			xmlParseChunk(parser_context, buf, size, 0);
+			xmlParseChunk(parser_context, buf.data(), size, 0);
 		}
-		if (FD_ISSET(STDIN_FILENO, &rdfs)) {
+		if (FD_ISSET(STDIN_FILENO, &rdFs)) {
 			// data available from STDIN
-			ssize_t size = read(STDIN_FILENO, buf, 4096);
-			char* oldpos = buf;
+			ssize_t size = read(STDIN_FILENO, buf.data(), buf.size());
+			char* oldPos = buf.data();
 			while (true) {
-				char* pos = (char*)memchr(oldpos, '\n', size);
-				if (pos) {
-					unsigned num = pos - oldpos;
-					command.append(oldpos, num);
+				if (auto* pos = static_cast<char*>(memchr(oldPos, '\n', size))) {
+					auto num = pos - oldPos;
+					command.append(oldPos, num);
 					sendCommand(command);
 					command.clear();
-					oldpos = pos + 1;
+					oldPos = pos + 1;
 					size -= num + 1;
 				} else {
-					command.append(pos, size);
+					command.append(oldPos, size);
 					break;
 				}
 			}
@@ -426,7 +432,6 @@ void OpenMSXComm::start()
 	// cleanup
 	xmlFreeParserCtxt(parser_context);
 }
-
 
 
 int main()

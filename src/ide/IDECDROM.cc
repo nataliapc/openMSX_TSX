@@ -1,44 +1,35 @@
 #include "IDECDROM.hh"
 #include "DeviceConfig.hh"
-#include "MSXMotherBoard.hh"
 #include "FileContext.hh"
 #include "FileException.hh"
-#include "RecordedCommand.hh"
 #include "CommandException.hh"
 #include "TclObject.hh"
-#include "CliComm.hh"
+#include "MSXCliComm.hh"
 #include "endian.hh"
+#include "narrow.hh"
+#include "one_of.hh"
 #include "serialize.hh"
+#include "xrange.hh"
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstdio>
 #include <memory>
 
 using std::string;
-using std::vector;
 
 namespace openmsx {
 
-class CDXCommand final : public RecordedCommand
+std::shared_ptr<IDECDROM::CDInUse> IDECDROM::getDrivesInUse(MSXMotherBoard& motherBoard)
 {
-public:
-	CDXCommand(CommandController& commandController,
-	           StateChangeDistributor& stateChangeDistributor,
-	           Scheduler& scheduler, IDECDROM& cd);
-	void execute(array_ref<TclObject> tokens,
-		TclObject& result, EmuTime::param time) override;
-	string help(const vector<string>& tokens) const override;
-	void tabCompletion(vector<string>& tokens) const override;
-private:
-	IDECDROM& cd;
-};
-
+	return motherBoard.getSharedStuff<CDInUse>("cdInUse");
+}
 
 IDECDROM::IDECDROM(const DeviceConfig& config)
 	: AbstractIDEDevice(config.getMotherBoard())
 	, name("cdX")
 {
-	cdInUse = getMotherBoard().getSharedStuff<CDInUse>("cdInUse");
+	cdInUse = getDrivesInUse(getMotherBoard());
 
 	unsigned id = 0;
 	while ((*cdInUse)[id]) {
@@ -49,7 +40,7 @@ IDECDROM::IDECDROM(const DeviceConfig& config)
 	}
 	name[2] = char('a' + id);
 	(*cdInUse)[id] = true;
-	cdxCommand = std::make_unique<CDXCommand>(
+	cdxCommand.emplace(
 		getMotherBoard().getCommandController(),
 		getMotherBoard().getStateChangeDistributor(),
 		getMotherBoard().getScheduler(), *this);
@@ -63,11 +54,13 @@ IDECDROM::IDECDROM(const DeviceConfig& config)
 	transferOffset = 0;
 	readSectorData = false;
 
+	getMotherBoard().registerMediaInfo(name, *this);
 	getMotherBoard().getMSXCliComm().update(CliComm::HARDWARE, name, "add");
 }
 
 IDECDROM::~IDECDROM()
 {
+	getMotherBoard().unregisterMediaInfo(*this);
 	getMotherBoard().getMSXCliComm().update(CliComm::HARDWARE, name, "remove");
 
 	unsigned id = name[2] - 'a';
@@ -75,15 +68,19 @@ IDECDROM::~IDECDROM()
 	(*cdInUse)[id] = false;
 }
 
+void IDECDROM::getMediaInfo(TclObject& result)
+{
+	result.addDictKeyValue("target", file.is_open() ? file.getURL() : std::string_view{});
+}
+
 bool IDECDROM::isPacketDevice()
 {
 	return true;
 }
 
-const std::string& IDECDROM::getDeviceName()
+std::string_view IDECDROM::getDeviceName()
 {
-	static const std::string NAME = "OPENMSX CD-ROM";
-	return NAME;
+	return "OPENMSX CD-ROM";
 }
 
 void IDECDROM::fillIdentifyBlock(AlignedBuffer& buf)
@@ -112,7 +109,7 @@ unsigned IDECDROM::readBlockStart(AlignedBuffer& buf, unsigned count)
 	if (file.is_open()) {
 		//fprintf(stderr, "read sector data at %08X\n", transferOffset);
 		file.seek(transferOffset);
-		file.read(buf, count);
+		file.read(std::span{buf.data(), count});
 		transferOffset += count;
 		return count;
 	} else {
@@ -215,7 +212,7 @@ void IDECDROM::executePacketCommand(AlignedBuffer& packet)
 	// It seems that unlike ATA which uses words at the basic data unit,
 	// ATAPI uses bytes.
 	//fprintf(stderr, "ATAPI Packet:");
-	//for (unsigned i = 0; i < 12; i++) {
+	//for (auto i : xrange(12)) {
 	//	fprintf(stderr, " %02X", packet[i]);
 	//}
 	//fprintf(stderr, "\n");
@@ -233,13 +230,13 @@ void IDECDROM::executePacketCommand(AlignedBuffer& packet)
 		const int byteCount = 18;
 		startPacketReadTransfer(byteCount);
 		auto& buf = startShortReadTransfer(byteCount);
-		for (int i = 0; i < byteCount; i++) {
+		for (auto i : xrange(byteCount)) {
 			buf[i] = 0x00;
 		}
 		buf[ 0] = 0xF0;
-		buf[ 2] = senseKey >> 16; // sense key
-		buf[12] = (senseKey >> 8) & 0xFF; // ASC
-		buf[13] = senseKey & 0xFF; // ASQ
+		buf[ 2] = narrow_cast<byte>((senseKey >> 16) & 0xFF); // sense key
+		buf[12] = narrow_cast<byte>((senseKey >>  8) & 0xFF); // ASC
+		buf[13] = narrow_cast<byte>((senseKey >>  0) & 0xFF); // ASQ
 		buf[ 7] = byteCount - 7;
 		senseKey = 0;
 		break;
@@ -270,8 +267,8 @@ void IDECDROM::executePacketCommand(AlignedBuffer& packet)
 		break;
 	}
 	case 0xA8: { // READ Command
-		int sectorNumber = Endian::read_UA_B32(&packet[2]);
-		int sectorCount  = Endian::read_UA_B32(&packet[6]);
+		uint32_t sectorNumber = Endian::read_UA_B32(&packet[2]);
+		uint32_t sectorCount  = Endian::read_UA_B32(&packet[6]);
 		//fprintf(stderr, "  read(12): sector %d, count %d\n",
 		//	sectorNumber, sectorCount);
 		// There are three block sizes:
@@ -335,22 +332,20 @@ CDXCommand::CDXCommand(CommandController& commandController_,
 {
 }
 
-void CDXCommand::execute(array_ref<TclObject> tokens, TclObject& result,
+void CDXCommand::execute(std::span<const TclObject> tokens, TclObject& result,
                          EmuTime::param /*time*/)
 {
 	if (tokens.size() == 1) {
 		auto& file = cd.file;
-		result.addListElement(cd.name + ':');
-		result.addListElement(file.is_open() ? file.getURL() : string{});
+		result.addListElement(tmpStrCat(cd.name, ':'),
+		                      file.is_open() ? file.getURL() : string{});
 		if (!file.is_open()) result.addListElement("empty");
-	} else if ((tokens.size() == 2) &&
-	           ((tokens[1] == "eject") || (tokens[1] == "-eject"))) {
+	} else if ((tokens.size() == 2) && (tokens[1] == one_of("eject", "-eject"))) {
 		cd.eject();
 		// TODO check for locked tray
 		if (tokens[1] == "-eject") {
-			result.setString(
-				"Warning: use of '-eject' is deprecated, "
-				"instead use the 'eject' subcommand");
+			result = "Warning: use of '-eject' is deprecated, "
+			         "instead use the 'eject' subcommand";
 		}
 	} else if ((tokens.size() == 2) ||
 	           ((tokens.size() == 3) && (tokens[1] == "insert"))) {
@@ -365,9 +360,8 @@ void CDXCommand::execute(array_ref<TclObject> tokens, TclObject& result,
 		}
 		try {
 			string filename = userFileContext().resolve(
-				tokens[fileToken].getString().str());
+				tokens[fileToken].getString());
 			cd.insert(filename);
-			// return filename; // Note: the diskX command doesn't do this either, so this has not been converted to TclObject style here
 		} catch (FileException& e) {
 			throw CommandException("Can't change cd image: ",
 			                       e.getMessage());
@@ -377,18 +371,19 @@ void CDXCommand::execute(array_ref<TclObject> tokens, TclObject& result,
 	}
 }
 
-string CDXCommand::help(const vector<string>& /*tokens*/) const
+string CDXCommand::help(std::span<const TclObject> /*tokens*/) const
 {
 	return strCat(
-		cd.name, "                   : display the cd image for this CDROM drive\n",
-		cd.name, " eject             : eject the cd image from this CDROM drive\n",
-		cd.name, " insert <filename> : change the cd image for this CDROM drive\n",
-		cd.name, " <filename>        : change the cd image for this CDROM drive\n");
+		cd.name, "                   : display the cd image for this CD-ROM drive\n",
+		cd.name, " eject             : eject the cd image from this CD-ROM drive\n",
+		cd.name, " insert <filename> : change the cd image for this CD-ROM drive\n",
+		cd.name, " <filename>        : change the cd image for this CD-ROM drive\n");
 }
 
-void CDXCommand::tabCompletion(vector<string>& tokens) const
+void CDXCommand::tabCompletion(std::vector<string>& tokens) const
 {
-	static const char* const extra[] = { "eject", "insert" };
+	using namespace std::literals;
+	static constexpr std::array extra = {"eject"sv, "insert"sv};
 	completeFileName(tokens, userFileContext(), extra);
 }
 
@@ -400,8 +395,8 @@ void IDECDROM::serialize(Archive& ar, unsigned /*version*/)
 
 	string filename = file.is_open() ? file.getURL() : string{};
 	ar.serialize("filename", filename);
-	if (ar.isLoader()) {
-		// re-insert CDROM before restoring 'mediaChanged', 'senseKey'
+	if constexpr (Archive::IS_LOADER) {
+		// re-insert CD-ROM before restoring 'mediaChanged', 'senseKey'
 		if (filename.empty()) {
 			eject();
 		} else {
@@ -409,12 +404,12 @@ void IDECDROM::serialize(Archive& ar, unsigned /*version*/)
 		}
 	}
 
-	ar.serialize("byteCountLimit", byteCountLimit);
-	ar.serialize("transferOffset", transferOffset);
-	ar.serialize("senseKey", senseKey);
-	ar.serialize("readSectorData", readSectorData);
-	ar.serialize("remMedStatNotifEnabled", remMedStatNotifEnabled);
-	ar.serialize("mediaChanged", mediaChanged);
+	ar.serialize("byteCountLimit",         byteCountLimit,
+	             "transferOffset",         transferOffset,
+	             "senseKey",               senseKey,
+	             "readSectorData",         readSectorData,
+	             "remMedStatNotifEnabled", remMedStatNotifEnabled,
+	             "mediaChanged",           mediaChanged);
 }
 INSTANTIATE_SERIALIZE_METHODS(IDECDROM);
 REGISTER_POLYMORPHIC_INITIALIZER(IDEDevice, IDECDROM, "IDECDROM");

@@ -98,7 +98,7 @@ proc load_session {name} {
 
 	# get all savestate files
 	set directory [file normalize $::env(OPENMSX_USER_DATA)/../sessions/${name}]
-	set states_to_restore [glob -tails -directory $directory -nocomplain *.oms *.xml.gz]
+	set states_to_restore [glob -tails -directory $directory -nocomplain *.oms]
 
 	# abort if we have nothing to restore
 	if {[llength $states_to_restore] == 0} {
@@ -169,7 +169,7 @@ proc setting_changed {name1 name2 op} {
 	if {$::enable_session_management} {;# setting changed from disabled to enabled
 		set after_quit_id [after quit {save_session "default_session"}]
 	} else { ;# setting changed from enabled to disabled
-		after cancel $after_quit_id
+		catch { after cancel $after_quit_id }
 	}
 }
 

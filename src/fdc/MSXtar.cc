@@ -7,109 +7,171 @@
 #endif
 
 #include "MSXtar.hh"
-#include "ReadDir.hh"
+
 #include "SectorAccessibleDisk.hh"
 #include "FileOperations.hh"
+#include "foreach_file.hh"
 #include "MSXException.hh"
+#include "MsxChar2Unicode.hh"
+
 #include "StringOp.hh"
 #include "strCat.hh"
 #include "File.hh"
-#include <cstring>
+#include "narrow.hh"
+#include "one_of.hh"
+#include "ranges.hh"
+#include "stl.hh"
+#include "xrange.hh"
+
 #include <algorithm>
+#include <bit>
+#include <cstring>
 #include <cassert>
 #include <cctype>
-#include <sys/stat.h>
 
 using std::string;
+using std::string_view;
 
 namespace openmsx {
 
-static const unsigned BAD_FAT = 0xFF7;
-static const unsigned EOF_FAT = 0xFFF; // actually 0xFF8-0xFFF, signals EOF in FAT12
-static const unsigned SECTOR_SIZE = SectorAccessibleDisk::SECTOR_SIZE;
+using FAT::Free;
+using FAT::EndOfChain;
+using FAT::Cluster;
+using FAT::DirCluster;
+using FAT::FatCluster;
+using FAT::FileName;
 
-static const byte T_MSX_REG  = 0x00; // Normal file
-static const byte T_MSX_READ = 0x01; // Read-Only file
-static const byte T_MSX_HID  = 0x02; // Hidden file
-static const byte T_MSX_SYS  = 0x04; // System file
-static const byte T_MSX_VOL  = 0x08; // filename is Volume Label
-static const byte T_MSX_DIR  = 0x10; // entry is a subdir
-static const byte T_MSX_ARC  = 0x20; // Archive bit
+namespace FAT {
+	static constexpr unsigned FREE = 0x000;
+	static constexpr unsigned FIRST_CLUSTER = 0x002;
+}
+
+namespace FAT12 {
+	static constexpr unsigned BAD = 0xFF7;
+	static constexpr unsigned END_OF_CHAIN = 0xFFF; // actually 0xFF8-0xFFF, signals EOF in FAT12
+
+	static constexpr unsigned MAX_CLUSTER_COUNT = 0xFF4;
+
+	// Functor to convert a FatCluster or DirCluster to a FAT12 cluster number
+	struct ToClusterNumber {
+		unsigned operator()(Free) const { return FAT::FREE; }
+		unsigned operator()(EndOfChain) const { return END_OF_CHAIN; }
+		unsigned operator()(Cluster cluster) const { return FAT::FIRST_CLUSTER + cluster.index; }
+	};
+}
+
+namespace FAT16 {
+	static constexpr unsigned BAD = 0xFFF7;
+	static constexpr unsigned END_OF_CHAIN = 0xFFFF; // actually 0xFFF8-0xFFFF, signals EOF in FAT16
+
+	static constexpr unsigned MAX_CLUSTER_COUNT = 0xFFF4;
+
+	// Functor to convert a FatCluster or DirCluster to a FAT16 cluster number
+	struct ToClusterNumber {
+		unsigned operator()(Free) const { return FAT::FREE; }
+		unsigned operator()(EndOfChain) const { return END_OF_CHAIN; }
+		unsigned operator()(Cluster cluster) const { return FAT::FIRST_CLUSTER + cluster.index; }
+	};
+}
+
+static constexpr unsigned SECTOR_SIZE = sizeof(SectorBuffer);
+static constexpr unsigned DIR_ENTRIES_PER_SECTOR = SECTOR_SIZE / sizeof(MSXDirEntry);
+
+static constexpr uint8_t EBPB_SIGNATURE = 0x29;  // Extended BIOS Parameter Block signature
+
 // This particular combination of flags indicates that this dir entry is used
 // to store a long Unicode file name.
 // For details, read http://home.teleport.com/~brainy/lfn.htm
-static const byte T_MSX_LFN  = 0x0F; // LFN entry (long files names)
+static constexpr uint8_t T_MSX_LFN  = 0x0F; // LFN entry (long files names)
 
-/** Transforms a clusternumber towards the first sector of this cluster
-  * The calculation uses info read fom the bootsector
+/** Transforms a cluster number towards the first sector of this cluster
+  * The calculation uses info read fom the boot sector
   */
-unsigned MSXtar::clusterToSector(unsigned cluster)
+unsigned MSXtar::clusterToSector(Cluster cluster) const
 {
-	return 1 + rootDirLast + sectorsPerCluster * (cluster - 2);
+	return dataStart + sectorsPerCluster * cluster.index;
 }
 
-/** Transforms a sectornumber towards it containing cluster
-  * The calculation uses info read fom the bootsector
+/** Transforms a sector number towards it containing cluster
+  * The calculation uses info read fom the boot sector
   */
-unsigned MSXtar::sectorToCluster(unsigned sector)
+Cluster MSXtar::sectorToCluster(unsigned sector) const
 {
-	return 2 + ((sector - (1 + rootDirLast)) / sectorsPerCluster);
+	// check lower bound since unsigned can't represent negative numbers
+	// don't check upper bound since it is used in calculations like getNextSector
+	assert(sector >= dataStart);
+	return Cluster{(sector - dataStart) / sectorsPerCluster};
 }
 
 
-/** Initialize object variables by reading info from the bootsector
+/** Initialize object variables by reading info from the boot sector
   */
 void MSXtar::parseBootSector(const MSXBootSector& boot)
 {
-	unsigned nbRootDirSectors = boot.dirEntries / 16;
+	fatCount          = boot.nrFats;
 	sectorsPerFat     = boot.sectorsFat;
 	sectorsPerCluster = boot.spCluster;
 
-	if (boot.nrSectors == 0) { // TODO: check limits more accurately
-		throw MSXException(
-			"Illegal number of sectors: ", boot.nrSectors);
-	}
-	if (boot.nrSides == 0) { // TODO: check limits more accurately
-		throw MSXException(
-			"Illegal number of sides: ", boot.nrSides);
-	}
-	if (boot.nrFats == 0) { // TODO: check limits more accurately
-		throw MSXException(
-			"Illegal number of FATs: ", boot.nrFats);
-	}
-	if (sectorsPerFat == 0) { // TODO: check limits more accurately
-		throw MSXException(
-			"Illegal number sectors per FAT: ", sectorsPerFat);
-	}
-	if (nbRootDirSectors == 0) { // TODO: check limits more accurately
-		throw MSXException(
-			"Illegal number of root dir sectors: ", nbRootDirSectors);
-	}
-	if (sectorsPerCluster == 0) { // TODO: check limits more accurately
-		throw MSXException(
-			"Illegal number of sectors per cluster: ", sectorsPerCluster);
+	unsigned nrSectors = boot.nrSectors;
+	if (nrSectors == 0 && boot.params.extended.extendedBootSignature == EBPB_SIGNATURE) {
+		nrSectors = boot.params.extended.nrSectors;
 	}
 
-	rootDirStart = 1 + boot.nrFats * sectorsPerFat;
+	if (boot.bpSector != SECTOR_SIZE) {
+		throw MSXException("Illegal sector size: ", boot.bpSector);
+	}
+	if (boot.resvSectors == 0) {
+		throw MSXException("Illegal number of reserved sectors: ", boot.resvSectors);
+	}
+	if (fatCount == 0) {
+		throw MSXException("Illegal number of FATs: ", fatCount);
+	}
+	if (sectorsPerFat == 0 || sectorsPerFat > 0x100) {
+		throw MSXException("Illegal number of sectors per FAT: ", sectorsPerFat);
+	}
+	if (boot.dirEntries == 0 || boot.dirEntries % DIR_ENTRIES_PER_SECTOR != 0) {
+		throw MSXException("Illegal number of root directory entries: ", boot.dirEntries);
+	}
+	if (!std::has_single_bit(sectorsPerCluster)) {
+		throw MSXException("Illegal number of sectors per cluster: ", sectorsPerCluster);
+	}
+
+	unsigned nbRootDirSectors = boot.dirEntries / DIR_ENTRIES_PER_SECTOR;
+	fatStart = boot.resvSectors;
+	rootDirStart = fatStart + fatCount * sectorsPerFat;
 	chrootSector = rootDirStart;
-	rootDirLast = rootDirStart + nbRootDirSectors - 1;
-	maxCluster = sectorToCluster(boot.nrSectors);
+	dataStart = rootDirStart + nbRootDirSectors;
 
-	// Some (invalid) diskimages have a too small FAT to be able to address
+	// Whether to use FAT16 is strangely implicit, it must be derived from the
+	// cluster count being higher than 0xFF4. Let's round that up to 0x1000,
+	// since FAT12 uses 1.5 bytes per cluster its maximum size is 12 sectors,
+	// whereas FAT16 uses 2 bytes per cluster so its minimum size is 16 sectors.
+	// Therefore we can pick the correct FAT type with sectorsPerFat >= 14.
+	constexpr unsigned fat16Threshold = (0x1000 * 3 / 2 + 0x1000 * 2) / 2 / SECTOR_SIZE;
+	fat16 = sectorsPerFat >= fat16Threshold;
+
+	if (dataStart + sectorsPerCluster > nrSectors) {
+		throw MSXException("Illegal number of sectors: ", nrSectors);
+	}
+
+	clusterCount = std::min((nrSectors - dataStart) / sectorsPerCluster,
+	                        fat16 ? FAT16::MAX_CLUSTER_COUNT : FAT12::MAX_CLUSTER_COUNT);
+
+	// Some (invalid) disk images have a too small FAT to be able to address
 	// all clusters of the image. OpenMSX SVN revisions pre-11326 even
 	// created such invalid images for some disk sizes!!
-	unsigned maxFatCluster = (2 * SECTOR_SIZE * sectorsPerFat) / 3;
-	maxCluster = std::min(maxCluster, maxFatCluster);
+	unsigned fatCapacity = (2 * SECTOR_SIZE * sectorsPerFat) / 3 - FAT::FIRST_CLUSTER;
+	clusterCount = std::min(clusterCount, fatCapacity);
 }
 
 void MSXtar::writeLogicalSector(unsigned sector, const SectorBuffer& buf)
 {
 	assert(!fatBuffer.empty());
-	unsigned fatSector = sector - 1;
+	unsigned fatSector = sector - fatStart;
 	if (fatSector < sectorsPerFat) {
 		// we have a cache and this is a sector of the 1st FAT
 		//   --> update cache
-		memcpy(&fatBuffer[fatSector], &buf, sizeof(buf));
+		fatBuffer[fatSector] = buf;
 		fatCacheDirty = true;
 	} else {
 		disk.writeSector(sector, buf);
@@ -119,18 +181,20 @@ void MSXtar::writeLogicalSector(unsigned sector, const SectorBuffer& buf)
 void MSXtar::readLogicalSector(unsigned sector, SectorBuffer& buf)
 {
 	assert(!fatBuffer.empty());
-	unsigned fatSector = sector - 1;
+	unsigned fatSector = sector - fatStart;
 	if (fatSector < sectorsPerFat) {
 		// we have a cache and this is a sector of the 1st FAT
 		//   --> read from cache
-		memcpy(&buf, &fatBuffer[fatSector], sizeof(buf));
+		buf = fatBuffer[fatSector];
 	} else {
 		disk.readSector(sector, buf);
 	}
 }
 
-MSXtar::MSXtar(SectorAccessibleDisk& sectordisk)
-	: disk(sectordisk)
+MSXtar::MSXtar(SectorAccessibleDisk& sectorDisk, const MsxChar2Unicode& msxChars_)
+	: disk(sectorDisk)
+	, msxChars(msxChars_)
+	, findFirstFreeClusterStart{0}
 {
 	if (disk.getNbSectors() == 0) {
 		throw MSXException("No disk inserted.");
@@ -146,96 +210,181 @@ MSXtar::MSXtar(SectorAccessibleDisk& sectordisk)
 	// cache complete FAT
 	fatCacheDirty = false;
 	fatBuffer.resize(sectorsPerFat);
-	for (unsigned i = 0; i < sectorsPerFat; ++i) {
-		disk.readSector(i + 1, fatBuffer[i]);
-	}
+	disk.readSectors(std::span{fatBuffer.data(), sectorsPerFat}, fatStart);
+}
+
+// Not used when NRVO is used (but NRVO optimization is not (yet) mandated)
+MSXtar::MSXtar(MSXtar&& other) noexcept
+	: disk(other.disk)
+	, fatBuffer(std::move(other.fatBuffer))
+	, msxChars(other.msxChars)
+	, findFirstFreeClusterStart(other.findFirstFreeClusterStart)
+	, clusterCount(other.clusterCount)
+	, fatCount(other.fatCount)
+	, sectorsPerCluster(other.sectorsPerCluster)
+	, sectorsPerFat(other.sectorsPerFat)
+	, fatStart(other.fatStart)
+	, rootDirStart(other.rootDirStart)
+	, dataStart(other.dataStart)
+	, chrootSector(other.chrootSector)
+	, fatCacheDirty(other.fatCacheDirty)
+{
+	other.fatCacheDirty = false;
 }
 
 MSXtar::~MSXtar()
 {
 	if (!fatCacheDirty) return;
 
-	for (unsigned i = 0; i < sectorsPerFat; ++i) {
-		try {
-			disk.writeSector(i + 1, fatBuffer[i]);
-		} catch (MSXException&) {
-			// nothing
+	for (auto fat : xrange(fatCount)) {
+		for (auto i : xrange(sectorsPerFat)) {
+			try {
+				disk.writeSector(i + fatStart + fat * sectorsPerFat, fatBuffer[i]);
+			} catch (MSXException&) {
+				// nothing
+			}
 		}
 	}
 }
 
-// transform BAD_FAT (0xFF7) and EOF_FAT-range (0xFF8-0xFFF)
-// to a single value: EOF_FAT (0xFFF)
-static unsigned normalizeFAT(unsigned cluster)
-{
-	return (cluster < BAD_FAT) ? cluster : EOF_FAT;
-}
-
-// Get the next clusternumber from the FAT chain
-unsigned MSXtar::readFAT(unsigned clnr) const
+// Get the next cluster number from the FAT chain
+FatCluster MSXtar::readFAT(Cluster cluster) const
 {
 	assert(!fatBuffer.empty()); // FAT must already be cached
-	auto* data = fatBuffer[0].raw;
-	auto* p = &data[(clnr * 3) / 2];
-	unsigned result = (clnr & 1)
-	                ? (p[0] >> 4) + (p[1] << 4)
-	                : p[0] + ((p[1] & 0x0F) << 8);
-	return normalizeFAT(result);
+	assert(cluster.index < clusterCount);
+
+	std::span<const uint8_t> data{fatBuffer[0].raw.data(), sectorsPerFat * size_t(SECTOR_SIZE)};
+
+	unsigned index = FAT::FIRST_CLUSTER + cluster.index;
+	unsigned value = [&] {
+		if (fat16) {
+			auto p = subspan<2>(data, index * 2);
+			return p[0] | p[1] << 8;
+		} else {
+			auto p = subspan<2>(data, (index * 3) / 2);
+			return (index & 1)
+			     ? (p[0] >> 4) + (p[1] << 4)
+			     : p[0] + ((p[1] & 0x0F) << 8);
+		}
+	}();
+
+	// Be tolerant when reading:
+	// * FREE is returned as FREE.
+	// * Anything else but a valid cluster number is returned as END_OF_CHAIN.
+	if (value == FAT::FREE) {
+		return Free{};
+	} else if (value >= FAT::FIRST_CLUSTER && value < FAT::FIRST_CLUSTER + clusterCount) {
+		return Cluster{value - FAT::FIRST_CLUSTER};
+	} else {
+		return EndOfChain{};
+	}
 }
 
 // Write an entry to the FAT
-void MSXtar::writeFAT(unsigned clnr, unsigned val)
+void MSXtar::writeFAT(Cluster cluster, FatCluster value)
 {
 	assert(!fatBuffer.empty()); // FAT must already be cached
-	assert(val < 4096); // FAT12
-	auto* data = fatBuffer[0].raw;
-	auto* p = &data[(clnr * 3) / 2];
-	if (clnr & 1) {
-		p[0] = (p[0] & 0x0F) + (val << 4);
-		p[1] = val >> 4;
+	assert(cluster.index < clusterCount);
+
+	// Be strict when writing:
+	// * Anything but FREE, END_OF_CHAIN or a valid cluster number is rejected.
+	assert(!std::holds_alternative<Cluster>(value) || std::get<Cluster>(value).index < clusterCount);
+
+	std::span data{fatBuffer[0].raw.data(), sectorsPerFat * size_t(SECTOR_SIZE)};
+
+	unsigned index = FAT::FIRST_CLUSTER + cluster.index;
+
+	if (std::holds_alternative<Free>(value) && cluster < findFirstFreeClusterStart) {
+		// update where findFirstFreeCluster() will start scanning
+		findFirstFreeClusterStart = cluster;
+	}
+
+	if (fat16) {
+		unsigned fatValue = std::visit(FAT16::ToClusterNumber{}, value);
+		auto p = subspan<2>(data, index * 2);
+		p[0] = narrow_cast<uint8_t>(fatValue);
+		p[1] = narrow_cast<uint8_t>(fatValue >> 8);
 	} else {
-		p[0] = val;
-		p[1] = (p[1] & 0xF0) + ((val >> 8) & 0x0F);
+		unsigned fatValue = std::visit(FAT12::ToClusterNumber{}, value);
+		auto p = subspan<2>(data, (index * 3) / 2);
+		if (index & 1) {
+			p[0] = narrow_cast<uint8_t>((p[0] & 0x0F) + (fatValue << 4));
+			p[1] = narrow_cast<uint8_t>(fatValue >> 4);
+		} else {
+			p[0] = narrow_cast<uint8_t>(fatValue);
+			p[1] = narrow_cast<uint8_t>((p[1] & 0xF0) + ((fatValue >> 8) & 0x0F));
+		}
 	}
 	fatCacheDirty = true;
 }
 
-// Find the next clusternumber marked as free in the FAT
+// Find the next cluster number marked as free in the FAT
 // @throws When no more free clusters
-unsigned MSXtar::findFirstFreeCluster()
+Cluster MSXtar::findFirstFreeCluster()
 {
-	for (unsigned cluster = 2; cluster < maxCluster; ++cluster) {
-		if (readFAT(cluster) == 0) {
-			return cluster;
+	for (auto cluster : xrange(findFirstFreeClusterStart.index, clusterCount)) {
+		if (readFAT({cluster}) == FatCluster(Free{})) {
+			findFirstFreeClusterStart = {cluster};
+			return findFirstFreeClusterStart;
 		}
 	}
 	throw MSXException("Disk full.");
 }
 
+unsigned MSXtar::countFreeClusters() const
+{
+	return narrow<unsigned>(ranges::count_if(xrange(findFirstFreeClusterStart.index, clusterCount),
+		[&](unsigned cluster) { return readFAT({cluster}) == FatCluster(Free{}); }));
+}
+
 // Get the next sector from a file or (root/sub)directory
 // If no next sector then 0 is returned
-unsigned MSXtar::getNextSector(unsigned sector)
+unsigned MSXtar::getNextSector(unsigned sector) const
 {
-	if (sector <= rootDirLast) {
+	assert(sector >= rootDirStart);
+	if (sector < dataStart) {
 		// sector is part of the root directory
-		return (sector == rootDirLast) ? 0 : sector + 1;
+		return (sector == dataStart - 1) ? 0 : sector + 1;
 	}
-	unsigned currCluster = sectorToCluster(sector);
+	Cluster currCluster = sectorToCluster(sector);
 	if (currCluster == sectorToCluster(sector + 1)) {
 		// next sector of cluster
 		return sector + 1;
 	} else {
 		// first sector in next cluster
-		unsigned nextcl = readFAT(currCluster);
-		return (nextcl == EOF_FAT) ? 0 : clusterToSector(nextcl);
+		FatCluster nextCluster = readFAT(currCluster);
+		return std::visit(overloaded{
+			[](Free) { return 0u; /* Invalid entry in FAT chain. */ },
+			[](EndOfChain) { return 0u; },
+			[this](Cluster cluster) { return clusterToSector(cluster); }
+		}, nextCluster);
 	}
 }
 
-// get start cluster from a directory entry,
-// also takes care of BAD_FAT and EOF_FAT-range.
-unsigned MSXtar::getStartCluster(const MSXDirEntry& entry)
+// Get start cluster from a directory entry.
+DirCluster MSXtar::getStartCluster(const MSXDirEntry& entry) const
 {
-	return normalizeFAT(entry.startCluster);
+	// Be tolerant when reading:
+	// * Anything but a valid cluster number is returned as FREE.
+	unsigned cluster = entry.startCluster;
+	if (cluster >= FAT::FIRST_CLUSTER && cluster < FAT::FIRST_CLUSTER + clusterCount) {
+		return Cluster{cluster - FAT::FIRST_CLUSTER};
+	} else {
+		return Free{};
+	}
+}
+
+// Set start cluster on a directory entry.
+void MSXtar::setStartCluster(MSXDirEntry& entry, DirCluster cluster) const
+{
+	// Be strict when writing:
+	// * Anything but FREE or a valid cluster number is rejected.
+	assert(!std::holds_alternative<Cluster>(cluster) || std::get<Cluster>(cluster).index < clusterCount);
+	if (fat16) {
+		entry.startCluster = narrow<uint16_t>(std::visit(FAT16::ToClusterNumber{}, cluster));
+	} else {
+		entry.startCluster = narrow<uint16_t>(std::visit(FAT12::ToClusterNumber{}, cluster));
+	}
 }
 
 // If there are no more free entries in a subdirectory, the subdir is
@@ -245,20 +394,20 @@ unsigned MSXtar::getStartCluster(const MSXDirEntry& entry)
 // @throws When disk is full
 unsigned MSXtar::appendClusterToSubdir(unsigned sector)
 {
-	unsigned nextCl = findFirstFreeCluster();
+	Cluster nextCl = findFirstFreeCluster();
 	unsigned nextSector = clusterToSector(nextCl);
 
 	// clear this cluster
 	SectorBuffer buf;
-	memset(&buf, 0, sizeof(buf));
-	for (unsigned i = 0; i < sectorsPerCluster; ++i) {
+	ranges::fill(buf.raw, 0);
+	for (auto i : xrange(sectorsPerCluster)) {
 		writeLogicalSector(i + nextSector, buf);
 	}
 
-	unsigned curCl = sectorToCluster(sector);
-	assert(readFAT(curCl) == EOF_FAT);
+	Cluster curCl = sectorToCluster(sector);
+	assert(readFAT(curCl) == FatCluster(EndOfChain{}));
 	writeFAT(curCl, nextCl);
-	writeFAT(nextCl, EOF_FAT);
+	writeFAT(nextCl, EndOfChain{});
 	return nextSector;
 }
 
@@ -272,29 +421,29 @@ unsigned MSXtar::findUsableIndexInSector(unsigned sector)
 	readLogicalSector(sector, buf);
 
 	// find a not used (0x00) or delete entry (0xE5)
-	for (unsigned i = 0; i < 16; ++i) {
-		byte tmp = buf.dirEntry[i].filename[0];
-		if ((tmp == 0x00) || (tmp == 0xE5)) {
+	for (auto i : xrange(DIR_ENTRIES_PER_SECTOR)) {
+		if (buf.dirEntry[i].filename[0] == one_of(0x00, char(0xE5))) {
 			return i;
 		}
 	}
 	return unsigned(-1);
 }
 
-// This function returns the sector and dirindex for a new directory entry
-// if needed the involved subdirectroy is expanded by an extra cluster
+// This function returns the sector and dirIndex for a new directory entry
+// if needed the involved subdirectory is expanded by an extra cluster
 // returns: a DirEntry containing sector and index
 // @throws When either root dir is full or disk is full
 MSXtar::DirEntry MSXtar::addEntryToDir(unsigned sector)
 {
-	// this routine adds the msxname to a directory sector, if needed (and
+	// this routine adds the msx name to a directory sector, if needed (and
 	// possible) the directory is extened with an extra cluster
 	DirEntry result;
 	result.sector = sector;
 
-	if (sector <= rootDirLast) {
+	assert(sector >= rootDirStart);
+	if (sector < dataStart) {
 		// add to the root directory
-		for (/* */ ; result.sector <= rootDirLast; result.sector++) {
+		for (/* */ ; result.sector < dataStart; result.sector++) {
 			result.index = findUsableIndexInSector(result.sector);
 			if (result.index != unsigned(-1)) {
 				return result;
@@ -318,32 +467,33 @@ MSXtar::DirEntry MSXtar::addEntryToDir(unsigned sector)
 	}
 }
 
-// create an MSX filename 8.3 format, if needed in vfat like abreviation
-static char toMSXChr(char a)
+// filters out unsupported characters and upper-cases
+static char toFileNameChar(char a)
 {
-	a = toupper(a);
-	if (a == ' ' || a == '.') {
+	if ((a >= 0x00 && a < 0x20) || a == one_of(
+		' ', '"', '*', '+', ',', '.', '/', ':', ';', '<', '=', '>', '?', '[', '\\', ']', '|', 0x7F, 0xFF)) {
 		a = '_';
 	}
-	return a;
+	return narrow<char>(toupper(a));
 }
 
 // Transform a long hostname in a 8.3 uppercase filename as used in the
-// direntries on an MSX
-static string makeSimpleMSXFileName(string_view fullFilename)
+// dirEntries on an MSX
+FileName MSXtar::hostToMSXFileName(string_view hostName) const
 {
-	string_view dir, fullFile;
-	StringOp::splitOnLast(fullFilename, '/', dir, fullFile);
+	std::vector<uint8_t> hostMSXName = msxChars.utf8ToMsx(hostName, '_');
+	std::string_view hostMSXNameView(std::bit_cast<char*>(hostMSXName.data()), hostMSXName.size());
+	auto [hostDir, hostFile] = StringOp::splitOnLast(hostMSXNameView, '/');
 
-	// handle speciale case '.' and '..' first
-	string result(8 + 3, ' ');
-	if ((fullFile == ".") || (fullFile == "..")) {
-		memcpy(&*begin(result), fullFile.data(), fullFile.size());
+	// handle special case '.' and '..' first
+	FileName result;
+	result.fill(' ');
+	if (hostFile == one_of(".", "..")) {
+		ranges::copy(hostFile, result);
 		return result;
 	}
 
-	string_view file, ext;
-	StringOp::splitOnLast(fullFile, '.', file, ext);
+	auto [file, ext] = StringOp::splitOnLast(hostFile, '.');
 	if (file.empty()) std::swap(file, ext);
 
 	StringOp::trimRight(file, ' ');
@@ -352,12 +502,12 @@ static string makeSimpleMSXFileName(string_view fullFilename)
 	// put in major case and create '_' if needed
 	string fileS(file.data(), std::min<size_t>(8, file.size()));
 	string extS (ext .data(), std::min<size_t>(3, ext .size()));
-	std::transform(begin(fileS), end(fileS), begin(fileS), toMSXChr);
-	std::transform(begin(extS ), end(extS ), begin(extS ), toMSXChr);
+	transform_in_place(fileS, toFileNameChar);
+	transform_in_place(extS,  toFileNameChar);
 
 	// add correct number of spaces
-	memcpy(&*begin(result) + 0, fileS.data(), fileS.size());
-	memcpy(&*begin(result) + 8, extS .data(), extS .size());
+	ranges::copy(fileS, subspan<8>(result, 0));
+	ranges::copy(extS,  subspan<3>(result, 8));
 	return result;
 }
 
@@ -367,7 +517,7 @@ static string makeSimpleMSXFileName(string_view fullFilename)
 // returns: the first sector of the new subdir
 // @throws in case no directory could be created
 unsigned MSXtar::addSubdir(
-	const string& msxName, unsigned t, unsigned d, unsigned sector)
+	const FileName& msxName, uint16_t t, uint16_t d, unsigned sector)
 {
 	// returns the sector for the first cluster of this subdir
 	DirEntry result = addEntryToDir(sector);
@@ -377,42 +527,47 @@ unsigned MSXtar::addSubdir(
 	readLogicalSector(result.sector, buf);
 
 	auto& dirEntry = buf.dirEntry[result.index];
-	dirEntry.attrib = T_MSX_DIR;
+	ranges::copy(msxName, dirEntry.filename);
+	dirEntry.attrib = MSXDirEntry::Attrib::DIRECTORY;
 	dirEntry.time = t;
 	dirEntry.date = d;
-	memcpy(&dirEntry, makeSimpleMSXFileName(msxName).data(), 11);
 
 	// dirEntry.filesize = fsize;
-	unsigned curCl = findFirstFreeCluster();
-	dirEntry.startCluster = curCl;
-	writeFAT(curCl, EOF_FAT);
+	Cluster curCl = findFirstFreeCluster();
+	setStartCluster(dirEntry, curCl);
+	writeFAT(curCl, EndOfChain{});
 
 	// save the sector again
 	writeLogicalSector(result.sector, buf);
 
 	// clear this cluster
 	unsigned logicalSector = clusterToSector(curCl);
-	memset(&buf, 0, sizeof(buf));
-	for (unsigned i = 0; i < sectorsPerCluster; ++i) {
+	ranges::fill(buf.raw, 0);
+	for (auto i : xrange(sectorsPerCluster)) {
 		writeLogicalSector(i + logicalSector, buf);
 	}
 
 	// now add the '.' and '..' entries!!
 	memset(&buf.dirEntry[0], 0, sizeof(MSXDirEntry));
-	memset(&buf.dirEntry[0], ' ', 11);
-	memset(&buf.dirEntry[0], '.', 1);
-	buf.dirEntry[0].attrib = T_MSX_DIR;
+	ranges::fill(buf.dirEntry[0].filename, ' ');
+	buf.dirEntry[0].filename[0] = '.';
+	buf.dirEntry[0].attrib = MSXDirEntry::Attrib::DIRECTORY;
 	buf.dirEntry[0].time = t;
 	buf.dirEntry[0].date = d;
-	buf.dirEntry[0].startCluster = curCl;
+	setStartCluster(buf.dirEntry[0], curCl);
 
 	memset(&buf.dirEntry[1], 0, sizeof(MSXDirEntry));
-	memset(&buf.dirEntry[1], ' ', 11);
-	memset(&buf.dirEntry[1], '.', 2);
-	buf.dirEntry[1].attrib = T_MSX_DIR;
+	ranges::fill(buf.dirEntry[1].filename, ' ');
+	buf.dirEntry[1].filename[0] = '.';
+	buf.dirEntry[1].filename[1] = '.';
+	buf.dirEntry[1].attrib = MSXDirEntry::Attrib::DIRECTORY;
 	buf.dirEntry[1].time = t;
 	buf.dirEntry[1].date = d;
-	buf.dirEntry[1].startCluster = sectorToCluster(sector);
+	if (sector == rootDirStart) {
+		setStartCluster(buf.dirEntry[1], Free{});
+	} else {
+		setStartCluster(buf.dirEntry[1], sectorToCluster(sector));
+	}
 
 	// and save this in the first sector of the new subdir
 	writeLogicalSector(logicalSector, buf);
@@ -420,44 +575,27 @@ unsigned MSXtar::addSubdir(
 	return logicalSector;
 }
 
-static void getTimeDate(time_t& totalSeconds, unsigned& time, unsigned& date)
-{
-	tm* mtim = localtime(&totalSeconds);
-	if (!mtim) {
-		time = 0;
-		date = 0;
-	} else {
-		time = (mtim->tm_sec >> 1) + (mtim->tm_min << 5) +
-		       (mtim->tm_hour << 11);
-		date = mtim->tm_mday + ((mtim->tm_mon + 1) << 5) +
-		       ((mtim->tm_year + 1900 - 1980) << 9);
-	}
-}
-
 // Get the time/date from a host file in MSX format
-static void getTimeDate(const string& filename, unsigned& time, unsigned& date)
+static DiskImageUtils::FatTimeDate getTimeDate(zstring_view filename)
 {
-	struct stat st;
-	if (stat(filename.c_str(), &st)) {
-		// stat failed
-		time = 0;
-		date = 0;
-	} else {
+	if (auto st = FileOperations::getStat(filename)) {
 		// Some info indicates that st.st_mtime could be useless on win32 with vfat.
 		// On Android 'st_mtime' is 'unsigned long' instead of 'time_t'
 		// (like on linux), so we require a reinterpret_cast. That cast
 		// is fine (but redundant) on linux.
-		getTimeDate(reinterpret_cast<time_t&>(st.st_mtime), time, date);
+		return DiskImageUtils::toTimeDate(reinterpret_cast<time_t&>(st->st_mtime));
+	} else {
+		// stat failed
+		return {0, 0};
 	}
 }
 
 // Add an MSXsubdir with the time properties from the HOST-OS subdir
 // @throws when subdir could not be created
-unsigned MSXtar::addSubdirToDSK(const string& hostName, const string& msxName,
+unsigned MSXtar::addSubdirToDSK(zstring_view hostName, const FileName& msxName,
                                 unsigned sector)
 {
-	unsigned time, date;
-	getTimeDate(hostName, time, date);
+	auto [time, date] = getTimeDate(hostName);
 	return addSubdir(msxName, time, date, sector);
 }
 
@@ -468,66 +606,69 @@ unsigned MSXtar::addSubdirToDSK(const string& hostName, const string& msxName,
 void MSXtar::alterFileInDSK(MSXDirEntry& msxDirEntry, const string& hostName)
 {
 	// get host file size
-	struct stat st;
-	if (stat(hostName.c_str(), &st)) {
+	auto st = FileOperations::getStat(hostName);
+	if (!st) {
 		throw MSXException("Error reading host file: ", hostName);
 	}
-	unsigned hostSize = st.st_size;
+	unsigned hostSize = narrow<unsigned>(st->st_size);
 	unsigned remaining = hostSize;
 
 	// open host file for reading
-	File file(FileOperations::expandTilde(hostName), "rb");
+	File file(hostName, "rb");
 
 	// copy host file to image
-	unsigned prevCl = 0;
-	unsigned curCl = getStartCluster(msxDirEntry);
+	DirCluster prevCl = Free{};
+	FatCluster curCl = std::visit(overloaded{
+		[](Free) -> FatCluster { return EndOfChain{}; },
+		[](Cluster cluster) -> FatCluster { return cluster; }
+	}, getStartCluster(msxDirEntry));
+
 	while (remaining) {
+		Cluster cluster;
 		// allocate new cluster if needed
 		try {
-			if ((curCl == 0) || (curCl == EOF_FAT)) {
-				unsigned newCl = findFirstFreeCluster();
-				if (prevCl == 0) {
-					msxDirEntry.startCluster = newCl;
-				} else {
-					writeFAT(prevCl, newCl);
-				}
-				writeFAT(newCl, EOF_FAT);
-				curCl = newCl;
-			}
+			cluster = std::visit(overloaded{
+				[](Free) -> Cluster { throw MSXException("Invalid entry in FAT chain."); },
+				[&](EndOfChain) {
+					Cluster newCl = findFirstFreeCluster();
+					std::visit(overloaded{
+						[&](Free) { setStartCluster(msxDirEntry, newCl); },
+						[&](Cluster cluster_) { writeFAT(cluster_, newCl); }
+					}, prevCl);
+					writeFAT(newCl, EndOfChain{});
+					return newCl;
+				},
+				[](Cluster cluster_) { return cluster_; }
+			}, curCl);
 		} catch (MSXException&) {
-			// no more free clusters
+			// no more free clusters or invalid entry in FAT chain
 			break;
 		}
 
 		// fill cluster
-		unsigned logicalSector = clusterToSector(curCl);
+		unsigned logicalSector = clusterToSector(cluster);
 		for (unsigned j = 0; (j < sectorsPerCluster) && remaining; ++j) {
 			SectorBuffer buf;
-			memset(&buf, 0, sizeof(buf));
 			unsigned chunkSize = std::min(SECTOR_SIZE, remaining);
-			file.read(&buf, chunkSize);
+			file.read(subspan(buf.raw, 0, chunkSize));
+			ranges::fill(subspan(buf.raw, chunkSize), 0);
 			writeLogicalSector(logicalSector + j, buf);
 			remaining -= chunkSize;
 		}
 
 		// advance to next cluster
-		prevCl = curCl;
-		curCl = readFAT(curCl);
+		prevCl = cluster;
+		curCl = readFAT(cluster);
 	}
 
 	// terminate FAT chain
-	if (prevCl == 0) {
-		msxDirEntry.startCluster = 0;
-	} else {
-		writeFAT(prevCl, EOF_FAT);
-	}
+	std::visit(overloaded{
+		[&](Free free) { setStartCluster(msxDirEntry, free); },
+		[&](Cluster cluster) { writeFAT(cluster, EndOfChain{}); }
+	}, prevCl);
 
 	// free rest of FAT chain
-	while ((curCl != EOF_FAT) && (curCl != 0)) {
-		unsigned nextCl = readFAT(curCl);
-		writeFAT(curCl, 0);
-		curCl = nextCl;
-	}
+	freeFatChain(curCl);
 
 	// write (possibly truncated) file size
 	msxDirEntry.size = hostSize - remaining;
@@ -537,12 +678,107 @@ void MSXtar::alterFileInDSK(MSXDirEntry& msxDirEntry, const string& hostName)
 	}
 }
 
+void MSXtar::freeFatChain(FAT::FatCluster startCluster)
+{
+	FatCluster curCl = startCluster;
+	while (std::holds_alternative<Cluster>(curCl)) {
+		Cluster cluster = std::get<Cluster>(curCl);
+		FatCluster nextCl = readFAT(cluster);
+		writeFAT(cluster, Free{});
+		curCl = nextCl;
+	}
+}
+
+std::string MSXtar::deleteEntry(const FAT::FileName& msxName, unsigned rootSector)
+{
+	SectorBuffer buf;
+	DirEntry entry = findEntryInDir(msxName, rootSector, buf);
+	if (entry.sector == 0) {
+		// not found
+		return "entry not found";
+	}
+	deleteEntry(buf.dirEntry[entry.index]);
+	writeLogicalSector(entry.sector, buf);
+	return "";
+}
+
+void MSXtar::deleteEntry(MSXDirEntry& msxDirEntry)
+{
+	DirCluster startCluster = getStartCluster(msxDirEntry);
+
+	if (msxDirEntry.attrib & MSXDirEntry::Attrib::DIRECTORY) {
+		// If we're deleting a directory then also (recursively)
+		// delete the files/directories in this directory.
+		if (const auto& msxName = msxDirEntry.filename;
+		    ranges::equal(msxName, std::string_view(".          ")) ||
+		    ranges::equal(msxName, std::string_view("..         "))) {
+			// But skip the "." and ".." entries.
+			return;
+		}
+		std::visit(overloaded{
+			[](Free) { /* Points to root, ignore. */ },
+			[&](Cluster cluster) { deleteDirectory(clusterToSector(cluster)); }
+		}, startCluster);
+	}
+
+	// At this point we have a regular file or an empty subdirectory.
+	// Delete it by marking the first filename char as 0xE5.
+	msxDirEntry.filename[0] = char(0xE5);
+
+	// Free the FAT chain
+	std::visit(overloaded{
+		[](Free) { /* Points to root, ignore. */ },
+		[&](Cluster cluster) { freeFatChain(cluster); }
+	}, startCluster);
+
+	// Changed sector will be written by parent function
+}
+
+void MSXtar::deleteDirectory(unsigned sector)
+{
+	for (/* */ ; sector != 0; sector = getNextSector(sector)) {
+		SectorBuffer buf;
+		readLogicalSector(sector, buf);
+		for (auto& dirEntry : buf.dirEntry) {
+			if (dirEntry.filename[0] == char(0x00)) {
+				return;
+			}
+			if (dirEntry.filename[0] == one_of(char(0xe5), '.') || dirEntry.attrib == T_MSX_LFN) {
+				continue;
+			}
+			deleteEntry(dirEntry);
+		}
+		writeLogicalSector(sector, buf);
+	}
+}
+
+std::string MSXtar::renameItem(std::string_view currentName, std::string_view newName)
+{
+	SectorBuffer buf;
+
+	FileName newMsxName = hostToMSXFileName(newName);
+	if (auto newEntry = findEntryInDir(newMsxName, chrootSector, buf);
+	    newEntry.sector != 0) {
+		return "another entry with new name already exists";
+	}
+
+	FileName oldMsxName = hostToMSXFileName(currentName);
+	auto oldEntry = findEntryInDir(oldMsxName, chrootSector, buf);
+	if (oldEntry.sector == 0) {
+		return "entry not found";
+	}
+
+	buf.dirEntry[oldEntry.index].filename = newMsxName;
+	writeLogicalSector(oldEntry.sector, buf);
+	return "";
+}
+
 // Find the dir entry for 'name' in subdir starting at the given 'sector'
 // with given 'index'
 // returns: a DirEntry with sector and index filled in
 //          sector is 0 if no match was found
 MSXtar::DirEntry MSXtar::findEntryInDir(
-	const string& name, unsigned sector, SectorBuffer& buf)
+	const FileName& msxName, unsigned sector, SectorBuffer& buf)
 {
 	DirEntry result;
 	result.sector = sector;
@@ -550,8 +786,8 @@ MSXtar::DirEntry MSXtar::findEntryInDir(
 	while (result.sector) {
 		// read sector and scan 16 entries
 		readLogicalSector(result.sector, buf);
-		for (result.index = 0; result.index < 16; ++result.index) {
-			if (string(buf.dirEntry[result.index].filename, 11) == name) {
+		for (result.index = 0; result.index < DIR_ENTRIES_PER_SECTOR; ++result.index) {
+			if (ranges::equal(buf.dirEntry[result.index].filename, msxName)) {
 				return result;
 			}
 		}
@@ -563,18 +799,22 @@ MSXtar::DirEntry MSXtar::findEntryInDir(
 
 // Add file to the MSX disk in the subdir pointed to by 'sector'
 // @throws when file could not be added
-string MSXtar::addFileToDSK(const string& fullHostName, unsigned rootSector)
+string MSXtar::addFileToDSK(const string& fullHostName, unsigned rootSector, Add add)
 {
-	string_view directory, hostName;
-	StringOp::splitOnLast(fullHostName, "/\\", directory, hostName);
-	string msxName = makeSimpleMSXFileName(hostName);
+	auto [directory, hostName] = StringOp::splitOnLast(fullHostName, "/\\");
+	FileName msxName = hostToMSXFileName(hostName);
 
 	// first find out if the filename already exists in current dir
 	SectorBuffer dummy;
-	DirEntry fullMsxDirEntry = findEntryInDir(msxName, rootSector, dummy);
-	if (fullMsxDirEntry.sector != 0) {
-		// TODO implement overwrite option
-		return strCat("Warning: preserving entry ", hostName, '\n');
+	if (DirEntry fullMsxDirEntry = findEntryInDir(msxName, rootSector, dummy);
+	    fullMsxDirEntry.sector != 0) {
+		if (add == Add::PRESERVE) {
+			return strCat("Warning: preserving entry ", hostName, '\n');
+		} else {
+			// first delete entry
+			deleteEntry(dummy.dirEntry[fullMsxDirEntry.index]);
+			writeLogicalSector(fullMsxDirEntry.sector, dummy);
+		}
 	}
 
 	SectorBuffer buf;
@@ -582,12 +822,11 @@ string MSXtar::addFileToDSK(const string& fullHostName, unsigned rootSector)
 	readLogicalSector(entry.sector, buf);
 	auto& dirEntry = buf.dirEntry[entry.index];
 	memset(&dirEntry, 0, sizeof(dirEntry));
-	memcpy(&dirEntry, msxName.data(), 11);
-	dirEntry.attrib = T_MSX_REG;
+	ranges::copy(msxName, dirEntry.filename);
+	dirEntry.attrib = MSXDirEntry::Attrib::REGULAR;
 
 	// compute time/date stamps
-	unsigned time, date;
-	getTimeDate(fullHostName, time, date);
+	auto [time, date] = getTimeDate(fullHostName);
 	dirEntry.time = time;
 	dirEntry.date = date;
 
@@ -602,116 +841,129 @@ string MSXtar::addFileToDSK(const string& fullHostName, unsigned rootSector)
 	return {};
 }
 
-// Transfer directory and all its subdirectories to the MSX diskimage
-// @throws when an error occurs
-string MSXtar::recurseDirFill(string_view dirName, unsigned sector)
+std::string MSXtar::addOrCreateSubdir(zstring_view hostDirName, unsigned sector, Add add)
 {
-	string messages;
-	ReadDir readDir(dirName.str());
-	while (dirent* d = readDir.getEntry()) {
-		string name(d->d_name);
-		string fullName = strCat(dirName, '/', name);
-
-		FileOperations::Stat st;
-		if (!FileOperations::getStat(fullName, st)) {
-			// ignore, normally this should not happen
-			continue;
+	FileName msxFileName = hostToMSXFileName(hostDirName);
+	auto printableFilename = msxToHostFileName(msxFileName);
+	SectorBuffer buf;
+	if (DirEntry entry = findEntryInDir(msxFileName, sector, buf);
+	    entry.sector != 0) {
+		// entry already exists ..
+		auto& msxDirEntry = buf.dirEntry[entry.index];
+		if (msxDirEntry.attrib & MSXDirEntry::Attrib::DIRECTORY) {
+			// .. and is a directory
+			DirCluster nextCluster = getStartCluster(msxDirEntry);
+			return std::visit(overloaded{
+				[&](Free) { return strCat("Directory ", printableFilename, " goes to root.\n"); },
+				[&](Cluster cluster) { return recurseDirFill(hostDirName, clusterToSector(cluster), add); }
+			}, nextCluster);
 		}
-
-		if (FileOperations::isRegularFile(st)) {
-			// add new file
-			messages += addFileToDSK(fullName, sector);
-
-		} else if (FileOperations::isDirectory(st) &&
-			   (name != ".") && (name != "..")) {
-			string msxFileName = makeSimpleMSXFileName(name);
-			SectorBuffer buf;
-			DirEntry entry = findEntryInDir(msxFileName, sector, buf);
-			if (entry.sector != 0) {
-				// entry already exists ..
-				auto& msxDirEntry = buf.dirEntry[entry.index];
-				if (msxDirEntry.attrib & T_MSX_DIR) {
-					// .. and is a directory
-					unsigned nextSector = clusterToSector(
-						getStartCluster(msxDirEntry));
-					messages += recurseDirFill(fullName, nextSector);
-				} else {
-					// .. but is NOT a directory
-					strAppend(messages,
-					          "MSX file ", msxFileName,
-					          " is not a directory.\n");
-				}
-			} else {
-				// add new directory
-				unsigned nextSector = addSubdirToDSK(fullName, name, sector);
-				messages += recurseDirFill(fullName, nextSector);
-			}
+		// .. but is NOT a directory
+		if (add == Add::PRESERVE) {
+			return strCat("MSX file ", printableFilename, " is not a directory.\n");
+		} else {
+			// first delete existing file
+			deleteEntry(msxDirEntry);
+			writeLogicalSector(entry.sector, buf);
 		}
 	}
+	// add new directory
+	unsigned nextSector = addSubdirToDSK(hostDirName, msxFileName, sector);
+	return recurseDirFill(hostDirName, nextSector, add);
+}
+
+// Transfer directory and all its subdirectories to the MSX disk image
+// @throws when an error occurs
+string MSXtar::recurseDirFill(string_view dirName, unsigned sector, Add add)
+{
+	string messages;
+
+	auto fileAction = [&](const string& path) {
+		// add new file
+		messages += addFileToDSK(path, sector, add);
+	};
+	auto dirAction = [&](const string& path) {
+		// add new directory (+ recurse)
+		messages += addOrCreateSubdir(path, sector, add);
+	};
+	foreach_file_and_directory(std::string(dirName), fileAction, dirAction);
+
 	return messages;
 }
 
 
-string MSXtar::condensName(const MSXDirEntry& dirEntry)
+string MSXtar::msxToHostFileName(const FileName& msxName) const
 {
 	string result;
-	for (unsigned i = 0; (i < 8) && (dirEntry.name.base[i] != ' '); ++i) {
-		result += char(tolower(dirEntry.name.base[i]));
+	for (unsigned i = 0; i < 8 && msxName[i] != ' '; ++i) {
+		result += char(tolower(msxName[i]));
 	}
-	if (dirEntry.name.ext[0] != ' ') {
+	if (msxName[8] != ' ') {
 		result += '.';
-		for (unsigned i = 0; (i < 3) && (dirEntry.name.ext[i] != ' '); ++i) {
-			result += char(tolower(dirEntry.name.ext[i]));
+		for (unsigned i = 8; i < 11 && msxName[i] != ' '; ++i) {
+			result += char(tolower(msxName[i]));
+		}
+	}
+	std::span<const uint8_t> resultSpan(std::bit_cast<const uint8_t*>(result.data()), result.size());
+	return msxChars.msxToUtf8(resultSpan, '_');
+}
+
+
+// Set the entries from dirEntry to the timestamp of resultFile
+static void changeTime(zstring_view resultFile, const MSXDirEntry& dirEntry)
+{
+	unsigned t = dirEntry.time;
+	unsigned d = dirEntry.date;
+	struct tm mTim;
+	struct utimbuf uTim;
+	mTim.tm_sec   = narrow<int>((t & 0x001f) << 1);
+	mTim.tm_min   = narrow<int>((t & 0x07e0) >> 5);
+	mTim.tm_hour  = narrow<int>((t & 0xf800) >> 11);
+	mTim.tm_mday  = narrow<int>( (d & 0x001f) >> 0);
+	mTim.tm_mon   = narrow<int>(((d & 0x01e0) >> 5) - 1);
+	mTim.tm_year  = narrow<int>(((d & 0xfe00) >> 9) + 80);
+	mTim.tm_isdst = -1;
+	uTim.actime  = mktime(&mTim);
+	uTim.modtime = mktime(&mTim);
+	utime(resultFile.c_str(), &uTim);
+}
+
+TclObject MSXtar::dirRaw()
+{
+	TclObject result;
+	for (unsigned sector = chrootSector; sector != 0; sector = getNextSector(sector)) {
+		SectorBuffer buf;
+		readLogicalSector(sector, buf);
+		for (auto& dirEntry : buf.dirEntry) {
+			if (dirEntry.filename[0] == char(0x00)) {
+				return result;
+			}
+			if (dirEntry.filename[0] == char(0xe5) || dirEntry.attrib == T_MSX_LFN) {
+				continue;
+			}
+
+			auto filename = msxToHostFileName(dirEntry.filename);
+			time_t time = DiskImageUtils::fromTimeDate(DiskImageUtils::FatTimeDate{dirEntry.time, dirEntry.date});
+			result.addListElement(makeTclList(filename, dirEntry.attrib, narrow<uint32_t>(time), dirEntry.size));
 		}
 	}
 	return result;
 }
 
-
-// Set the entries from dirEntry to the timestamp of resultFile
-void MSXtar::changeTime(const string& resultFile, const MSXDirEntry& dirEntry)
+std::string MSXtar::dir()
 {
-	unsigned t = dirEntry.time;
-	unsigned d = dirEntry.date;
-	struct tm mtim;
-	struct utimbuf utim;
-	mtim.tm_sec   =  (t & 0x001f) << 1;
-	mtim.tm_min   =  (t & 0x07e0) >> 5;
-	mtim.tm_hour  =  (t & 0xf800) >> 11;
-	mtim.tm_mday  =  (d & 0x001f);
-	mtim.tm_mon   = ((d & 0x01e0) >> 5) - 1;
-	mtim.tm_year  = ((d & 0xfe00) >> 9) + 80;
-	mtim.tm_isdst = -1;
-	utim.actime  = mktime(&mtim);
-	utim.modtime = mktime(&mtim);
-	utime(resultFile.c_str(), &utim);
-}
+	std::string result;
+	auto list = dirRaw();
+	auto num = list.size();
+	for (unsigned i = 0; i < num; ++i) {
+		auto entry = list.getListIndexUnchecked(i);
+		auto filename = std::string(entry.getListIndexUnchecked(0).getString());
+		auto attrib = DiskImageUtils::formatAttrib(narrow<uint8_t>(entry.getListIndexUnchecked(1).getOptionalInt().value_or(0)));
+		//time_t time = entry.getListIndexUnchecked(2).getOptionalInt().value_or(0); // ignored
+		auto size = entry.getListIndexUnchecked(3).getOptionalInt().value_or(0);
 
-string MSXtar::dir()
-{
-	string result;
-	for (unsigned sector = chrootSector; sector != 0; sector = getNextSector(sector)) {
-		SectorBuffer buf;
-		readLogicalSector(sector, buf);
-		for (auto& dirEntry : buf.dirEntry) {
-			if ((dirEntry.filename[0] == char(0xe5)) ||
-			    (dirEntry.filename[0] == char(0x00)) ||
-			    (dirEntry.attrib == T_MSX_LFN)) continue;
-
-			// filename first (in condensed form for human readablitly)
-			string tmp = condensName(dirEntry);
-			tmp.resize(13, ' ');
-			strAppend(result, tmp,
-			          // attributes
-			          (dirEntry.attrib & T_MSX_DIR  ? 'd' : '-'),
-			          (dirEntry.attrib & T_MSX_READ ? 'r' : '-'),
-			          (dirEntry.attrib & T_MSX_HID  ? 'h' : '-'),
-			          (dirEntry.attrib & T_MSX_VOL  ? 'v' : '-'), // TODO check if this is the output of files,l
-			          (dirEntry.attrib & T_MSX_ARC  ? 'a' : '-'), // TODO check if this is the output of files,l
-			          "  ",
-			          // filesize
-			          dirEntry.size << '\n');
-		}
+		filename.resize(13, ' '); // filename first (in condensed form for human readability)
+		strAppend(result, filename, attrib, "  ", size, '\n');
 	}
 	return result;
 }
@@ -738,15 +990,14 @@ void MSXtar::chroot(string_view newRootDir, bool createDir)
 	}
 
 	while (!newRootDir.empty()) {
-		string_view firstPart, lastPart;
-		StringOp::splitOnFirst(newRootDir, "/\\", firstPart, lastPart);
+		auto [firstPart, lastPart] = StringOp::splitOnFirst(newRootDir, "/\\");
 		newRootDir = lastPart;
 		StringOp::trimLeft(newRootDir, "/\\");
 
 		// find 'firstPart' directory or create it if requested
 		SectorBuffer buf;
-		string simple = makeSimpleMSXFileName(firstPart);
-		DirEntry entry = findEntryInDir(simple, chrootSector, buf);
+		FileName msxName = hostToMSXFileName(firstPart);
+		DirEntry entry = findEntryInDir(msxName, chrootSector, buf);
 		if (entry.sector == 0) {
 			if (!createDir) {
 				throw MSXException("Subdirectory ", firstPart,
@@ -755,15 +1006,18 @@ void MSXtar::chroot(string_view newRootDir, bool createDir)
 			// creat new subdir
 			time_t now;
 			time(&now);
-			unsigned t, d;
-			getTimeDate(now, t, d);
-			chrootSector = addSubdir(simple, t, d, chrootSector);
+			auto [t, d] = DiskImageUtils::toTimeDate(now);
+			chrootSector = addSubdir(msxName, t, d, chrootSector);
 		} else {
 			auto& dirEntry = buf.dirEntry[entry.index];
-			if (!(dirEntry.attrib & T_MSX_DIR)) {
+			if (!(dirEntry.attrib & MSXDirEntry::Attrib::DIRECTORY)) {
 				throw MSXException(firstPart, " is not a directory.");
 			}
-			chrootSector = clusterToSector(getStartCluster(dirEntry));
+			DirCluster chrootCluster = getStartCluster(dirEntry);
+			chrootSector = std::visit(overloaded{
+				[this](Free) { return rootDirStart; },
+				[this](Cluster cluster) { return clusterToSector(cluster); }
+			}, chrootCluster);
 		}
 	}
 }
@@ -771,44 +1025,49 @@ void MSXtar::chroot(string_view newRootDir, bool createDir)
 void MSXtar::fileExtract(const string& resultFile, const MSXDirEntry& dirEntry)
 {
 	unsigned size = dirEntry.size;
-	unsigned sector = clusterToSector(getStartCluster(dirEntry));
+	unsigned sector = std::visit(overloaded{
+		[](Free) { return 0u; },
+		[this](Cluster cluster) { return clusterToSector(cluster); }
+	}, getStartCluster(dirEntry));
 
-	File file(FileOperations::expandTilde(resultFile), "wb");
+	File file(resultFile, "wb");
 	while (size && sector) {
 		SectorBuffer buf;
 		readLogicalSector(sector, buf);
-		unsigned savesize = std::min(size, SECTOR_SIZE);
-		file.write(&buf, savesize);
-		size -= savesize;
+		unsigned saveSize = std::min(size, SECTOR_SIZE);
+		file.write(subspan(buf.raw, 0, saveSize));
+		size -= saveSize;
 		sector = getNextSector(sector);
 	}
 	// now change the access time
 	changeTime(resultFile, dirEntry);
 }
 
-// extracts a single item (file or directory) from the msximage to the host OS
+// extracts a single item (file or directory) from the msx image to the host OS
 string MSXtar::singleItemExtract(string_view dirName, string_view itemName,
                                  unsigned sector)
 {
 	// first find out if the filename exists in current dir
 	SectorBuffer buf;
-	string msxName = makeSimpleMSXFileName(itemName);
+	FileName msxName = hostToMSXFileName(itemName);
 	DirEntry entry = findEntryInDir(msxName, sector, buf);
 	if (entry.sector == 0) {
 		return strCat(itemName, " not found!\n");
 	}
 
 	auto& msxDirEntry = buf.dirEntry[entry.index];
-	// create full name for loacl filesystem
-	string fullName = strCat(dirName, '/', condensName(msxDirEntry));
+	// create full name for local filesystem
+	string fullName = strCat(dirName, '/', msxToHostFileName(msxDirEntry.filename));
 
 	// ...and extract
-	if  (msxDirEntry.attrib & T_MSX_DIR) {
+	if  (msxDirEntry.attrib & MSXDirEntry::Attrib::DIRECTORY) {
 		// recursive extract this subdir
 		FileOperations::mkdirp(fullName);
-		recurseDirExtract(
-			fullName,
-			clusterToSector(getStartCluster(msxDirEntry)));
+		DirCluster nextCluster = getStartCluster(msxDirEntry);
+		std::visit(overloaded{
+			[](Free) { /* Points to root, ignore. */},
+			[&](Cluster cluster) { recurseDirExtract(fullName, clusterToSector(cluster)); }
+		}, nextCluster);
 	} else {
 		// it is a file
 		fileExtract(fullName, msxDirEntry);
@@ -824,38 +1083,52 @@ void MSXtar::recurseDirExtract(string_view dirName, unsigned sector)
 		SectorBuffer buf;
 		readLogicalSector(sector, buf);
 		for (auto& dirEntry : buf.dirEntry) {
-			if ((dirEntry.filename[0] == char(0xe5)) ||
-			    (dirEntry.filename[0] == char(0x00)) ||
-			    (dirEntry.filename[0] == '.')) continue;
-
-			string filename = condensName(dirEntry);
+			if (dirEntry.filename[0] == char(0x00)) {
+				return;
+			}
+			if (dirEntry.filename[0] == one_of(char(0xe5), '.') || dirEntry.attrib == T_MSX_LFN) {
+				continue;
+			}
+			string filename = msxToHostFileName(dirEntry.filename);
 			string fullName = filename;
 			if (!dirName.empty()) {
 				fullName = strCat(dirName, '/', filename);
 			}
-			if (dirEntry.attrib != T_MSX_DIR) { // TODO
-				fileExtract(fullName, dirEntry);
-			}
-			if (dirEntry.attrib == T_MSX_DIR) {
+			if (dirEntry.attrib & MSXDirEntry::Attrib::DIRECTORY) {
 				FileOperations::mkdirp(fullName);
 				// now change the access time
 				changeTime(fullName, dirEntry);
-				recurseDirExtract(
-					fullName,
-					clusterToSector(getStartCluster(dirEntry)));
+				std::visit(overloaded{
+					[](Free) { /* Points to root, ignore. */ },
+					[&](Cluster cluster) { recurseDirExtract(fullName, clusterToSector(cluster)); }
+				}, getStartCluster(dirEntry));
+			} else {
+				fileExtract(fullName, dirEntry);
 			}
 		}
 	}
 }
 
-string MSXtar::addDir(string_view rootDirName)
+std::string MSXtar::addItem(const std::string& hostItemName, Add add)
 {
-	return recurseDirFill(rootDirName, chrootSector);
+	if (auto stat = FileOperations::getStat(hostItemName)) {
+		if (FileOperations::isRegularFile(*stat)) {
+			return addFileToDSK(hostItemName, chrootSector, add);
+		} else if (FileOperations::isDirectory(hostItemName)) {
+			return addOrCreateSubdir(hostItemName, chrootSector, add);
+		}
+	}
+	return "";
 }
 
-string MSXtar::addFile(const string& filename)
+string MSXtar::addDir(string_view rootDirName, Add add)
 {
-	return addFileToDSK(filename, chrootSector);
+	return recurseDirFill(rootDirName, chrootSector, add);
+}
+
+string MSXtar::addFile(const string& filename, Add add)
+{
+	return addFileToDSK(filename, chrootSector, add);
 }
 
 string MSXtar::getItemFromDir(string_view rootDirName, string_view itemName)
@@ -866,6 +1139,23 @@ string MSXtar::getItemFromDir(string_view rootDirName, string_view itemName)
 void MSXtar::getDir(string_view rootDirName)
 {
 	recurseDirExtract(rootDirName, chrootSector);
+}
+
+std::string MSXtar::deleteItem(std::string_view itemName)
+{
+	FileName msxName = hostToMSXFileName(itemName);
+	return deleteEntry(msxName, chrootSector);
+}
+
+std::string MSXtar::convertToMsxName(std::string_view name) const
+{
+	FileName msxName = hostToMSXFileName(name);
+	return msxToHostFileName(msxName);
+}
+
+MSXtar::FreeSpaceResult MSXtar::getFreeSpace() const
+{
+	return {countFreeClusters(), sectorsPerCluster * SECTOR_SIZE};
 }
 
 } // namespace openmsx

@@ -50,7 +50,17 @@ proc psgdirectioncallback {} {
 	message {The running MSX software has set unsafe PSG port directions.
 Real (older) MSX machines can get damaged by this.} warning
 }
-set invalid_psg_directions_callback psgdirectioncallback
+interp alias {} default_invalid_psg_directions_callback {} psgdirectioncallback
+
+
+# Callback on setting an invalid PPI mode.
+set ppi_mode_warning_printed false
+proc ppimodecallback {} {
+	if {$::ppi_mode_warning_printed} return
+	set ::ppi_mode_warning_printed true
+	message {Invalid PPI mode selected. This is not yet correctly emulated. On a real MSX this will most likely hang.} warning
+}
+interp alias {} default_invalid_ppi_mode_callback {} ppimodecallback
 
 
 # Callback on DI;HALT.
@@ -60,8 +70,7 @@ proc dihaltcallback {} {
 		message "DI; HALT detected, which means a hang. You can just as well reset the machine now..." warning
 	}
 }
-set di_halt_callback dihaltcallback
-
+interp alias {} default_di_halt_callback {} dihaltcallback
 
 # Callback on too fast VRAM read/write, not enabled by default
 proc warn_too_fast_vram_access {} {
@@ -98,6 +107,11 @@ proc sensorkidacquirecallback {port} {
 set sensor_kid_port_status_callback sensorkidportstatuscallback
 set sensor_kid_acquire_callback     sensorkidacquirecallback
 
-
-# show message (also) as OSD message
-set message_callback osd::display_message
+proc default_V9990_invalid_register_read_callback {reg} {
+	message [format "Reading from V9990 write-only register 0x%x" $reg] warning
+}
+proc default_V9990_invalid_register_write_callback {reg value} {
+	message [format "Writing 0x%x to V9990 read-only register %i" $value $reg] warning
+}
+#set v9990_invalid_register_read_callback  default_V9990_invalid_register_read_callback
+#set v9990_invalid_register_write_callback default_V9990_invalid_register_write_callback

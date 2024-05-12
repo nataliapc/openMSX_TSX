@@ -1,11 +1,16 @@
 #include "MSXS1985.hh"
+#include "MSXMapperIO.hh"
+#include "MSXMotherBoard.hh"
 #include "SRAM.hh"
+#include "enumerate.hh"
+#include "narrow.hh"
 #include "serialize.hh"
+#include <array>
 #include <memory>
 
 namespace openmsx {
 
-static const byte ID = 0xFE;
+static constexpr byte ID = 0xFE;
 
 MSXS1985::MSXS1985(const DeviceConfig& config)
 	: MSXDevice(config)
@@ -22,10 +27,19 @@ MSXS1985::MSXS1985(const DeviceConfig& config)
 			getName() + " SRAM", "S1985 Backup RAM",
 			0x10, config);
 	}
+
+	auto& mapperIO = getMotherBoard().createMapperIO();
+	byte mask = 0b0001'1111; // always(?) 5 bits
+	auto baseValue = narrow_cast<byte>(config.getChildDataAsInt("MapperReadBackBaseValue", 0x80));
+	mapperIO.setMode(MSXMapperIO::Mode::INTERNAL, mask, baseValue);
+
 	reset(EmuTime::dummy());
 }
 
-MSXS1985::~MSXS1985() = default;
+MSXS1985::~MSXS1985()
+{
+	getMotherBoard().destroyMapperIO();
+}
 
 void MSXS1985::reset(EmuTime::param /*time*/)
 {
@@ -37,7 +51,7 @@ byte MSXS1985::readSwitchedIO(word port, EmuTime::param time)
 	byte result = peekSwitchedIO(port, time);
 	switch (port & 0x0F) {
 	case 7:
-		pattern = (pattern << 1) | (pattern >> 7);
+		pattern = byte((pattern << 1) | (pattern >> 7));
 		break;
 	}
 	return result;
@@ -45,21 +59,16 @@ byte MSXS1985::readSwitchedIO(word port, EmuTime::param time)
 
 byte MSXS1985::peekSwitchedIO(word port, EmuTime::param /*time*/) const
 {
-	byte result;
 	switch (port & 0x0F) {
 	case 0:
-		result = byte(~ID);
-		break;
+		return byte(~ID);
 	case 2:
-		result = (*sram)[address];
-		break;
+		return (*sram)[address];
 	case 7:
-		result = (pattern & 0x80) ? color2 : color1;
-		break;
+		return (pattern & 0x80) ? color2 : color1;
 	default:
-		result = 0xFF;
+		return 0xFF;
 	}
-	return result;
 }
 
 void MSXS1985::writeSwitchedIO(word port, byte value, EmuTime::param /*time*/)
@@ -93,25 +102,25 @@ void MSXS1985::serialize(Archive& ar, unsigned version)
 		// serialize normally...
 		ar.serialize("sram", *sram);
 	} else {
-		assert(ar.isLoader());
+		assert(Archive::IS_LOADER);
 		// version 1 had here
 		//    <ram>
 		//      <ram encoding="..">...</ram>
 		//    </ram>
 		// deserialize that structure and transfer it to SRAM
-		byte tmp[0x10];
+		std::array<byte, 0x10> tmp;
 		ar.beginTag("ram");
-		ar.serialize_blob("ram", tmp, sizeof(tmp));
+		ar.serialize_blob("ram", tmp);
 		ar.endTag("ram");
-		for (unsigned i = 0; i < sizeof(tmp); ++i) {
-			sram->write(i, tmp[i]);
+		for (auto [i, t] : enumerate(tmp)) {
+			sram->write(unsigned(i), t);
 		}
 	}
 
-	ar.serialize("address", address);
-	ar.serialize("color1", color1);
-	ar.serialize("color2", color2);
-	ar.serialize("pattern", pattern);
+	ar.serialize("address", address,
+	             "color1",  color1,
+	             "color2",  color2,
+	             "pattern", pattern);
 }
 INSTANTIATE_SERIALIZE_METHODS(MSXS1985);
 REGISTER_MSXDEVICE(MSXS1985, "S1985");

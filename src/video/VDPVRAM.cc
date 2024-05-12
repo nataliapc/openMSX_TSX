@@ -1,28 +1,21 @@
 #include "VDPVRAM.hh"
 #include "SpriteChecker.hh"
 #include "Renderer.hh"
-#include "Math.hh"
 #include "outer.hh"
+#include "ranges.hh"
 #include "serialize.hh"
 #include <algorithm>
-#include <cstring>
+#include <array>
+#include <bit>
 
 namespace openmsx {
 
 // class VRAMWindow
 
-DummyVRAMOBserver VRAMWindow::dummyObserver;
-
 VRAMWindow::VRAMWindow(Ram& vram)
-	: data(&vram[0])
-{
-	observer = &dummyObserver;
-	baseAddr  = -1; // disable window
-	origBaseMask = 0;
-	effectiveBaseMask = 0;
-	indexMask = 0; // these 4 don't matter but it makes valgrind happy
-	combiMask = 0;
+	: data(vram.data())
 	// sizeMask will be initialized shortly by the VDPVRAM class
+{
 }
 
 
@@ -40,7 +33,7 @@ VRAMWindow::VRAMWindow(Ram& vram)
  *   size of this debuggable would have to be 256kB to be able to access the
  *   complete extended VRAM in interleaved mode.
  */
-VDPVRAM::LogicalVRAMDebuggable::LogicalVRAMDebuggable(VDP& vdp_)
+VDPVRAM::LogicalVRAMDebuggable::LogicalVRAMDebuggable(const VDP& vdp_)
 	: SimpleDebuggable(vdp_.getMotherBoard(), vdp_.getName() == "VDP" ? "VRAM" :
 			vdp_.getName() + " VRAM",
 			"CPU view on video RAM given the current display mode.",
@@ -73,7 +66,7 @@ void VDPVRAM::LogicalVRAMDebuggable::write(
 // class PhysicalVRAMDebuggable
 
 VDPVRAM::PhysicalVRAMDebuggable::PhysicalVRAMDebuggable(
-		VDP& vdp_, unsigned actualSize_)
+		const VDP& vdp_, unsigned actualSize_)
 	: SimpleDebuggable(vdp_.getMotherBoard(), vdp_.getName() == "VDP" ?
 	                   "physical VRAM" : strCat("physical ", vdp_.getName(), " VRAM"),
 	                   "VDP-screen-mode-independent view on the video RAM.",
@@ -97,7 +90,7 @@ void VDPVRAM::PhysicalVRAMDebuggable::write(
 
 // class VDPVRAM
 
-static unsigned bufferSize(unsigned size)
+static constexpr unsigned bufferSize(unsigned size)
 {
 	// Always allocate at least a buffer of 128kB, this makes the VR0/VR1
 	// swapping a lot easier. Actually only in case there is also extended
@@ -113,9 +106,10 @@ VDPVRAM::VDPVRAM(VDP& vdp_, unsigned size, EmuTime::param time)
 	, logicalVRAMDebug (vdp)
 	, physicalVRAMDebug(vdp, size)
 	#ifdef DEBUG
-	, vramTime(EmuTime::zero)
+	, vramTime(EmuTime::zero())
 	#endif
 	, actualSize(size)
+	, vrMode(vdp.getVRMode())
 	, cmdReadWindow(data)
 	, cmdWriteWindow(data)
 	, nameTable(data)
@@ -126,27 +120,24 @@ VDPVRAM::VDPVRAM(VDP& vdp_, unsigned size, EmuTime::param time)
 	, spriteAttribTable(data)
 	, spritePatternTable(data)
 {
-	(void)time;
-
-	vrMode = vdp.getVRMode();
 	setSizeMask(time);
 
-	// Whole VRAM is cachable.
+	// Whole VRAM is cacheable.
 	// Because this window has no observer, any EmuTime can be passed.
 	// TODO: Move this to cache registration.
-	bitmapCacheWindow.setMask(0x1FFFF, ~0u << 17, EmuTime::zero);
+	bitmapCacheWindow.setMask(0x1FFFF, ~0u << 17, EmuTime::zero());
 }
 
 void VDPVRAM::clear()
 {
 	// Initialise VRAM data array.
 	data.clear(0); // fill with zeros (unless initialContent is specified)
-	if (data.getSize() != actualSize) {
-		assert(data.getSize() > actualSize);
+	if (data.size() != actualSize) {
+		assert(data.size() > actualSize);
 		// Read from unconnected VRAM returns random data.
 		// TODO reading same location multiple times does not always
 		// give the same value.
-		memset(&data[actualSize], 0xFF, data.getSize() - actualSize);
+		ranges::fill(subspan(data, actualSize), 0xFF);
 	}
 }
 
@@ -176,25 +167,27 @@ void VDPVRAM::updateSpritesEnabled(bool enabled, EmuTime::param time)
 
 void VDPVRAM::setSizeMask(EmuTime::param time)
 {
-	sizeMask = (
+	unsigned newSizeMask = (
 		  vrMode
 		// VR = 1: 64K address space, CAS0/1 is determined by A16
-		? (Math::powerOfTwo(actualSize) - 1) | (1u << 16)
+		? (std::bit_ceil(actualSize) - 1) | (1u << 16)
 		// VR = 0: 16K address space, CAS0/1 is determined by A14
-		: (std::min(Math::powerOfTwo(actualSize), 16384u) - 1) | (1u << 14)
+		: (std::min(std::bit_ceil(actualSize), 0x4000u) - 1) | (1u << 14)
 		) | (1u << 17); // CASX (expansion RAM) is always relevant
 
-	cmdReadWindow.setSizeMask(sizeMask, time);
-	cmdWriteWindow.setSizeMask(sizeMask, time);
-	nameTable.setSizeMask(sizeMask, time);
-	colorTable.setSizeMask(sizeMask, time);
-	patternTable.setSizeMask(sizeMask, time);
-	bitmapVisibleWindow.setSizeMask(sizeMask, time);
-	bitmapCacheWindow.setSizeMask(sizeMask, time);
-	spriteAttribTable.setSizeMask(sizeMask, time);
-	spritePatternTable.setSizeMask(sizeMask, time);
+	cmdReadWindow.setSizeMask(newSizeMask, time);
+	cmdWriteWindow.setSizeMask(newSizeMask, time);
+	nameTable.setSizeMask(newSizeMask, time);
+	colorTable.setSizeMask(newSizeMask, time);
+	patternTable.setSizeMask(newSizeMask, time);
+	bitmapVisibleWindow.setSizeMask(newSizeMask, time);
+	bitmapCacheWindow.setSizeMask(newSizeMask, time);
+	spriteAttribTable.setSizeMask(newSizeMask, time);
+	spritePatternTable.setSizeMask(newSizeMask, time);
+
+	sizeMask = newSizeMask;
 }
-static inline unsigned swapAddr(unsigned x)
+static constexpr unsigned swapAddr(unsigned x)
 {
 	// translate VR0 address to corresponding VR1 address
 	//  note: output bit 0 is always 1
@@ -219,7 +212,7 @@ void VDPVRAM::updateVRMode(bool newVRmode, EmuTime::param time)
 		}
 	} else {
 		// switch from VR=1 to VR=0
-		for (int i = 0; i < 0x8000; ++i) {
+		for (auto i : xrange(0x8000)) {
 			std::swap(data[i], data[swapAddr(i)]);
 		}
 	}
@@ -282,16 +275,15 @@ void VDPVRAM::change4k8kMapping(bool mapping8k)
 	 * even in 4K mode, all 16K of VRAM can be accessed. The only
 	 * difference is in what addresses are used to store data.
 	 */
-	byte tmp[0x4000];
+	std::array<byte, 0x4000> tmp;
 	if (mapping8k) {
 		// from 8k/16k to 4k mapping
 		for (unsigned addr8 = 0; addr8 < 0x4000; addr8 += 64) {
 			unsigned addr4 =  (addr8 & 0x203F) |
 			                 ((addr8 & 0x1000) >> 6) |
 			                 ((addr8 & 0x0FC0) << 1);
-			const byte* src = &data[addr8];
-			byte* dst = &tmp[addr4];
-			memcpy(dst, src, 64);
+			ranges::copy(subspan<64>(data, addr8),
+			             subspan<64>(tmp, addr4));
 		}
 	} else {
 		// from 4k to 8k/16k mapping
@@ -299,22 +291,22 @@ void VDPVRAM::change4k8kMapping(bool mapping8k)
 			unsigned addr8 =  (addr4 & 0x203F) |
 			                 ((addr4 & 0x0040) << 6) |
 			                 ((addr4 & 0x1F80) >> 1);
-			const byte* src = &data[addr4];
-			byte* dst = &tmp[addr8];
-			memcpy(dst, src, 64);
+			ranges::copy(subspan<64>(data, addr4),
+			             subspan<64>(tmp, addr8));
 		}
 	}
-	memcpy(&data[0], tmp, sizeof(tmp));
+	//ranges::copy(tmp, std::span{data}); // TODO error with clang-15/libc++
+	ranges::copy(tmp, std::span{data.begin(), data.end()});
 }
 
 
 template<typename Archive>
 void VRAMWindow::serialize(Archive& ar, unsigned /*version*/)
 {
-	ar.serialize("baseAddr",  baseAddr);
-	ar.serialize("baseMask",  origBaseMask);
-	ar.serialize("indexMask", indexMask);
-	if (ar.isLoader()) {
+	ar.serialize("baseAddr",  baseAddr,
+	             "baseMask",  origBaseMask,
+	             "indexMask", indexMask);
+	if constexpr (Archive::IS_LOADER) {
 		effectiveBaseMask = origBaseMask & sizeMask;
 		combiMask = ~effectiveBaseMask | indexMask;
 		// TODO ?  observer->updateWindow(isEnabled(), time);
@@ -324,23 +316,23 @@ void VRAMWindow::serialize(Archive& ar, unsigned /*version*/)
 template<typename Archive>
 void VDPVRAM::serialize(Archive& ar, unsigned /*version*/)
 {
-	if (ar.isLoader()) {
+	if constexpr (Archive::IS_LOADER) {
 		vrMode = vdp.getVRMode();
 		setSizeMask(static_cast<MSXDevice&>(vdp).getCurrentTime());
 	}
 
-	ar.serialize_blob("data", &data[0], actualSize);
-	ar.serialize("cmdReadWindow",       cmdReadWindow);
-	ar.serialize("cmdWriteWindow",      cmdWriteWindow);
-	ar.serialize("nameTable",           nameTable);
+	ar.serialize_blob("data", std::span{data.data(), actualSize});
+	ar.serialize("cmdReadWindow",       cmdReadWindow,
+	             "cmdWriteWindow",      cmdWriteWindow,
+	             "nameTable",           nameTable,
 	// TODO: Find a way of changing the line below to "colorTable",
 	// without breaking backwards compatibility
-	ar.serialize("colourTable",         colorTable);
-	ar.serialize("patternTable",        patternTable);
-	ar.serialize("bitmapVisibleWindow", bitmapVisibleWindow);
-	ar.serialize("bitmapCacheWindow",   bitmapCacheWindow);
-	ar.serialize("spriteAttribTable",   spriteAttribTable);
-	ar.serialize("spritePatternTable",  spritePatternTable);
+	             "colourTable",         colorTable,
+	             "patternTable",        patternTable,
+	             "bitmapVisibleWindow", bitmapVisibleWindow,
+	             "bitmapCacheWindow",   bitmapCacheWindow,
+	             "spriteAttribTable",   spriteAttribTable,
+	             "spritePatternTable",  spritePatternTable);
 }
 INSTANTIATE_SERIALIZE_METHODS(VDPVRAM);
 

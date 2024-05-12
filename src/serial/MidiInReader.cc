@@ -4,12 +4,12 @@
 #include "EventDistributor.hh"
 #include "Scheduler.hh"
 #include "FileOperations.hh"
+#include "checked_cast.hh"
 #include "serialize.hh"
+#include <array>
 #include <cstdio>
 #include <cerrno>
 #include <cstring>
-
-using std::string;
 
 namespace openmsx {
 
@@ -22,29 +22,30 @@ MidiInReader::MidiInReader(EventDistributor& eventDistributor_,
 		"filename of the file where the MIDI input is read from",
 		"/dev/midi")
 {
-	eventDistributor.registerEventListener(OPENMSX_MIDI_IN_READER_EVENT, *this);
+	eventDistributor.registerEventListener(EventType::MIDI_IN_READER, *this);
 }
 
 MidiInReader::~MidiInReader()
 {
-	eventDistributor.unregisterEventListener(OPENMSX_MIDI_IN_READER_EVENT, *this);
+	eventDistributor.unregisterEventListener(EventType::MIDI_IN_READER, *this);
 }
 
 // Pluggable
 void MidiInReader::plugHelper(Connector& connector_, EmuTime::param /*time*/)
 {
-	file = FileOperations::openFile(readFilenameSetting.getString().str(), "rb");
+	file = FileOperations::openFile(readFilenameSetting.getString(), "rb");
 	if (!file) {
 		throw PlugException("Failed to open input: ", strerror(errno));
 	}
 
-	auto& midiConnector = static_cast<MidiInConnector&>(connector_);
+	auto& midiConnector = checked_cast<MidiInConnector&>(connector_);
 	midiConnector.setDataBits(SerialDataInterface::DATA_8); // 8 data bits
 	midiConnector.setStopBits(SerialDataInterface::STOP_1); // 1 stop bit
 	midiConnector.setParityBit(false, SerialDataInterface::EVEN); // no parity
 
 	setConnector(&connector_); // base class will do this in a moment,
 	                           // but thread already needs it
+	poller.reset();
 	thread = std::thread([this]() { run(); });
 }
 
@@ -55,13 +56,12 @@ void MidiInReader::unplugHelper(EmuTime::param /*time*/)
 	file.reset();
 }
 
-const string& MidiInReader::getName() const
+std::string_view MidiInReader::getName() const
 {
-	static const string name("midi-in-reader");
-	return name;
+	return "midi-in-reader";
 }
 
-string_view MidiInReader::getDescription() const
+std::string_view MidiInReader::getDescription() const
 {
 	return "MIDI in file reader. Sends data from an input file to the "
 	       "MIDI port it is connected to. The filename is set with "
@@ -71,7 +71,6 @@ string_view MidiInReader::getDescription() const
 
 void MidiInReader::run()
 {
-	byte buf;
 	if (!file) return;
 	while (true) {
 #ifndef _WIN32
@@ -79,7 +78,8 @@ void MidiInReader::run()
 			break;
 		}
 #endif
-		size_t num = fread(&buf, 1, 1, file.get());
+		std::array<uint8_t, 1> buf;
+		size_t num = fread(buf.data(), sizeof(uint8_t), buf.size(), file.get());
 		if (poller.aborted()) {
 			break;
 		}
@@ -89,20 +89,19 @@ void MidiInReader::run()
 		assert(isPluggedIn());
 
 		{
-			std::lock_guard<std::mutex> lock(mutex);
-			queue.push_back(buf);
+			std::scoped_lock lock(mutex);
+			queue.push_back(buf[0]);
 		}
-		eventDistributor.distributeEvent(
-			std::make_shared<SimpleEvent>(OPENMSX_MIDI_IN_READER_EVENT));
+		eventDistributor.distributeEvent(MidiInReaderEvent());
 	}
 }
 
 // MidiInDevice
 void MidiInReader::signal(EmuTime::param time)
 {
-	auto* conn = static_cast<MidiInConnector*>(getConnector());
+	auto* conn = checked_cast<MidiInConnector*>(getConnector());
 	if (!conn->acceptsData()) {
-		std::lock_guard<std::mutex> lock(mutex);
+		std::scoped_lock lock(mutex);
 		queue.clear();
 		return;
 	}
@@ -110,9 +109,9 @@ void MidiInReader::signal(EmuTime::param time)
 		return;
 	}
 
-	byte data;
+	uint8_t data;
 	{
-		std::lock_guard<std::mutex> lock(mutex);
+		std::scoped_lock lock(mutex);
 		if (queue.empty()) return;
 		data = queue.pop_front();
 	}
@@ -120,12 +119,12 @@ void MidiInReader::signal(EmuTime::param time)
 }
 
 // EventListener
-int MidiInReader::signalEvent(const std::shared_ptr<const Event>& /*event*/)
+int MidiInReader::signalEvent(const Event& /*event*/)
 {
 	if (isPluggedIn()) {
 		signal(scheduler.getCurrentTime());
 	} else {
-		std::lock_guard<std::mutex> lock(mutex);
+		std::scoped_lock lock(mutex);
 		queue.clear();
 	}
 	return 0;

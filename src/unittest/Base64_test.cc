@@ -1,17 +1,22 @@
 #include "catch.hpp"
+
 #include "Base64.hh"
+
+#include "ranges.hh"
+
+#include <bit>
 
 static void test_decode(const std::string& encoded, const std::string& decoded)
 {
-	auto p = Base64::decode(encoded);
-	REQUIRE(p.second == decoded.size());
-	CHECK(memcmp(p.first.data(), decoded.data(), decoded.size()) == 0);
+	auto [buf, bufSize] = Base64::decode(encoded);
+	REQUIRE(bufSize == decoded.size());
+	CHECK(ranges::equal(std::span{buf.data(), bufSize}, decoded));
 }
 
 static void test(const std::string& decoded, const std::string& encoded)
 {
-	CHECK(Base64::encode(reinterpret_cast<const uint8_t*>(decoded.data()),
-	                     decoded.size())
+	CHECK(Base64::encode(std::span{std::bit_cast<const uint8_t*>(decoded.data()),
+	                               decoded.size()})
 	      == encoded);
 	test_decode(encoded, decoded);
 }

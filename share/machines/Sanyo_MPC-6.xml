@@ -6,8 +6,9 @@
     <manufacturer>Sanyo</manufacturer>
     <code>MPC-6/Wavy6</code>
     <release_year>?</release_year>
-    <description>A simple 64kB Japanese MSX1 machine</description>
+    <description>A basic 64kB Japanese MSX1 machine.</description>
     <type>MSX</type>
+    <region>jp</region>
   </info>
 
   <!-- This config is based on Werner Kai's machine with serial number 10722198
@@ -56,8 +57,8 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <PrinterPort id="Printer Port">

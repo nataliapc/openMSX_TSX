@@ -6,8 +6,9 @@
     <manufacturer>Toshiba</manufacturer>
     <code>HX-23</code>
     <release_year>1985</release_year>
-    <description>Rare Japanese MSX2 with stereo PSG and 64kB of VRAM</description>
+    <description>Rare Japanese MSX2 with stereo PSG, only 64kB of VRAM and word processing software built in.</description>
     <type>MSX2</type>
+    <region>jp</region>
   </info>
 
   <!-- by FRS -->
@@ -41,7 +42,7 @@
 
     <PSG id="PSG">
       <type>AY8910</type>
-      <keyboardlayout>jis</keyboardlayout>
+      <keyboardlayout>JIS</keyboardlayout>
       <sound>
         <volume>21000</volume>
         <!-- There's a switch in the back to select stereo or mono sound -->
@@ -50,8 +51,8 @@
         <balance channel="3">-100</balance>
       </sound>
       <!-- The PSG I/O ports are mirrored from A0h to A7h -->
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <RTC id="Real time clock">

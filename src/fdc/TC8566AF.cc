@@ -7,83 +7,78 @@
 #include "DiskDrive.hh"
 #include "RawTrack.hh"
 #include "Clock.hh"
-#include "CliComm.hh"
+#include "MSXCliComm.hh"
 #include "MSXException.hh"
+#include "one_of.hh"
 #include "serialize.hh"
+#include "view.hh"
+#include "xrange.hh"
 
 namespace openmsx {
 
-static const byte STM_DB0 = 0x01; // FDD 0 Busy
-static const byte STM_DB1 = 0x02; // FDD 1 Busy
-static const byte STM_DB2 = 0x04; // FDD 2 Busy
-static const byte STM_DB3 = 0x08; // FDD 3 Busy
-static const byte STM_CB  = 0x10; // FDC Busy
-static const byte STM_NDM = 0x20; // Non-DMA mode
-static const byte STM_DIO = 0x40; // Data Input/Output
-static const byte STM_RQM = 0x80; // Request for Master
+static constexpr uint8_t STM_DB0 = 0x01; // FDD 0 Busy
+static constexpr uint8_t STM_DB1 = 0x02; // FDD 1 Busy
+static constexpr uint8_t STM_DB2 = 0x04; // FDD 2 Busy
+static constexpr uint8_t STM_DB3 = 0x08; // FDD 3 Busy
+static constexpr uint8_t STM_CB  = 0x10; // FDC Busy
+static constexpr uint8_t STM_NDM = 0x20; // Non-DMA mode
+static constexpr uint8_t STM_DIO = 0x40; // Data Input/Output
+static constexpr uint8_t STM_RQM = 0x80; // Request for Master
 
-static const byte ST0_DS0 = 0x01; // Drive Select 0,1
-static const byte ST0_DS1 = 0x02; //
-static const byte ST0_HD  = 0x04; // Head Address
-static const byte ST0_NR  = 0x08; // Not Ready
-static const byte ST0_EC  = 0x10; // Equipment Check
-static const byte ST0_SE  = 0x20; // Seek End
-static const byte ST0_IC0 = 0x40; // Interrupt Code
-static const byte ST0_IC1 = 0x80; //
+static constexpr uint8_t ST0_DS0 = 0x01; // Drive Select 0,1
+static constexpr uint8_t ST0_DS1 = 0x02; //
+static constexpr uint8_t ST0_HD  = 0x04; // Head Address
+static constexpr uint8_t ST0_NR  = 0x08; // Not Ready
+static constexpr uint8_t ST0_EC  = 0x10; // Equipment Check
+static constexpr uint8_t ST0_SE  = 0x20; // Seek End
+static constexpr uint8_t ST0_IC0 = 0x40; // Interrupt Code
+static constexpr uint8_t ST0_IC1 = 0x80; //
 
-static const byte ST1_MA  = 0x01; // Missing Address Mark
-static const byte ST1_NW  = 0x02; // Not Writable
-static const byte ST1_ND  = 0x04; // No Data
-//                        = 0x08; // -
-static const byte ST1_OR  = 0x10; // Over Run
-static const byte ST1_DE  = 0x20; // Data Error
-//                        = 0x40; // -
-static const byte ST1_EN  = 0x80; // End of Cylinder
+static constexpr uint8_t ST1_MA  = 0x01; // Missing Address Mark
+static constexpr uint8_t ST1_NW  = 0x02; // Not Writable
+static constexpr uint8_t ST1_ND  = 0x04; // No Data
+//                               = 0x08; // -
+static constexpr uint8_t ST1_OR  = 0x10; // Over Run
+static constexpr uint8_t ST1_DE  = 0x20; // Data Error
+//                               = 0x40; // -
+static constexpr uint8_t ST1_EN  = 0x80; // End of Cylinder
 
-static const byte ST2_MD  = 0x01; // Missing Address Mark in Data Field
-static const byte ST2_BC  = 0x02; // Bad Cylinder
-static const byte ST2_SN  = 0x04; // Scan Not Satisfied
-static const byte ST2_SH  = 0x08; // Scan Equal Satisfied
-static const byte ST2_NC  = 0x10; // No cylinder
-static const byte ST2_DD  = 0x20; // Data Error in Data Field
-static const byte ST2_CM  = 0x40; // Control Mark
-//                        = 0x80; // -
+static constexpr uint8_t ST2_MD  = 0x01; // Missing Address Mark in Data Field
+static constexpr uint8_t ST2_BC  = 0x02; // Bad Cylinder
+static constexpr uint8_t ST2_SN  = 0x04; // Scan Not Satisfied
+static constexpr uint8_t ST2_SH  = 0x08; // Scan Equal Satisfied
+static constexpr uint8_t ST2_NC  = 0x10; // No cylinder
+static constexpr uint8_t ST2_DD  = 0x20; // Data Error in Data Field
+static constexpr uint8_t ST2_CM  = 0x40; // Control Mark
+//                               = 0x80; // -
 
-static const byte ST3_DS0 = 0x01; // Drive Select 0
-static const byte ST3_DS1 = 0x02; // Drive Select 1
-static const byte ST3_HD  = 0x04; // Head Address
-static const byte ST3_2S  = 0x08; // Two Side
-static const byte ST3_TK0 = 0x10; // Track 0
-static const byte ST3_RDY = 0x20; // Ready
-static const byte ST3_WP  = 0x40; // Write Protect
-static const byte ST3_FLT = 0x80; // Fault
+static constexpr uint8_t ST3_DS0 = 0x01; // Drive Select 0
+static constexpr uint8_t ST3_DS1 = 0x02; // Drive Select 1
+static constexpr uint8_t ST3_HD  = 0x04; // Head Address
+static constexpr uint8_t ST3_2S  = 0x08; // Two Side
+static constexpr uint8_t ST3_TK0 = 0x10; // Track 0
+static constexpr uint8_t ST3_RDY = 0x20; // Ready
+static constexpr uint8_t ST3_WP  = 0x40; // Write Protect
+static constexpr uint8_t ST3_FLT = 0x80; // Fault
 
 
-TC8566AF::TC8566AF(Scheduler& scheduler_, DiskDrive* drv[4], CliComm& cliComm_,
+TC8566AF::TC8566AF(Scheduler& scheduler_, std::span<std::unique_ptr<DiskDrive>, 4> drv, MSXCliComm& cliComm_,
                    EmuTime::param time)
 	: Schedulable(scheduler_)
 	, cliComm(cliComm_)
-	, delayTime(EmuTime::zero)
-	, headUnloadTime(EmuTime::zero) // head not loaded
 {
-	// avoid UMR (on savestate)
-	dataAvailable = 0;
-	dataCurrent = 0;
 	setDrqRate(RawTrack::STANDARD_SIZE);
 
-	drive[0] = drv[0];
-	drive[1] = drv[1];
-	drive[2] = drv[2];
-	drive[3] = drv[3];
+	ranges::copy(view::transform(drv, [](auto& p) { return p.get(); }),
+	             drive);
 	reset(time);
 }
 
 void TC8566AF::reset(EmuTime::param time)
 {
-	drive[0]->setMotor(false, time);
-	drive[1]->setMotor(false, time);
-	drive[2]->setMotor(false, time);
-	drive[3]->setMotor(false, time);
+	for (auto* d : drive) {
+		d->setMotor(false, time);
+	}
 	//enableIntDma = 0;
 	//notReset = 1;
 	driveSelect = 0;
@@ -100,49 +95,32 @@ void TC8566AF::reset(EmuTime::param time)
 	headNumber = 0;
 	sectorNumber = 0;
 	number = 0;
-	currentTrack = 0;
+	endOfTrack = 0;
 	sectorsPerCylinder = 0;
 	fillerByte = 0;
 	gapLength = 0;
 	specifyData[0] = 0; // TODO check
 	specifyData[1] = 0; // TODO check
-	seekValue = 0;
-	headUnloadTime = EmuTime::zero; // head not loaded
+	for (auto& si : seekInfo) {
+		si.time = EmuTime::zero();
+		si.currentTrack = 0;
+		si.seekValue = 0;
+		si.state = SEEK_IDLE;
+	}
+	headUnloadTime = EmuTime::zero(); // head not loaded
 
 	mainStatus = STM_RQM;
 	//interrupt = false;
 }
 
-byte TC8566AF::peekReg(int reg, EmuTime::param time) const
-{
-	switch (reg) {
-	case 4: // Main Status Register
-		return peekStatus();
-	case 5: // data port
-		return peekDataPort(time);
-	}
-	return 0xff;
-}
-
-byte TC8566AF::readReg(int reg, EmuTime::param time)
-{
-	switch (reg) {
-	case 4: // Main Status Register
-		return readStatus(time);
-	case 5: // data port
-		return readDataPort(time);
-	}
-	return 0xff;
-}
-
-byte TC8566AF::peekStatus() const
+uint8_t TC8566AF::peekStatus() const
 {
 	bool nonDMAMode = specifyData[1] & 1;
-	bool dma = nonDMAMode && (phase == PHASE_DATATRANSFER);
+	bool dma = nonDMAMode && (phase == PHASE_DATA_TRANSFER);
 	return mainStatus | (dma ? STM_NDM : 0);
 }
 
-byte TC8566AF::readStatus(EmuTime::param time)
+uint8_t TC8566AF::readStatus(EmuTime::param time)
 {
 	if (delayTime.before(time)) {
 		mainStatus |= STM_RQM;
@@ -155,10 +133,10 @@ void TC8566AF::setDrqRate(unsigned trackLength)
 	delayTime.setFreq(trackLength * DiskDrive::ROTATIONS_PER_SECOND);
 }
 
-byte TC8566AF::peekDataPort(EmuTime::param time) const
+uint8_t TC8566AF::peekDataPort(EmuTime::param time) const
 {
 	switch (phase) {
-	case PHASE_DATATRANSFER:
+	case PHASE_DATA_TRANSFER:
 		return executionPhasePeek(time);
 	case PHASE_RESULT:
 		return resultsPhasePeek();
@@ -167,11 +145,11 @@ byte TC8566AF::peekDataPort(EmuTime::param time) const
 	}
 }
 
-byte TC8566AF::readDataPort(EmuTime::param time)
+uint8_t TC8566AF::readDataPort(EmuTime::param time)
 {
 	//interrupt = false;
 	switch (phase) {
-	case PHASE_DATATRANSFER:
+	case PHASE_DATA_TRANSFER:
 		if (delayTime.before(time)) {
 			return executionPhaseRead(time);
 		} else {
@@ -184,7 +162,7 @@ byte TC8566AF::readDataPort(EmuTime::param time)
 	}
 }
 
-byte TC8566AF::executionPhasePeek(EmuTime::param time) const
+uint8_t TC8566AF::executionPhasePeek(EmuTime::param time) const
 {
 	switch (command) {
 	case CMD_READ_DATA:
@@ -199,13 +177,13 @@ byte TC8566AF::executionPhasePeek(EmuTime::param time) const
 	}
 }
 
-byte TC8566AF::executionPhaseRead(EmuTime::param time)
+uint8_t TC8566AF::executionPhaseRead(EmuTime::param time)
 {
 	switch (command) {
 	case CMD_READ_DATA: {
 		assert(dataAvailable);
 		auto* drv = drive[driveSelect];
-		byte result = drv->readTrackByte(dataCurrent++);
+		uint8_t result = drv->readTrackByte(dataCurrent++);
 		crc.update(result);
 		--dataAvailable;
 		delayTime += 1; // time when next byte will be available
@@ -217,14 +195,23 @@ byte TC8566AF::executionPhaseRead(EmuTime::param time)
 			resultPhase();
 		} else if (!dataAvailable) {
 			// check crc error
-			word diskCrc  = 256 * drv->readTrackByte(dataCurrent++);
-			     diskCrc +=       drv->readTrackByte(dataCurrent++);
+			uint16_t diskCrc  = 256 * drv->readTrackByte(dataCurrent++);
+			         diskCrc +=       drv->readTrackByte(dataCurrent++);
 			if (diskCrc != crc.getValue()) {
 				status0 |= ST0_IC0;
 				status1 |= ST1_DE;
 				status2 |= ST2_DD;
+				resultPhase();
+			} else {
+				++sectorNumber;
+				if (sectorNumber > endOfTrack) {
+					// done
+					resultPhase();
+				} else {
+					// read next sector
+					startReadWriteSector(time);
+				}
 			}
-			resultPhase();
 		}
 		return result;
 	}
@@ -233,12 +220,13 @@ byte TC8566AF::executionPhaseRead(EmuTime::param time)
 	}
 }
 
-byte TC8566AF::resultsPhasePeek() const
+uint8_t TC8566AF::resultsPhasePeek() const
 {
 	switch (command) {
 	case CMD_READ_DATA:
 	case CMD_WRITE_DATA:
 	case CMD_FORMAT:
+	case CMD_READ_ID:
 		switch (phaseStep) {
 		case 0:
 			return status0;
@@ -262,7 +250,7 @@ byte TC8566AF::resultsPhasePeek() const
 		case 0:
 			return status0;
 		case 1:
-			return currentTrack;
+			return seekInfo[status0 & 3].currentTrack;
 		}
 		break;
 
@@ -279,14 +267,18 @@ byte TC8566AF::resultsPhasePeek() const
 	return 0xff;
 }
 
-byte TC8566AF::resultsPhaseRead(EmuTime::param time)
+uint8_t TC8566AF::resultsPhaseRead(EmuTime::param time)
 {
-	byte result = resultsPhasePeek();
+	uint8_t result = resultsPhasePeek();
 	switch (command) {
 	case CMD_READ_DATA:
 	case CMD_WRITE_DATA:
 	case CMD_FORMAT:
+	case CMD_READ_ID:
 		switch (phaseStep++) {
+		case 0:
+			status0 = 0; // TODO correct?  Reset _all_ bits?
+			break;
 		case 6:
 			endCommand(time);
 			break;
@@ -295,6 +287,9 @@ byte TC8566AF::resultsPhaseRead(EmuTime::param time)
 
 	case CMD_SENSE_INTERRUPT_STATUS:
 		switch (phaseStep++) {
+		case 0:
+			status0 = 0; // TODO correct?  Reset _all_ bits?
+			break;
 		case 1:
 			endCommand(time);
 			break;
@@ -315,30 +310,27 @@ byte TC8566AF::resultsPhaseRead(EmuTime::param time)
 	return result;
 }
 
-void TC8566AF::writeReg(int reg, byte data, EmuTime::param time)
+void TC8566AF::writeControlReg0(uint8_t value, EmuTime::param time)
 {
-	switch (reg) {
-	case 2: // control register 0
-		drive[3]->setMotor((data & 0x80) != 0, time);
-		drive[2]->setMotor((data & 0x40) != 0, time);
-		drive[1]->setMotor((data & 0x20) != 0, time);
-		drive[0]->setMotor((data & 0x10) != 0, time);
-		//enableIntDma = data & 0x08;
-		//notReset     = data & 0x04;
-		driveSelect = data & 0x03;
-		break;
+	drive[3]->setMotor((value & 0x80) != 0, time);
+	drive[2]->setMotor((value & 0x40) != 0, time);
+	drive[1]->setMotor((value & 0x20) != 0, time);
+	drive[0]->setMotor((value & 0x10) != 0, time);
+	//enableIntDma = value & 0x08;
+	//notReset     = value & 0x04;
+	driveSelect = value & 0x03;
+}
 
-	//case 3: // control register 1
-	//	controlReg1 = data;
-	//	break;
-
-	case 5: // data port
-		writeDataPort(data, time);
-		break;
+void TC8566AF::writeControlReg1(uint8_t value, EmuTime::param /*time*/)
+{
+	if (value & 1) { // TC, terminate multi-sector read/write command
+		if (phase == PHASE_DATA_TRANSFER) {
+			resultPhase();
+		}
 	}
 }
 
-void TC8566AF::writeDataPort(byte value, EmuTime::param time)
+void TC8566AF::writeDataPort(uint8_t value, EmuTime::param time)
 {
 	switch (phase) {
 	case PHASE_IDLE:
@@ -349,7 +341,7 @@ void TC8566AF::writeDataPort(byte value, EmuTime::param time)
 		commandPhaseWrite(value, time);
 		break;
 
-	case PHASE_DATATRANSFER:
+	case PHASE_DATA_TRANSFER:
 		executionPhaseWrite(value, time);
 		break;
 	default:
@@ -358,7 +350,7 @@ void TC8566AF::writeDataPort(byte value, EmuTime::param time)
 	}
 }
 
-void TC8566AF::idlePhaseWrite(byte value, EmuTime::param time)
+void TC8566AF::idlePhaseWrite(uint8_t value, EmuTime::param time)
 {
 	command = CMD_UNKNOWN;
 	commandCode = value;
@@ -386,6 +378,7 @@ void TC8566AF::idlePhaseWrite(byte value, EmuTime::param time)
 	case CMD_READ_DATA:
 	case CMD_WRITE_DATA:
 	case CMD_FORMAT:
+	case CMD_READ_ID:
 		status0 &= ~(ST0_IC0 | ST0_IC1);
 		status1 = 0;
 		status2 = 0;
@@ -412,13 +405,14 @@ void TC8566AF::idlePhaseWrite(byte value, EmuTime::param time)
 	}
 }
 
-void TC8566AF::commandPhase1(byte value)
+void TC8566AF::commandPhase1(uint8_t value)
 {
 	drive[driveSelect]->setSide((value & 0x04) != 0);
 	status0 &= ~(ST0_DS0 | ST0_DS1 | ST0_IC0 | ST0_IC1);
-	status0 |= //(drive[driveSelect]->isDiskInserted() ? 0 : ST0_DS0) |
+	status0 |= uint8_t(
+		   //(drive[driveSelect]->isDiskInserted() ? 0 : ST0_DS0) |
 	           (value & (ST0_DS0 | ST0_DS1)) |
-	           (drive[driveSelect]->isDummyDrive() ? ST0_IC1 : 0);
+	           (drive[driveSelect]->isDummyDrive() ? ST0_IC1 : 0));
 	status3  = (value & (ST3_DS0 | ST3_DS1)) |
 	           (drive[driveSelect]->isTrack00()        ? ST3_TK0 : 0) |
 	           (drive[driveSelect]->isDoubleSided()    ? ST3_HD  : 0) |
@@ -426,7 +420,7 @@ void TC8566AF::commandPhase1(byte value)
 	           (drive[driveSelect]->isDiskInserted()   ? ST3_RDY : 0);
 }
 
-EmuTime TC8566AF::locateSector(EmuTime::param time)
+EmuTime TC8566AF::locateSector(EmuTime::param time, bool readId)
 {
 	RawTrack::Sector sectorInfo;
 	int lastIdx = -1;
@@ -437,28 +431,45 @@ EmuTime TC8566AF::locateSector(EmuTime::param time)
 			setDrqRate(drv->getTrackLength());
 			next = drv->getNextSector(next, sectorInfo);
 		} catch (MSXException& /*e*/) {
-			return EmuTime::infinity;
+			return EmuTime::infinity();
 		}
-		if ((next == EmuTime::infinity) ||
+		if ((next == EmuTime::infinity()) ||
 		    (sectorInfo.addrIdx == lastIdx)) {
 			// no sectors on track or sector already seen
-			return EmuTime::infinity;
+			return EmuTime::infinity();
 		}
 		if (lastIdx == -1) lastIdx = sectorInfo.addrIdx;
-		if (sectorInfo.addrCrcErr)               continue;
+		if (readId) {
+			cylinderNumber = sectorInfo.track;
+			headNumber     = sectorInfo.head;
+			sectorNumber   = sectorInfo.sector;
+			number         = sectorInfo.sizeCode;
+			// skip checks, any sector header is fine
+			// also skip setting 'ST2_CM' and updating 'crc'
+			break;
+		}
+		if (sectorInfo.addrCrcErr)               continue; // Is this checked for CMD_READ_ID?
 		if (sectorInfo.track  != cylinderNumber) continue;
 		if (sectorInfo.head   != headNumber)     continue;
 		if (sectorInfo.sector != sectorNumber)   continue;
 		if (sectorInfo.dataIdx == -1)            continue;
+
+		if (bool expectDeleted = command == CMD_READ_DELETED_DATA;
+		    sectorInfo.deleted != expectDeleted) {
+			status2 |= ST2_CM;
+		}
+		crc.update(sectorInfo.deleted ? 0xF8 : 0xFB);
 		break;
 	}
-	// TODO does TC8566AF look at lower 3 bits?
-	dataAvailable = 128 << (sectorInfo.sizeCode & 7);
-	dataCurrent = sectorInfo.dataIdx;
+	if (!readId) {
+		// TODO does TC8566AF look at lower 3 bits? (instead of only 2)
+		dataAvailable = 128 << (sectorInfo.sizeCode & 7);
+		dataCurrent = sectorInfo.dataIdx;
+	}
 	return next;
 }
 
-void TC8566AF::commandPhaseWrite(byte value, EmuTime::param time)
+void TC8566AF::commandPhaseWrite(uint8_t value, EmuTime::param time)
 {
 	switch (command) {
 	case CMD_READ_DATA:
@@ -480,44 +491,14 @@ void TC8566AF::commandPhaseWrite(byte value, EmuTime::param time)
 			number = value;
 			break;
 		case 5: // End Of Track
+			endOfTrack = value;
 			break;
 		case 6: // Gap Length
+			// ignore
 			break;
 		case 7: // Data length
-			phase = PHASE_DATATRANSFER;
-			phaseStep = 0;
-			//interrupt = true;
-
-			// load drive head, if not already loaded
-			EmuTime ready = time;
-			if (!isHeadLoaded(time)) {
-				ready += getHeadLoadDelay();
-				// set 'head is loaded'
-				headUnloadTime = EmuTime::infinity;
-			}
-
-			// actually read sector: fills in
-			//   dataAvailable and dataCurrent
-			ready = locateSector(ready);
-			if (ready == EmuTime::infinity) {
-				status0 |= ST0_IC0;
-				status1 |= ST1_ND;
-				resultPhase();
-				return;
-			}
-			if (command == CMD_READ_DATA) {
-				mainStatus |= STM_DIO;
-			} else {
-				mainStatus &= ~STM_DIO;
-			}
-			// Initialize crc
-			// TODO 0xFB vs 0xF8 depends on deleted vs normal data
-			crc.init<0xA1, 0xA1, 0xA1, 0xFB>();
-
-			// first byte is available when it's rotated below the
-			// drive-head
-			delayTime.reset(ready);
-			mainStatus &= ~STM_RQM;
+			// ignore value
+			startReadWriteSector(time);
 			break;
 		}
 		break;
@@ -540,7 +521,7 @@ void TC8566AF::commandPhaseWrite(byte value, EmuTime::param time)
 		case 4:
 			fillerByte   = value;
 			mainStatus  &= ~STM_DIO;
-			phase        = PHASE_DATATRANSFER;
+			phase        = PHASE_DATA_TRANSFER;
 			phaseStep    = 0;
 			//interrupt    = true;
 			initTrackHeader(time);
@@ -548,25 +529,43 @@ void TC8566AF::commandPhaseWrite(byte value, EmuTime::param time)
 		}
 		break;
 
+	case CMD_READ_ID:
+		assert(phaseStep == 0);
+		commandPhase1(value);
+		startReadWriteSector(time);
+		break;
+
 	case CMD_SEEK:
 		switch (phaseStep++) {
 		case 0:
 			commandPhase1(value);
 			break;
-		case 1:
-			seekValue = value; // target track
-			doSeek(time);
+		case 1: {
+			endCommand(time);
+			auto n = status0 & 3;
+			auto& si = seekInfo[n];
+			si.time = time;
+			si.seekValue = value; // target track
+			si.state = SEEK_SEEK;
+			doSeek(n);
 			break;
+		}
 		}
 		break;
 
 	case CMD_RECALIBRATE:
 		switch (phaseStep++) {
-		case 0:
+		case 0: {
 			commandPhase1(value);
-			seekValue = 255; // max try 255 steps
-			doSeek(time);
+			endCommand(time);
+			int n = status0 & 3;
+			auto& si = seekInfo[n];
+			si.time = time;
+			si.seekValue = 255; // max try 255 steps
+			si.state = SEEK_RECALIBRATE;
+			doSeek(n);
 			break;
+		}
 		}
 		break;
 
@@ -593,6 +592,50 @@ void TC8566AF::commandPhaseWrite(byte value, EmuTime::param time)
 	}
 }
 
+// read/write-sector, but also read-ID
+void TC8566AF::startReadWriteSector(EmuTime::param time)
+{
+	phase = PHASE_DATA_TRANSFER;
+	phaseStep = 0;
+	//interrupt = true;
+
+	// load drive head, if not already loaded
+	EmuTime ready = time;
+	if (!isHeadLoaded(time)) {
+		ready += getHeadLoadDelay();
+		// set 'head is loaded'
+		headUnloadTime = EmuTime::infinity();
+	}
+
+	// Initialize crc
+	crc.init({0xA1, 0xA1, 0xA1}); // 0xFB or 0xF8 is added later
+
+	// actually read sector header: fills in
+	//   dataAvailable and dataCurrent
+	bool readId = command == CMD_READ_ID;
+	ready = locateSector(ready, readId);
+	if (ready == EmuTime::infinity()) {
+		status0 |= ST0_IC0;
+		status1 |= readId ? ST1_MA : ST1_ND;
+		resultPhase();
+		return;
+	}
+	if (command == CMD_READ_DATA) {
+		mainStatus |= STM_DIO;
+	} else {
+		mainStatus &= ~STM_DIO;
+	}
+
+	// first byte is available when it's rotated below the
+	// drive-head
+	delayTime.reset(ready);
+	mainStatus &= ~STM_RQM;
+
+	if (readId) {
+		resultPhase(true);
+	}
+}
+
 void TC8566AF::initTrackHeader(EmuTime::param time)
 {
 	try {
@@ -602,11 +645,14 @@ void TC8566AF::initTrackHeader(EmuTime::param time)
 		dataCurrent = 0;
 		dataAvailable = trackLength;
 
-		for (int i = 0; i < 80; ++i) drv->writeTrackByte(dataCurrent++, 0x4E); // gap4a
-		for (int i = 0; i < 12; ++i) drv->writeTrackByte(dataCurrent++, 0x00); // sync
-		for (int i = 0; i <  3; ++i) drv->writeTrackByte(dataCurrent++, 0xC2); // index mark
-		for (int i = 0; i <  1; ++i) drv->writeTrackByte(dataCurrent++, 0xFC); //   "    "
-		for (int i = 0; i < 50; ++i) drv->writeTrackByte(dataCurrent++, 0x4E); // gap1
+		auto write = [&](unsigned n, uint8_t value) {
+			repeat(n, [&] { drv->writeTrackByte(dataCurrent++, value); });
+		};
+		write(80, 0x4E); // gap4a
+		write(12, 0x00); // sync
+		write( 3, 0xC2); // index mark
+		write( 1, 0xFC); //   "    "
+		write(50, 0x4E); // gap1
 	} catch (MSXException& /*e*/) {
 		endCommand(time);
 	}
@@ -615,84 +661,109 @@ void TC8566AF::initTrackHeader(EmuTime::param time)
 void TC8566AF::formatSector()
 {
 	auto* drv = drive[driveSelect];
-	for (int i = 0; i < 12; ++i) drv->writeTrackByte(dataCurrent++, 0x00); // sync
 
-	for (int i = 0; i <  3; ++i) drv->writeTrackByte(dataCurrent++, 0xA1); // addr mark
-	drv->writeTrackByte(dataCurrent++, 0xFE, true); // addr mark + add idam
-	crc.init<0xA1, 0xA1, 0xA1, 0xFE>();
-	drv->writeTrackByte(dataCurrent++, currentTrack); // C: Cylinder number
-	crc.update(currentTrack);
-	drv->writeTrackByte(dataCurrent++, headNumber);   // H: Head Address
-	crc.update(headNumber);
-	drv->writeTrackByte(dataCurrent++, sectorNumber); // R: Record
-	crc.update(sectorNumber);
-	drv->writeTrackByte(dataCurrent++, number);       // N: Length of sector
-	crc.update(number);
-	drv->writeTrackByte(dataCurrent++, crc.getValue() >> 8);   // CRC (high byte)
-	drv->writeTrackByte(dataCurrent++, crc.getValue() & 0xff); //     (low  byte)
+	auto write1 = [&](uint8_t value, bool idam = false) {
+		drv->writeTrackByte(dataCurrent++, value, idam);
+	};
+	auto writeU = [&](uint8_t value) {
+		write1(value);
+		crc.update(value);
+	};
+	auto writeN = [&](unsigned n, uint8_t value) {
+		repeat(n, [&] { write1(value); });
+	};
+	auto writeCRC = [&] {
+		write1(narrow_cast<uint8_t>(crc.getValue() >> 8));   // CRC (high byte)
+		write1(narrow_cast<uint8_t>(crc.getValue() & 0xff)); //     (low  byte)
+	};
 
-	for (int i = 0; i < 22; ++i) drv->writeTrackByte(dataCurrent++, 0x4E); // gap2
-	for (int i = 0; i < 12; ++i) drv->writeTrackByte(dataCurrent++, 0x00); // sync
+	writeN(12, 0x00); // sync
 
-	for (int i = 0; i <  3; ++i) drv->writeTrackByte(dataCurrent++, 0xA1); // data mark
-	for (int i = 0; i <  1; ++i) drv->writeTrackByte(dataCurrent++, 0xFB); //  "    "
-	crc.init<0xA1, 0xA1, 0xA1, 0xFB>();
-	for (int i = 0; i < (128 << (number & 7)); ++i) {
-		drv->writeTrackByte(dataCurrent++, fillerByte);
-		crc.update(fillerByte);
-	}
-	drv->writeTrackByte(dataCurrent++, crc.getValue() >> 8);   // CRC (high byte)
-	drv->writeTrackByte(dataCurrent++, crc.getValue() & 0xff); //     (low  byte)
+	writeN(3, 0xA1); // addr mark
+	write1(0xFE, true); // addr mark + add idam
+	crc.init({0xA1, 0xA1, 0xA1, 0xFE});
+	writeU(cylinderNumber); // C: Cylinder number
+	writeU(headNumber);     // H: Head Address
+	writeU(sectorNumber);   // R: Record
+	writeU(number);         // N: Length of sector
+	writeCRC();
 
-	for (int i = 0; i < gapLength; ++i) drv->writeTrackByte(dataCurrent++, 0x4E); // gap3
+	writeN(22, 0x4E); // gap2
+	writeN(12, 0x00); // sync
+
+	writeN(3, 0xA1); // data mark
+	write1(0xFB);   //  "    "
+	crc.init({0xA1, 0xA1, 0xA1, 0xFB});
+	repeat(128 << (number & 7), [&] { writeU(fillerByte); });
+	writeCRC();
+
+	writeN(gapLength, 0x4E); // gap3
 }
 
-void TC8566AF::doSeek(EmuTime::param time)
+void TC8566AF::doSeek(int n)
 {
-	DiskDrive& currentDrive = *drive[driveSelect];
+	auto& si = seekInfo[n];
+	DiskDrive& currentDrive = *drive[n];
+
+	const auto stm_dbn = uint8_t(1 << n); // STM_DB0..STM_DB3
+	mainStatus |= stm_dbn;
+
+	auto endSeek = [&] {
+		status0 |= ST0_SE;
+		si.state = SEEK_IDLE;
+		mainStatus &= ~stm_dbn;
+	};
+
+	if (currentDrive.isDummyDrive()) {
+		status0 |= ST0_NR;
+		endSeek();
+		return;
+	}
 
 	bool direction = false; // initialize to avoid warning
-	switch (command) {
-	case CMD_SEEK:
-		if (seekValue > currentTrack) {
-			++currentTrack;
+	switch (si.state) {
+	case SEEK_SEEK:
+		if (si.seekValue > si.currentTrack) {
+			++si.currentTrack;
 			direction = true;
-		} else if (seekValue < currentTrack) {
-			--currentTrack;
+		} else if (si.seekValue < si.currentTrack) {
+			--si.currentTrack;
 			direction = false;
 		} else {
-			assert(seekValue == currentTrack);
-			status0 |= ST0_SE;
-			endCommand(time);
+			assert(si.seekValue == si.currentTrack);
+			endSeek();
 			return;
 		}
 		break;
-	case CMD_RECALIBRATE:
-		if (currentDrive.isTrack00() || (seekValue == 0)) {
-			if (seekValue == 0) {
+	case SEEK_RECALIBRATE:
+		if (currentDrive.isTrack00() || (si.seekValue == 0)) {
+			if (si.seekValue == 0) {
 				status0 |= ST0_EC;
 			}
-			currentTrack = 0;
-			status0 |= ST0_SE;
-			endCommand(time);
+			si.currentTrack = 0;
+			endSeek();
 			return;
 		}
 		direction = false;
-		--seekValue;
+		--si.seekValue;
 		break;
 	default:
 		UNREACHABLE;
 	}
 
-	currentDrive.step(direction, time);
+	currentDrive.step(direction, si.time);
 
-	setSyncPoint(time + getSeekDelay());
+	si.time += getSeekDelay();
+	setSyncPoint(si.time);
 }
 
 void TC8566AF::executeUntil(EmuTime::param time)
 {
-	if ((command == CMD_SEEK) || (command == CMD_RECALIBRATE)) {
-		doSeek(time);
+	for (auto n : xrange(4)) {
+		if ((seekInfo[n].state != SEEK_IDLE) &&
+		    (seekInfo[n].time == time)) {
+			doSeek(n);
+		}
 	}
 }
 
@@ -700,12 +771,12 @@ void TC8566AF::writeSector()
 {
 	// write 2 CRC bytes (big endian)
 	auto* drv = drive[driveSelect];
-	drv->writeTrackByte(dataCurrent++, crc.getValue() >> 8);
-	drv->writeTrackByte(dataCurrent++, crc.getValue() & 0xFF);
+	drv->writeTrackByte(dataCurrent++, narrow_cast<uint8_t>(crc.getValue() >> 8));
+	drv->writeTrackByte(dataCurrent++, narrow_cast<uint8_t>(crc.getValue() & 0xFF));
 	drv->flushTrack();
 }
 
-void TC8566AF::executionPhaseWrite(byte value, EmuTime::param time)
+void TC8566AF::executionPhaseWrite(uint8_t value, EmuTime::param time)
 {
 	auto* drv = drive[driveSelect];
 	switch (command) {
@@ -724,11 +795,20 @@ void TC8566AF::executionPhaseWrite(byte value, EmuTime::param time)
 		} else if (!dataAvailable) {
 			try {
 				writeSector();
+
+				++sectorNumber;
+				if (sectorNumber > endOfTrack) {
+					// done
+					resultPhase();
+				} else {
+					// write next sector
+					startReadWriteSector(time);
+				}
 			} catch (MSXException&) {
 				status0 |= ST0_IC0;
 				status1 |= ST1_NW;
+				resultPhase();
 			}
-			resultPhase();
 		}
 		break;
 
@@ -737,7 +817,7 @@ void TC8566AF::executionPhaseWrite(byte value, EmuTime::param time)
 		mainStatus &= ~STM_RQM;
 		switch (phaseStep & 3) {
 		case 0:
-			currentTrack = value;
+			cylinderNumber = value;
 			break;
 		case 1:
 			headNumber = value;
@@ -769,9 +849,10 @@ void TC8566AF::executionPhaseWrite(byte value, EmuTime::param time)
 	}
 }
 
-void TC8566AF::resultPhase()
+void TC8566AF::resultPhase(bool readId)
 {
-	mainStatus |= STM_DIO | STM_RQM;
+	mainStatus |= STM_DIO;
+	if (!readId) mainStatus |= STM_RQM; // for CMD_READ_ID we wait for 'delayTime'
 	phase       = PHASE_RESULT;
 	phaseStep   = 0;
 	//interrupt = true;
@@ -782,7 +863,7 @@ void TC8566AF::endCommand(EmuTime::param time)
 	phase       = PHASE_IDLE;
 	mainStatus &= ~(STM_CB | STM_DIO);
 	delayTime.reset(time); // set STM_RQM
-	if (headUnloadTime == EmuTime::infinity) {
+	if (headUnloadTime == EmuTime::infinity()) {
 		headUnloadTime = time + getHeadUnloadDelay();
 	}
 }
@@ -819,7 +900,7 @@ EmuDuration TC8566AF::getSeekDelay() const
 }
 
 
-static std::initializer_list<enum_string<TC8566AF::Command>> commandInfo = {
+static constexpr std::initializer_list<enum_string<TC8566AF::Command>> commandInfo = {
 	{ "UNKNOWN",                TC8566AF::CMD_UNKNOWN                },
 	{ "READ_DATA",              TC8566AF::CMD_READ_DATA              },
 	{ "WRITE_DATA",             TC8566AF::CMD_WRITE_DATA             },
@@ -839,69 +920,84 @@ static std::initializer_list<enum_string<TC8566AF::Command>> commandInfo = {
 };
 SERIALIZE_ENUM(TC8566AF::Command, commandInfo);
 
-static std::initializer_list<enum_string<TC8566AF::Phase>> phaseInfo = {
+static constexpr std::initializer_list<enum_string<TC8566AF::Phase>> phaseInfo = {
 	{ "IDLE",         TC8566AF::PHASE_IDLE         },
 	{ "COMMAND",      TC8566AF::PHASE_COMMAND      },
-	{ "DATATRANSFER", TC8566AF::PHASE_DATATRANSFER },
+	{ "DATATRANSFER", TC8566AF::PHASE_DATA_TRANSFER },
 	{ "RESULT",       TC8566AF::PHASE_RESULT       }
 };
 SERIALIZE_ENUM(TC8566AF::Phase, phaseInfo);
+
+static constexpr std::initializer_list<enum_string<TC8566AF::SeekState>> seekInfo = {
+	{ "IDLE",        TC8566AF::SEEK_IDLE },
+	{ "SEEK",        TC8566AF::SEEK_SEEK },
+	{ "RECALIBRATE", TC8566AF::SEEK_RECALIBRATE }
+};
+SERIALIZE_ENUM(TC8566AF::SeekState, seekInfo);
+
+template<typename Archive>
+void TC8566AF::SeekInfo::serialize(Archive& ar, unsigned /*version*/)
+{
+	ar.serialize("time",         time,
+	             "currentTrack", currentTrack,
+	             "seekValue",    seekValue,
+	             "state",        state);
+}
 
 // version 1: initial version
 // version 2: added specifyData, headUnloadTime, seekValue
 //            inherit from Schedulable
 // version 3: Replaced 'sectorSize', 'sectorOffset', 'sectorBuf'
 //            with 'dataAvailable', 'dataCurrent', .trackData'.
-//            Not 100% backwardscompatible, see also comments in WD2793.
+//            Not 100% backwards compatible, see also comments in WD2793.
 //            Added 'crc' and 'gapLength'.
 // version 4: changed type of delayTime from Clock to DynamicClock
 // version 5: removed trackData
+// version 6: added seekInfo[4]
+// version 7: added 'endOfTrack'
 template<typename Archive>
 void TC8566AF::serialize(Archive& ar, unsigned version)
 {
 	if (ar.versionAtLeast(version, 4)) {
 		ar.serialize("delayTime", delayTime);
 	} else {
-		assert(ar.isLoader());
+		assert(Archive::IS_LOADER);
 		Clock<6250 * 5> c(EmuTime::dummy());
 		ar.serialize("delayTime", c);
 		delayTime.reset(c.getTime());
 		delayTime.setFreq(6250 * 5);
 	}
-	ar.serialize("command", command);
-	ar.serialize("phase", phase);
-	ar.serialize("phaseStep", phaseStep);
-	ar.serialize("driveSelect", driveSelect);
-	ar.serialize("mainStatus", mainStatus);
-	ar.serialize("status0", status0);
-	ar.serialize("status1", status1);
-	ar.serialize("status2", status2);
-	ar.serialize("status3", status3);
-	ar.serialize("commandCode", commandCode);
-	ar.serialize("cylinderNumber", cylinderNumber);
-	ar.serialize("headNumber", headNumber);
-	ar.serialize("sectorNumber", sectorNumber);
-	ar.serialize("number", number);
-	ar.serialize("currentTrack", currentTrack);
-	ar.serialize("sectorsPerCylinder", sectorsPerCylinder);
-	ar.serialize("fillerByte", fillerByte);
+	ar.serialize("command",            command,
+	             "phase",              phase,
+	             "phaseStep",          phaseStep,
+	             "driveSelect",        driveSelect,
+	             "mainStatus",         mainStatus,
+	             "status0",            status0,
+	             "status1",            status1,
+	             "status2",            status2,
+	             "status3",            status3,
+	             "commandCode",        commandCode,
+	             "cylinderNumber",     cylinderNumber,
+	             "headNumber",         headNumber,
+	             "sectorNumber",       sectorNumber,
+	             "number",             number,
+	             "sectorsPerCylinder", sectorsPerCylinder,
+	             "fillerByte",         fillerByte);
 	if (ar.versionAtLeast(version, 2)) {
 		ar.template serializeBase<Schedulable>(*this);
-		ar.serialize("specifyData", specifyData);
-		ar.serialize("headUnloadTime", headUnloadTime);
-		ar.serialize("seekValue", seekValue);
+		ar.serialize("specifyData",    specifyData,
+		             "headUnloadTime", headUnloadTime);
 	} else {
-		assert(ar.isLoader());
+		assert(Archive::IS_LOADER);
 		specifyData[0] = 0xDF; // values normally set by TurboR disk rom
 		specifyData[1] = 0x03;
-		headUnloadTime = EmuTime::zero;
-		seekValue = 0;
+		headUnloadTime = EmuTime::zero();
 	}
 	if (ar.versionAtLeast(version, 3)) {
-		ar.serialize("dataAvailable", dataAvailable);
-		ar.serialize("dataCurrent", dataCurrent);
-		ar.serialize("gapLength", gapLength);
-		word crcVal = crc.getValue();
+		ar.serialize("dataAvailable", dataAvailable,
+		             "dataCurrent", dataCurrent,
+		             "gapLength", gapLength);
+		uint16_t crcVal = crc.getValue();
 		ar.serialize("crc", crcVal);
 		crc.init(crcVal);
 	}
@@ -914,6 +1010,26 @@ void TC8566AF::serialize(Archive& ar, unsigned version)
 				"fully backwards-compatible and can cause "
 				"wrong emulation behavior.");
 		}
+	}
+	if (ar.versionAtLeast(version, 6)) {
+		ar.serialize("seekInfo", seekInfo);
+	} else {
+		if (command == one_of(CMD_SEEK, CMD_RECALIBRATE)) {
+			cliComm.printWarning(
+				"Loading an old savestate that has an "
+				"in-progress TC8566AF seek-command. This is "
+				"not fully backwards-compatible and can cause "
+				"wrong emulation behavior.");
+		}
+		uint8_t currentTrack = 0;
+		ar.serialize("currentTrack", currentTrack);
+		for (auto& si : seekInfo) {
+			si.currentTrack = currentTrack;
+			assert(si.state == SEEK_IDLE);
+		}
+	}
+	if (ar.versionAtLeast(version, 7)) {
+		ar.serialize("endOfTrack", endOfTrack);
 	}
 };
 INSTANTIATE_SERIALIZE_METHODS(TC8566AF);

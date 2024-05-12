@@ -11,11 +11,12 @@
 #include "CommandController.hh"
 #include "CommandException.hh"
 #include "TclObject.hh"
-#include "XMLElement.hh"
-#include "checked_cast.hh"
+#include "TemporaryString.hh"
+#include "XMLEscape.hh"
 #include "cstdiop.hh"
+#include "ranges.hh"
 #include "unistdp.hh"
-#include "openmsx.hh"
+#include <array>
 #include <cassert>
 #include <iostream>
 
@@ -24,43 +25,7 @@
 #include "SspiNegotiateServer.hh"
 #endif
 
-using std::string;
-
 namespace openmsx {
-
-// class CliCommandEvent
-
-class CliCommandEvent final : public Event
-{
-public:
-	CliCommandEvent(string command_, const CliConnection* id_)
-		: Event(OPENMSX_CLICOMMAND_EVENT)
-		, command(std::move(command_)), id(id_)
-	{
-	}
-	const string& getCommand() const
-	{
-		return command;
-	}
-	const CliConnection* getId() const
-	{
-		return id;
-	}
-	void toStringImpl(TclObject& result) const override
-	{
-		result.addListElement("CliCmd");
-		result.addListElement(getCommand());
-	}
-	bool lessImpl(const Event& other) const override
-	{
-		auto& otherCmdEvent = checked_cast<const CliCommandEvent&>(other);
-		return getCommand() < otherCmdEvent.getCommand();
-	}
-private:
-	const string command;
-	const CliConnection* id;
-};
-
 
 // class CliConnection
 
@@ -70,39 +35,41 @@ CliConnection::CliConnection(CommandController& commandController_,
 	, commandController(commandController_)
 	, eventDistributor(eventDistributor_)
 {
-	for (auto& en : updateEnabled) {
-		en = false;
-	}
+	ranges::fill(updateEnabled, false);
 
-	eventDistributor.registerEventListener(OPENMSX_CLICOMMAND_EVENT, *this);
+	eventDistributor.registerEventListener(EventType::CLICOMMAND, *this);
 }
 
 CliConnection::~CliConnection()
 {
-	eventDistributor.unregisterEventListener(OPENMSX_CLICOMMAND_EVENT, *this);
+	eventDistributor.unregisterEventListener(EventType::CLICOMMAND, *this);
 }
 
-void CliConnection::log(CliComm::LogLevel level, string_view message)
+void CliConnection::log(CliComm::LogLevel level, std::string_view message, float fraction) noexcept
 {
 	auto levelStr = CliComm::getLevelStrings();
-	output(strCat("<log level=\"", levelStr[level], "\">",
-	              XMLElement::XMLEscape(message.str()), "</log>\n"));
+	std::string fullMessage{message};
+	if (level == CliComm::PROGRESS && fraction >= 0.0f) {
+		strAppend(fullMessage, "... ", int(100.0f * fraction), '%');
+	}
+	output(tmpStrCat("<log level=\"", levelStr[level], "\">",
+	                 XMLEscape(fullMessage), "</log>\n"));
 }
 
-void CliConnection::update(CliComm::UpdateType type, string_view machine,
-                              string_view name, string_view value)
+void CliConnection::update(CliComm::UpdateType type, std::string_view machine,
+                           std::string_view name, std::string_view value) noexcept
 {
 	if (!getUpdateEnable(type)) return;
 
 	auto updateStr = CliComm::getUpdateStrings();
-	string tmp = strCat("<update type=\"", updateStr[type], '\"');
+	auto tmp = strCat("<update type=\"", updateStr[type], '\"');
 	if (!machine.empty()) {
 		strAppend(tmp, " machine=\"", machine, '\"');
 	}
 	if (!name.empty()) {
-		strAppend(tmp, " name=\"", XMLElement::XMLEscape(name.str()), '\"');
+		strAppend(tmp, " name=\"", XMLEscape(name), '\"');
 	}
-	strAppend(tmp, '>', XMLElement::XMLEscape(value.str()), "</update>\n");
+	strAppend(tmp, '>', XMLEscape(value), "</update>\n");
 
 	output(tmp);
 }
@@ -129,28 +96,28 @@ void CliConnection::end()
 	}
 }
 
-void CliConnection::execute(const string& command)
+void CliConnection::execute(const std::string& command)
 {
-	eventDistributor.distributeEvent(
-		std::make_shared<CliCommandEvent>(command, this));
+	eventDistributor.distributeEvent(CliCommandEvent(command, this));
 }
 
-static string reply(const string& message, bool status)
+static TemporaryString reply(std::string_view message, bool status)
 {
-	return strCat("<reply result=\"", (status ? "ok" : "nok"), "\">",
-	              XMLElement::XMLEscape(message), "</reply>\n");
+	return tmpStrCat("<reply result=\"", (status ? "ok" : "nok"), "\">",
+	                 XMLEscape(message), "</reply>\n");
 }
 
-int CliConnection::signalEvent(const std::shared_ptr<const Event>& event)
+int CliConnection::signalEvent(const Event& event)
 {
-	auto& commandEvent = checked_cast<const CliCommandEvent&>(*event);
-	if (commandEvent.getId() == this) {
+	assert(getType(event) == EventType::CLICOMMAND);
+	if (const auto& commandEvent = get_event<CliCommandEvent>(event);
+	    commandEvent.getId() == this) {
 		try {
-			string result = commandController.executeCommand(
-				commandEvent.getCommand(), this).getString().str();
+			auto result = commandController.executeCommand(
+				commandEvent.getCommand(), this).getString();
 			output(reply(result, true));
 		} catch (CommandException& e) {
-			string result = std::move(e).getMessage() + '\n';
+			std::string result = std::move(e).getMessage() + '\n';
 			output(reply(result, false));
 		}
 	}
@@ -160,7 +127,7 @@ int CliConnection::signalEvent(const std::shared_ptr<const Event>& event)
 
 // class StdioConnection
 
-static const int BUF_SIZE = 4096;
+static constexpr int BUF_SIZE = 4096;
 StdioConnection::StdioConnection(CommandController& commandController_,
                                  EventDistributor& eventDistributor_)
 	: CliConnection(commandController_, eventDistributor_)
@@ -182,17 +149,17 @@ void StdioConnection::run()
 #else
 		if (poller.poll(STDIN_FILENO)) break;
 #endif
-		char buf[BUF_SIZE];
-		int n = read(STDIN_FILENO, buf, sizeof(buf));
+		std::array<char, BUF_SIZE> buf;
+		auto n = read(STDIN_FILENO, buf.data(), sizeof(buf));
 		if (n > 0) {
-			parser.parse(buf, n);
+			parser.parse(subspan(buf, 0, n));
 		} else if (n < 0) {
 			break;
 		}
 	}
 }
 
-void StdioConnection::output(string_view message)
+void StdioConnection::output(std::string_view message)
 {
 	std::cout << message << std::flush;
 }
@@ -212,10 +179,10 @@ static const HANDLE OPENMSX_INVALID_HANDLE_VALUE = reinterpret_cast<HANDLE>(-1);
 
 PipeConnection::PipeConnection(CommandController& commandController_,
                                EventDistributor& eventDistributor_,
-                               string_view name)
+                               std::string_view name)
 	: CliConnection(commandController_, eventDistributor_)
 {
-	string pipeName = strCat("\\\\.\\pipe\\", name);
+	auto pipeName = strCat("\\\\.\\pipe\\", name);
 	pipeHandle = CreateFileA(pipeName.c_str(), GENERIC_READ, 0, nullptr,
 	                         OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
 	if (pipeHandle == OPENMSX_INVALID_HANDLE_VALUE) {
@@ -275,7 +242,7 @@ void PipeConnection::run()
 			if (!GetOverlappedResult(pipeHandle, &overlapped, &bytesRead, TRUE)) {
 				break; // Pipe broke
 			}
-			parser.parse(buf, bytesRead);
+			parser.parse(std::span{buf, bytesRead});
 		} else if (wait == WAIT_OBJECT_0) {
 			break; // Shutdown
 		} else {
@@ -291,7 +258,7 @@ void PipeConnection::run()
 	pipeHandle = OPENMSX_INVALID_HANDLE_VALUE;
 }
 
-void PipeConnection::output(string_view message)
+void PipeConnection::output(std::string_view message)
 {
 	if (pipeHandle != OPENMSX_INVALID_HANDLE_VALUE) {
 		std::cout << message << std::flush;
@@ -311,7 +278,7 @@ SocketConnection::SocketConnection(CommandController& commandController_,
                                    EventDistributor& eventDistributor_,
                                    SOCKET sd_)
 	: CliConnection(commandController_, eventDistributor_)
-	, sd(sd_), established(false)
+	, sd(sd_)
 {
 }
 
@@ -326,7 +293,7 @@ void SocketConnection::run()
 #ifdef _WIN32
 	bool ok;
 	{
-		std::lock_guard<std::mutex> lock(sdMutex);
+		std::scoped_lock lock(sdMutex);
 		// Authenticate and authorize the caller
 		SocketStreamWrapper stream(sd);
 		SspiNegotiateServer server(stream);
@@ -351,10 +318,10 @@ void SocketConnection::run()
 			break;
 		}
 #endif
-		char buf[BUF_SIZE];
-		int n = sock_recv(sd, buf, BUF_SIZE);
+		std::array<char, BUF_SIZE> buf;
+		auto n = sock_recv(sd, buf.data(), sizeof(buf));
 		if (n > 0) {
-			parser.parse(buf, n);
+			parser.parse(subspan(buf, 0, n));
 		} else if (n < 0) {
 			break;
 		}
@@ -362,26 +329,24 @@ void SocketConnection::run()
 	closeSocket();
 }
 
-void SocketConnection::output(string_view message)
+void SocketConnection::output(std::string_view message_)
 {
 	if (!established) { // TODO needs locking?
 		// Connection isn't authorized yet (and opening tag is not
 		// yet send). Ignore log and update messages for now.
 		return;
 	}
-	const char* data = message.data();
-	unsigned pos = 0;
-	size_t bytesLeft = message.size();
-	while (bytesLeft) {
-		int bytesSend;
+	// std::span message = message_; // error with clang-15/libc++
+	std::span message{message_.begin(), message_.end()};
+	while (!message.empty()) {
+		ptrdiff_t bytesSend;
 		{
-			std::lock_guard<std::mutex> lock(sdMutex);
+			std::scoped_lock lock(sdMutex);
 			if (sd == OPENMSX_INVALID_SOCKET) return;
-			bytesSend = sock_send(sd, &data[pos], bytesLeft);
+			bytesSend = sock_send(sd, message.data(), message.size());
 		}
 		if (bytesSend > 0) {
-			bytesLeft -= bytesSend;
-			pos += bytesSend;
+			message = message.subspan(bytesSend);
 		} else {
 			// Note: On Windows we rely on closing the socket to
 			//       wake up the worker thread, on other platforms
@@ -395,7 +360,7 @@ void SocketConnection::output(string_view message)
 
 void SocketConnection::closeSocket()
 {
-	std::lock_guard<std::mutex> lock(sdMutex);
+	std::scoped_lock lock(sdMutex);
 	if (sd != OPENMSX_INVALID_SOCKET) {
 		SOCKET _sd = sd;
 		sd = OPENMSX_INVALID_SOCKET;

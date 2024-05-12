@@ -2,49 +2,55 @@
 #define LASERDISCPLAYER_HH
 
 #include "ResampledSoundDevice.hh"
+#include "MSXMotherBoard.hh"
 #include "BooleanSetting.hh"
 #include "RecordedCommand.hh"
 #include "EmuTime.hh"
 #include "Schedulable.hh"
 #include "DynamicClock.hh"
 #include "Filename.hh"
+#include "OggReader.hh"
 #include "VideoSystemChangeListener.hh"
 #include "EventListener.hh"
 #include "ThrottleManager.hh"
 #include "outer.hh"
+#include <memory>
+#include <optional>
 
 namespace openmsx {
 
 class PioneerLDControl;
 class HardwareConfig;
-class MSXMotherBoard;
-class OggReader;
 class LDRenderer;
 class RawFrame;
 
 class LaserdiscPlayer final : public ResampledSoundDevice
                             , private EventListener
                             , private VideoSystemChangeListener
+                            , public MediaInfoProvider
 {
 public:
 	LaserdiscPlayer(const HardwareConfig& hwConf,
-			PioneerLDControl& ldcontrol);
+			PioneerLDControl& ldControl);
 	~LaserdiscPlayer();
 
 	// Called from CassettePort
-	int16_t readSample(EmuTime::param time);
+	[[nodiscard]] int16_t readSample(EmuTime::param time);
 
 	// Called from PioneerLDControl
 	void setMuting(bool left, bool right, EmuTime::param time);
-	bool extAck(EmuTime::param /*time*/) const { return ack; }
+	[[nodiscard]] bool extAck(EmuTime::param /*time*/) const { return ack; }
 	void extControl(bool bit, EmuTime::param time);
-	const RawFrame* getRawFrame() const;
+	[[nodiscard]] const RawFrame* getRawFrame() const;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 	// video interface
-	MSXMotherBoard& getMotherBoard() { return motherBoard; }
+	[[nodiscard]] MSXMotherBoard& getMotherBoard() { return motherBoard; }
+
+	// MediaInfoProvider
+	void getMediaInfo(TclObject& result) override;
 
 	enum RemoteState {
 		REMOTE_IDLE,
@@ -57,7 +63,7 @@ public:
 	enum PlayerState {
 		PLAYER_STOPPED,
 		PLAYER_PLAYING,
-		PLAYER_MULTISPEED,
+		PLAYER_MULTI_SPEED,
 		PLAYER_PAUSED,
 		PLAYER_STILL
 	};
@@ -80,8 +86,9 @@ public:
 		IR_NEC,
 	};
 private:
+	std::string getStateString() const;
 	void setImageName(std::string newImage, EmuTime::param time);
-	const Filename& getImageName() const { return oggImage; }
+	[[nodiscard]] const Filename& getImageName() const { return oggImage; }
 	void autoRun();
 
 	/** Laserdisc player commands
@@ -91,7 +98,7 @@ private:
 	void stop(EmuTime::param time);
 	void eject(EmuTime::param time);
 	void seekFrame(size_t frame, EmuTime::param time);
-	void stepFrame(bool);
+	void stepFrame(bool forwards);
 	void seekChapter(int chapter, EmuTime::param time);
 
 	// Control from MSX
@@ -99,20 +106,21 @@ private:
 	/** Is video output being generated?
 	  */
 	void scheduleDisplayStart(EmuTime::param time);
-	bool isVideoOutputAvailable(EmuTime::param time);
-	void remoteButtonNEC(unsigned code, EmuTime::param time);
-	void submitRemote(RemoteProtocol protocol, unsigned code);
+	[[nodiscard]] bool isVideoOutputAvailable(EmuTime::param time);
+	void remoteButtonNEC(uint8_t code, EmuTime::param time);
+	void submitRemote(RemoteProtocol protocol, uint8_t code);
 	void setAck(EmuTime::param time, int wait);
-	size_t getCurrentSample(EmuTime::param time);
+	[[nodiscard]] size_t getCurrentSample(EmuTime::param time);
 	void createRenderer();
 
 	// SoundDevice
-	void generateChannels(int** buffers, unsigned num) override;
-	bool updateBuffer(unsigned length, int* buffer,
+	void generateChannels(std::span<float*> buffers, unsigned num) override;
+	bool updateBuffer(size_t length, float* buffer,
 	                  EmuTime::param time) override;
+	[[nodiscard]] float getAmplificationFactorImpl() const override;
 
 	// Schedulable
-	struct SyncAck : public Schedulable {
+	struct SyncAck final : public Schedulable {
 		friend class LaserdiscPlayer;
 		explicit SyncAck(Scheduler& s) : Schedulable(s) {}
 		void executeUntil(EmuTime::param time) override {
@@ -120,7 +128,7 @@ private:
 			player.execSyncAck(time);
 		}
 	} syncAck;
-	struct SyncOdd : public Schedulable {
+	struct SyncOdd final : public Schedulable {
 		friend class LaserdiscPlayer;
 		explicit SyncOdd(Scheduler& s) : Schedulable(s) {}
 		void executeUntil(EmuTime::param time) override {
@@ -128,7 +136,7 @@ private:
 			player.execSyncFrame(time, true);
 		}
 	} syncOdd;
-	struct SyncEven : public Schedulable {
+	struct SyncEven final : public Schedulable {
 		friend class LaserdiscPlayer;
 		explicit SyncEven(Scheduler& s) : Schedulable(s) {}
 		void executeUntil(EmuTime::param time) override {
@@ -139,29 +147,29 @@ private:
 
 	void execSyncAck(EmuTime::param time);
 	void execSyncFrame(EmuTime::param time, bool odd);
-	EmuTime::param getCurrentTime() const { return syncAck.getCurrentTime(); }
+	[[nodiscard]] EmuTime::param getCurrentTime() const { return syncAck.getCurrentTime(); }
 
 	// EventListener
-	int signalEvent(const std::shared_ptr<const Event>& event) override;
+	int signalEvent(const Event& event) override;
 
 	// VideoSystemChangeListener interface:
-	void preVideoSystemChange() override;
-	void postVideoSystemChange() override;
+	void preVideoSystemChange() noexcept override;
+	void postVideoSystemChange() noexcept override;
 
 	MSXMotherBoard& motherBoard;
-	PioneerLDControl& ldcontrol;
+	PioneerLDControl& ldControl;
 
 	struct Command final : RecordedCommand {
 		Command(CommandController& commandController,
 		        StateChangeDistributor& stateChangeDistributor,
 		        Scheduler& scheduler);
-		void execute(array_ref<TclObject> tokens, TclObject& result,
+		void execute(std::span<const TclObject> tokens, TclObject& result,
 			     EmuTime::param time) override;
-		std::string help(const std::vector<std::string>& tokens) const override;
+		[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override;
 		void tabCompletion(std::vector<std::string>& tokens) const override;
 	} laserdiscCommand;
 
-	std::unique_ptr<OggReader> video;
+	std::optional<OggReader> video;
 	Filename oggImage;
 	std::unique_ptr<LDRenderer> renderer;
 
@@ -171,21 +179,21 @@ private:
 	int frameStep;
 
 	// Audio state
-	DynamicClock sampleClock;
-	EmuTime start;
+	DynamicClock sampleClock{EmuTime::zero()};
+	EmuTime start = EmuTime::zero();
 	size_t playingFromSample;
 	size_t lastPlayedSample;
-	bool muteLeft, muteRight;
+	bool muteLeft = false, muteRight = false;
 	StereoMode stereoMode;
 
 	// Ext Control
-	RemoteState remoteState;
-	EmuTime remoteLastEdge;
+	RemoteState remoteState = REMOTE_IDLE;
+	EmuTime remoteLastEdge = EmuTime::zero();
 	unsigned remoteBitNr;
 	unsigned remoteBits;
-	bool remoteLastBit;
-	RemoteProtocol remoteProtocol;
-	unsigned remoteCode;
+	bool remoteLastBit = false;
+	RemoteProtocol remoteProtocol = IR_NONE;
+	uint8_t remoteCode;
 	bool remoteExecuteDelayed;
 	// Number of v-blank since code was sent
 	int remoteVblanksBack;
@@ -203,12 +211,12 @@ private:
 	int seekNum;
 
 	// For ack
-	bool ack;
+	bool ack = false;
 
 	// State of the video itself
-	bool seeking;
+	bool seeking = false;
 
-	PlayerState playerState;
+	PlayerState playerState = PLAYER_STOPPED;
 
 	enum PlayingSpeed {
 		SPEED_STEP3 = -5,	// Each frame is repeated 90 times
@@ -226,7 +234,7 @@ private:
 	// Loading indicator
 	BooleanSetting autoRunSetting;
 	LoadingIndicator loadingIndicator;
-	int sampleReads;
+	int sampleReads = 0;
 };
 
 SERIALIZE_CLASS_VERSION(LaserdiscPlayer, 4);

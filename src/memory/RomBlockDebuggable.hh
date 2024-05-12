@@ -3,6 +3,7 @@
 
 #include "SimpleDebuggable.hh"
 #include "MSXDevice.hh"
+#include <span>
 #include <string>
 
 namespace openmsx {
@@ -18,32 +19,36 @@ public:
 		        0x10000)
 	{
 	}
+protected:
+	~RomBlockDebuggableBase() = default;
 };
 
 class RomBlockDebuggable final : public RomBlockDebuggableBase
 {
 public:
-	RomBlockDebuggable(const MSXDevice& device, const byte* blockNr_,
+	RomBlockDebuggable(const MSXDevice& device, std::span<const byte> blockNr_,
 	                   unsigned startAddress_, unsigned mappedSize_,
 	                   unsigned bankSizeShift_, unsigned debugShift_ = 0)
 		: RomBlockDebuggableBase(device)
-		, blockNr(blockNr_), startAddress(startAddress_)
+		, blockNr(blockNr_.data()), startAddress(startAddress_)
 		, mappedSize(mappedSize_), bankSizeShift(bankSizeShift_)
 		, debugShift(debugShift_), debugMask(~((1 << debugShift) - 1))
 	{
+		assert((mappedSize >> bankSizeShift) == blockNr_.size()); // no need to include 'debugMask' here
 	}
-	RomBlockDebuggable(const MSXDevice& device, const byte* blockNr_,
+	RomBlockDebuggable(const MSXDevice& device, std::span<const byte> blockNr_,
 	                   unsigned startAddress_, unsigned mappedSize_,
 	                   unsigned bankSizeShift_, unsigned debugShift_,
 	                   unsigned debugMask_)
 		: RomBlockDebuggableBase(device)
-		, blockNr(blockNr_), startAddress(startAddress_)
+		, blockNr(blockNr_.data()), startAddress(startAddress_)
 		, mappedSize(mappedSize_), bankSizeShift(bankSizeShift_)
 		, debugShift(debugShift_), debugMask(debugMask_)
 	{
+		assert(((mappedSize >> bankSizeShift) & debugMask) < blockNr_.size()); // here we do need 'debugMask'
 	}
 
-	byte read(unsigned address) override
+	[[nodiscard]] byte read(unsigned address) override
 	{
 		unsigned addr = address - startAddress;
 		if (addr < mappedSize) {

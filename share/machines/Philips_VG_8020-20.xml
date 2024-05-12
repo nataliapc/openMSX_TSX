@@ -6,15 +6,16 @@
     <manufacturer>Philips</manufacturer>
     <code>VG 8020/20</code>
     <release_year>?</release_year>
-    <description/>
+    <description>Second version of the Philips VG 8020, a basic 64kB MSX1. This version as a different memory layout, making use of S3527 VLSI chip.</description>
     <type>MSX</type>
+    <region>eu</region>
   </info>
 
 <!---
 Note sure if we can compare, but the Philips VG8020/40 with
 serial JM00 745032706 (see http://bilgisayarlarim.com/Philips/VG-8020)
 contains:
-- S3528 MSX-ENGINE
+- S3527 MSX-ENGINE
 - Zilog Z0840004PSC Z80 CPU
 - TMS9129NL VDP
 -->
@@ -27,7 +28,7 @@ contains:
       <sound>
         <volume>16000</volume>
       </sound>
-      <io base="0xA8" num="4"/>
+      <io base="0xA8" num="8"/> <!-- S-3527 mirrors -->
       <keyboard_type>int</keyboard_type>
       <has_keypad>false</has_keypad>
       <key_ghosting_sgc_protected>true</key_ghosting_sgc_protected>
@@ -47,12 +48,13 @@ contains:
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="8" type="IO"/> <!-- S-3527 mirrors -->
+      <ignorePortDirections>true</ignorePortDirections> <!-- Confirmed by p_gimeno on a VG 8020/40 -->
     </PSG>
 
     <PrinterPort id="Printer Port">
-      <io base="0x90" num="2"/>
+      <io base="0x90" num="8" type="IO"/> <!-- S-3527 mirrors -->
+      <status_readable_on_all_ports>true</status_readable_on_all_ports> <!-- S-3527 property -->
     </PrinterPort>
 
     <primary slot="0">
@@ -77,6 +79,7 @@ contains:
 
       <secondary slot="2">
         <RAM id="Main RAM">
+          <initialContent encoding="hex">00FF</initialContent> <!-- At least on thegeps his machine -->
           <mem base="0x0000" size="0x10000"/>
         </RAM>
       </secondary>

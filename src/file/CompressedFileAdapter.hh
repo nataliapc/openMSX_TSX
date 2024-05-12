@@ -11,38 +11,41 @@ class CompressedFileAdapter : public FileBase
 {
 public:
 	struct Decompressed {
-		MemBuffer<byte> buf;
+		MemBuffer<uint8_t> buf;
 		size_t size;
 		std::string originalName;
 		std::string cachedURL;
 		time_t cachedModificationDate;
+		unsigned useCount = 0;
 	};
 
-	void read(void* buffer, size_t num) final override;
-	void write(const void* buffer, size_t num) final override;
-	const byte* mmap(size_t& size) final override;
-	void munmap() final override;
-	size_t getSize() final override;
-	void seek(size_t pos) final override;
-	size_t getPos() final override;
-	void truncate(size_t size) final override;
-	void flush() final override;
-	const std::string getURL() const final override;
-	const std::string getOriginalName() final override;
-	bool isReadOnly() const final override;
-	time_t getModificationDate() final override;
+	void read(std::span<uint8_t> buffer) final;
+	void write(std::span<const uint8_t> buffer) final;
+	[[nodiscard]] std::span<const uint8_t> mmap() final;
+	void munmap() final;
+	[[nodiscard]] size_t getSize() final;
+	void seek(size_t pos) final;
+	[[nodiscard]] size_t getPos() final;
+	void truncate(size_t size) final;
+	void flush() final;
+	[[nodiscard]] const std::string& getURL() const final;
+	[[nodiscard]] std::string_view getOriginalName() final;
+	[[nodiscard]] bool isReadOnly() const final;
+	[[nodiscard]] time_t getModificationDate() final;
 
 protected:
 	explicit CompressedFileAdapter(std::unique_ptr<FileBase> file);
-	~CompressedFileAdapter();
+	~CompressedFileAdapter() override;
 	virtual void decompress(FileBase& file, Decompressed& decompressed) = 0;
 
 private:
 	void decompress();
 
+private:
+	// invariant: exactly one of 'file' and 'decompressed' is '!= nullptr'
 	std::unique_ptr<FileBase> file;
-	std::shared_ptr<Decompressed> decompressed;
-	size_t pos;
+	const Decompressed* decompressed = nullptr;
+	size_t pos = 0;
 };
 
 } // namespace openmsx

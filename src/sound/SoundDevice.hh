@@ -1,39 +1,45 @@
 #ifndef SOUNDDEVICE_HH
 #define SOUNDDEVICE_HH
 
-#include "MSXMixer.hh"
 #include "EmuTime.hh"
-#include "FixedPoint.hh"
-#include "string_view.hh"
-#include <memory>
+#include "WavWriter.hh"
+#include "static_string_view.hh"
+#include <array>
+#include <optional>
+#include <string>
+#include <string_view>
 
 namespace openmsx {
 
 class DeviceConfig;
-class Wav16Writer;
-class Filename;
 class DynamicClock;
+class Filename;
+class MSXMixer;
 
 class SoundDevice
 {
 public:
-	using VolumeType = FixedPoint<MSXMixer::AMP_BITS>;
-	static const unsigned MAX_CHANNELS = 24;
+	static constexpr unsigned MAX_CHANNELS = 24;
+
+	SoundDevice(const SoundDevice&) = delete;
+	SoundDevice(SoundDevice&&) = delete;
+	SoundDevice& operator=(const SoundDevice&) = delete;
+	SoundDevice& operator=(SoundDevice&&) = delete;
 
 	/** Get the unique name that identifies this sound device.
 	  * Used to create setting names.
 	  */
-	const std::string& getName() const { return name; }
+	[[nodiscard]] const std::string& getName() const { return name; }
 
 	/** Gets a description of this sound device,
 	  * to be presented to the user.
 	  */
-	const std::string& getDescription() const { return description; }
+	[[nodiscard]] std::string_view getDescription() const { return description; }
 
 	/** Is this a stereo device?
 	  * This is set in the constructor and cannot be changed anymore
 	  */
-	bool isStereo() const;
+	[[nodiscard]] bool isStereo() const;
 
 	/** Gets this device its 'amplification factor'.
 	  *
@@ -47,10 +53,13 @@ public:
 	  * The influence of the different volume settings is not part of this
 	  * factor.
 	  */
-	std::pair<VolumeType, VolumeType> getAmplificationFactor() const {
+	struct AmplificationFactors {
+		float left;
+		float right;
+	};
+	[[nodiscard]] AmplificationFactors getAmplificationFactor() const {
 		auto f = getAmplificationFactorImpl();
-		return std::make_pair(f * softwareVolumeLeft,
-		                      f * softwareVolumeRight);
+		return {f * softwareVolumeLeft, f * softwareVolumeRight};
 	}
 
 	/** Change the 'software volume' of this sound device.
@@ -63,8 +72,8 @@ public:
 	  *
 	  * This method allows to change that per-chip volume.
 	  */
-	void setSoftwareVolume(VolumeType volume, EmuTime::param time);
-	void setSoftwareVolume(VolumeType left, VolumeType right, EmuTime::param time);
+	void setSoftwareVolume(float volume, EmuTime::param time);
+	void setSoftwareVolume(float left, float right, EmuTime::param time);
 
 	void recordChannel(unsigned channel, const Filename& filename);
 	void muteChannel  (unsigned channel, bool muted);
@@ -75,21 +84,22 @@ protected:
 	  * @param name Name for this device, will be made unique
 	  * @param description Description for this sound device
 	  * @param numChannels The number of channels for this device
+	  * @param inputRate The sample rate of this sound device
 	  * @param stereo Is this a stereo device
 	  */
-	SoundDevice(MSXMixer& mixer, string_view name, string_view description,
-	            unsigned numChannels, bool stereo = false);
+	SoundDevice(MSXMixer& mixer, std::string_view name, static_string_view description,
+	            unsigned numChannels, unsigned inputRate, bool stereo);
 	~SoundDevice();
 
-	/** Get extra amplification factor for this device.
+	/** Get amplification/attenuation factor for this device.
 	  * Normally the outputBuffer() method should scale the output to
-	  * the range [-32768,32768]. Some devices can be emulated slightly
-	  * faster to produce another output range. In later stages the output
+	  * the range [-1.0..+1.0]. But sometimes it's more convenient to
+	  * generate another output range. In later stages the output
 	  * is anyway still multiplied by some factor. This method tells which
 	  * factor should be used to scale the output to the correct range.
-	  * The default implementation returns 1.
+	  * The default implementation returns '1.0 / 32768.0'.
 	  */
-	virtual int getAmplificationFactorImpl() const;
+	[[nodiscard]] virtual float getAmplificationFactorImpl() const;
 
 	/**
 	 * Registers this sound device with the Mixer.
@@ -109,7 +119,7 @@ protected:
 	void updateStream(EmuTime::param time);
 
 	void setInputRate(unsigned sampleRate) { inputSampleRate = sampleRate; }
-	unsigned getInputRate() const { return inputSampleRate; }
+	[[nodiscard]] unsigned getInputRate() const { return inputSampleRate; }
 
 public: // Will be called by Mixer:
 	/**
@@ -117,7 +127,7 @@ public: // Will be called by Mixer:
 	 * the required sampleRate through this method. All sound devices share
 	 * a common sampleRate.
 	 */
-	virtual void setOutputRate(unsigned sampleRate) = 0;
+	virtual void setOutputRate(unsigned hostSampleRate, double speed) = 0;
 
 	/** Generate sample data
 	  * @param length The number of required samples
@@ -129,7 +139,7 @@ public: // Will be called by Mixer:
 	  *
 	  * This method is regularly called from the Mixer, it should return a
 	  * pointer to a buffer filled with the required number of samples.
-	  * Samples are always ints, later they are converted to the systems
+	  * Samples are always floats, later they are converted to the systems
 	  * native format (e.g. 16-bit signed).
 	  *
 	  * Note: To enable various optimizations (like SSE), this method can
@@ -137,19 +147,19 @@ public: // Will be called by Mixer:
 	  * samples should be ignored, though the caller must make sure the
 	  * buffer has enough space to hold them.
 	  */
-	virtual bool updateBuffer(unsigned length, int* buffer,
-	                          EmuTime::param time) = 0;
+	[[nodiscard]] virtual bool updateBuffer(size_t length, float* buffer,
+	                                        EmuTime::param time) = 0;
 
 protected:
 	/** Adds a number of samples that all have the same value.
-	  * Can be used to synthesize the high half of a square wave cycle.
+	  * Can be used to synthesize segments of a square wave.
 	  * @param buffer Pointer to the position in a sample buffer where the
 	  *               samples should be added. This pointer is updated to
 	  *               the position right after the written samples.
 	  * @param value Sample value (amplitude).
 	  * @param num The number of samples.
 	  */
-	static void addFill(int*& buffer, int value, unsigned num);
+	static void addFill(float*& buffer, float value, unsigned num);
 
 	/** Abstract method to generate the actual sound data.
 	  * @param buffers An array of pointer to buffers. Each buffer must
@@ -164,7 +174,7 @@ protected:
 	  * pointer to nullptr. This has exactly the same effect as filling the
 	  * buffer completely with zeros, but it can be more efficient.
 	  */
-	virtual void generateChannels(int** buffers, unsigned num) = 0;
+	virtual void generateChannels(std::span<float*> buffers, unsigned num) = 0;
 
 	/** Calls generateChannels() and combines the output to a single
 	  * channel.
@@ -178,28 +188,28 @@ protected:
 	  * samples should be ignored, though the caller must make sure the
 	  * buffer has enough space to hold them.
 	  */
-	bool mixChannels(int* dataOut, unsigned samples);
+	[[nodiscard]] bool mixChannels(float* dataOut, size_t samples);
 
 	/** See MSXMixer::getHostSampleClock(). */
-	const DynamicClock& getHostSampleClock() const;
-	double getEffectiveSpeed() const;
+	[[nodiscard]] const DynamicClock& getHostSampleClock() const;
+	[[nodiscard]] double getEffectiveSpeed() const;
 
 private:
 	MSXMixer& mixer;
 	const std::string name;
-	const std::string description;
+	const static_string_view description;
 
-	std::unique_ptr<Wav16Writer> writer[MAX_CHANNELS];
+	std::array<std::optional<Wav16Writer>, MAX_CHANNELS> writer;
 
-	VolumeType softwareVolumeLeft{1};
-	VolumeType softwareVolumeRight{1};
+	float softwareVolumeLeft = 1.0f;
+	float softwareVolumeRight = 1.0f;
 	unsigned inputSampleRate;
 	const unsigned numChannels;
 	const unsigned stereo;
-	unsigned numRecordChannels;
-	int channelBalance[MAX_CHANNELS];
-	bool channelMuted[MAX_CHANNELS];
-	bool balanceCenter;
+	unsigned numRecordChannels = 0;
+	std::array<int,  MAX_CHANNELS> channelBalance;
+	std::array<bool, MAX_CHANNELS> channelMuted;
+	bool balanceCenter = true;
 };
 
 } // namespace openmsx

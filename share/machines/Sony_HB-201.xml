@@ -8,7 +8,7 @@
        VDP: TMS9118NL
        PPI: NEC D8255AC-5
        CPU: Sharp LH0080A
-       PSG: Yamaha YM2159F
+       PSG: Yamaha YM2149F
 
        Z80 scf: 01C529ED01D429C (dunno)
        Z80 cpl: 3AF12D7 (standard)
@@ -25,8 +25,9 @@
     <manufacturer>Sony</manufacturer>
     <code>HB-201</code>
     <release_year>1985</release_year>
-    <description/>
+    <description>Like the HB-101, but with 64kB RAM.</description>
     <type>MSX</type>
+    <region>jp</region>
   </info>
 
   <CassettePort/>
@@ -56,8 +57,8 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <PrinterPort id="Printer Port">

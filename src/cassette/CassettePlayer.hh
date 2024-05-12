@@ -4,6 +4,7 @@
 #include "EventListener.hh"
 #include "CassetteDevice.hh"
 #include "ResampledSoundDevice.hh"
+#include "MSXMotherBoard.hh"
 #include "RecordedCommand.hh"
 #include "Schedulable.hh"
 #include "ThrottleManager.hh"
@@ -12,22 +13,28 @@
 #include "BooleanSetting.hh"
 #include "outer.hh"
 #include "serialize_meta.hh"
-#include <string>
+#include <array>
+#include <cstdint>
 #include <memory>
+#include <string>
 
 namespace openmsx {
 
 class CassetteImage;
 class HardwareConfig;
-class MSXMotherBoard;
 class Wav8Writer;
 
 class CassettePlayer final : public CassetteDevice, public ResampledSoundDevice
+                           , public MediaInfoProvider
                            , private EventListener
 {
 public:
+	static constexpr std::string_view TAPE_RECORDING_DIR = "taperecordings";
+	static constexpr std::string_view TAPE_RECORDING_EXTENSION = ".wav";
+
+public:
 	explicit CassettePlayer(const HardwareConfig& hwConf);
-	~CassettePlayer();
+	~CassettePlayer() override;
 
 	// CassetteDevice
 	void setMotor(bool status, EmuTime::param time) override;
@@ -35,13 +42,17 @@ public:
 	void setSignal(bool output, EmuTime::param time) override;
 
 	// Pluggable
-	const std::string& getName() const override;
-	string_view getDescription() const override;
+	std::string_view getName() const override;
+	std::string_view getDescription() const override;
 	void plugHelper(Connector& connector, EmuTime::param time) override;
 	void unplugHelper(EmuTime::param time) override;
 
 	// SoundDevice
-	void generateChannels(int** buffers, unsigned num) override;
+	void generateChannels(std::span<float*> buffers, unsigned num) override;
+	float getAmplificationFactorImpl() const override;
+
+	// MediaInfoProvider
+	void getMediaInfo(TclObject& result) override;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
@@ -49,8 +60,8 @@ public:
 	enum State { PLAY, RECORD, STOP }; // public for serialization
 
 private:
-	State getState() const { return state; }
-	std::string getStateString() const;
+	[[nodiscard]] State getState() const { return state; }
+	[[nodiscard]] std::string getStateString() const;
 	void setState(State newState, const Filename& newImage,
 	              EmuTime::param time);
 	void setImageName(const Filename& newImage);
@@ -60,7 +71,7 @@ private:
 	/** Insert a tape for use in PLAY mode.
 	 */
 	void playTape(const Filename& filename, EmuTime::param time);
-	void insertTape(const Filename& filename);
+	void insertTape(const Filename& filename, EmuTime::param time);
 
 	/** Removes tape (possibly stops recording). And go to STOP mode.
 	 */
@@ -81,13 +92,13 @@ private:
 	 */
 	void setMotorControl(bool status, EmuTime::param time);
 
-	/** True when the tape is rolling: not in STOP mode, AND [ motorcontrol
+	/** True when the tape is rolling: not in STOP mode, AND [ motorControl
 	  * is disabled OR motor is on ].
 	  */
 	bool isRolling() const;
 
 	/** If motor, motorControl or state is changed, this method should
-	  * be called to update the end-of-tape syncpoint and the loading
+	  * be called to update the end-of-tape syncPoint and the loading
 	  * indicator.
 	  */
 	void updateLoadingState(EmuTime::param time);
@@ -111,10 +122,10 @@ private:
 	void autoRun();
 
 	// EventListener
-	int signalEvent(const std::shared_ptr<const Event>& event) override;
+	int signalEvent(const Event& event) override;
 
 	// Schedulable
-	struct SyncEndOfTape : Schedulable {
+	struct SyncEndOfTape final : Schedulable {
 		friend class CassettePlayer;
 		explicit SyncEndOfTape(Scheduler& s) : Schedulable(s) {}
 		void executeUntil(EmuTime::param time) override {
@@ -122,7 +133,7 @@ private:
 			cp.execEndOfTape(time);
 		}
 	} syncEndOfTape;
-	struct SyncAudioEmu : Schedulable {
+	struct SyncAudioEmu final : Schedulable {
 		friend class CassettePlayer;
 		explicit SyncAudioEmu(Scheduler& s) : Schedulable(s) {}
 		void executeUntil(EmuTime::param time) override {
@@ -135,8 +146,7 @@ private:
 	void execSyncAudioEmu(EmuTime::param time);
 	EmuTime::param getCurrentTime() const { return syncEndOfTape.getCurrentTime(); }
 
-	static const size_t BUF_SIZE = 1024;
-	unsigned char buf[BUF_SIZE];
+	std::array<uint8_t, 1024> buf;
 
 	double lastX; // last unfiltered output
 	double lastY; // last filtered output
@@ -144,14 +154,14 @@ private:
 	double partialInterval;
 
 	/** The time in the world of the tape. Zero at the start of the tape. */
-	EmuTime tapePos;
+	EmuTime tapePos = EmuTime::zero();
 
 	/** Last time the sync() method was called.
 	  * Used to calculate EmuDuration since last sync. */
-	EmuTime prevSyncTime;
+	EmuTime prevSyncTime = EmuTime::zero();
 
 	// SoundDevice
-	unsigned audioPos;
+	unsigned audioPos = 0;
 	Filename casImage;
 
 	MSXMotherBoard& motherBoard;
@@ -160,11 +170,11 @@ private:
 		TapeCommand(CommandController& commandController,
 			    StateChangeDistributor& stateChangeDistributor,
 			    Scheduler& scheduler);
-		void execute(array_ref<TclObject> tokens, TclObject& result,
+		void execute(std::span<const TclObject> tokens, TclObject& result,
 			     EmuTime::param time) override;
-		std::string help(const std::vector<std::string>& tokens) const override;
+		[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override;
 		void tabCompletion(std::vector<std::string>& tokens) const override;
-		bool needRecord(array_ref<TclObject> tokens) const override;
+		[[nodiscard]] bool needRecord(std::span<const TclObject> tokens) const override;
 	} tapeCommand;
 
 	LoadingIndicator loadingIndicator;
@@ -172,11 +182,11 @@ private:
 	std::unique_ptr<Wav8Writer> recordImage;
 	std::unique_ptr<CassetteImage> playImage;
 
-	size_t sampcnt;
-	State state;
-	bool lastOutput;
-	bool motor, motorControl;
-	bool syncScheduled;
+	size_t sampCnt = 0;
+	State state = STOP;
+	bool lastOutput = false;
+	bool motor = false, motorControl = true;
+	bool syncScheduled = false;
 };
 SERIALIZE_CLASS_VERSION(CassettePlayer, 2);
 

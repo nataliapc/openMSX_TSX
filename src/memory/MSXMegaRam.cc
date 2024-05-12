@@ -16,29 +16,47 @@
  *
  *  Another thing: the MegaRAMs of Ademir Carchano have a mirror
  *  effect: if you map the page 0 of MegaRAM slot, you'll be
- *  acessing the same area of 8000h-BFFFh of this slot; if you map
- *  the page 3 of MegaRAM slot, you'll be acessing the same area of
+ *  accessing the same area of 8000h-BFFFh of this slot; if you map
+ *  the page 3 of MegaRAM slot, you'll be accessing the same area of
  *  4000h-7FFFh of this slot. I don't know any software that makes
  *  use of this feature, except UZIX for MSX1.
  */
 
 #include "MSXMegaRam.hh"
+#include "DeviceConfig.hh"
+#include "MSXException.hh"
 #include "Rom.hh"
-#include "Math.hh"
+#include "narrow.hh"
 #include "serialize.hh"
+#include "xrange.hh"
+#include <bit>
 #include <memory>
 
 namespace openmsx {
 
+[[nodiscard]] static unsigned getNumBlocks(const DeviceConfig& config)
+{
+	int size = config.getChildDataAsInt("size", 0); // size in kB
+	if (auto err = [&]() -> const char* {
+		if (size < 0)         return "Cannot be negative.";
+		if (size > (8 * 256)) return "Cannot be larger than 2048.";
+		if ((size % 8) != 0)  return "Must be a multiple of 8.";
+		return nullptr;
+	}()) {
+		throw MSXException("Invalid MegaRam size: ", size, ". ", err);
+	}
+	return size / 8;
+}
+
 MSXMegaRam::MSXMegaRam(const DeviceConfig& config)
 	: MSXDevice(config)
-	, numBlocks(config.getChildDataAsInt("size") / 8) // 8kB blocks
+	, numBlocks(getNumBlocks(config)) // number of 8kB blocks
 	, ram(config, getName() + " RAM", "Mega-RAM", numBlocks * 0x2000)
 	, rom(config.findChild("rom")
 	      ? std::make_unique<Rom>(getName() + " ROM", "Mega-RAM DiskROM", config)
 	      : nullptr)
 	, romBlockDebug(*this, bank, 0x0000, 0x10000, 13, 0, 3)
-	, maskBlocks(Math::powerOfTwo(numBlocks) - 1)
+	, maskBlocks(narrow<byte>(std::bit_ceil(numBlocks) - 1))
 {
 	powerUp(EmuTime::dummy());
 }
@@ -47,7 +65,7 @@ MSXMegaRam::~MSXMegaRam() = default;
 
 void MSXMegaRam::powerUp(EmuTime::param time)
 {
-	for (unsigned i = 0; i < 4; i++) {
+	for (auto i : xrange(byte(4))) {
 		setBank(i, 0);
 	}
 	writeMode = false;
@@ -72,12 +90,12 @@ const byte* MSXMegaRam::getReadCacheLine(word address) const
 		if (address >= 0x4000 && address <= 0xBFFF) {
 			return &(*rom)[address - 0x4000];
 		}
-		return unmappedRead;
+		return unmappedRead.data();
 	}
 	unsigned block = bank[(address & 0x7FFF) / 0x2000];
 	return (block < numBlocks)
 	     ? &ram[(block * 0x2000) + (address & 0x1FFF)]
-	     : unmappedRead;
+	     : unmappedRead.data();
 }
 
 void MSXMegaRam::writeMem(word address, byte value, EmuTime::param /*time*/)
@@ -86,18 +104,18 @@ void MSXMegaRam::writeMem(word address, byte value, EmuTime::param /*time*/)
 		*tmp = value;
 	} else {
 		assert(!romMode && !writeMode);
-		setBank((address & 0x7FFF) / 0x2000, value);
+		setBank(narrow<byte>((address & 0x7FFF) / 0x2000), value);
 	}
 }
 
 byte* MSXMegaRam::getWriteCacheLine(word address) const
 {
-	if (romMode) return unmappedWrite;
+	if (romMode) return unmappedWrite.data();
 	if (writeMode) {
 		unsigned block = bank[(address & 0x7FFF) / 0x2000];
 		return (block < numBlocks)
 		     ? const_cast<byte*>(&ram[(block * 0x2000) + (address & 0x1FFF)])
-		     : unmappedWrite;
+		     : unmappedWrite.data();
 	} else {
 		return nullptr;
 	}
@@ -115,7 +133,7 @@ byte MSXMegaRam::readIO(word port, EmuTime::param /*time*/)
 			if (rom) romMode = true;
 			break;
 	}
-	invalidateMemCache(0x0000, 0x10000);
+	invalidateDeviceRWCache();
 	return 0xFF; // return value doesn't matter
 }
 
@@ -136,25 +154,25 @@ void MSXMegaRam::writeIO(word port, byte /*value*/, EmuTime::param /*time*/)
 			if (rom) romMode = true;
 			break;
 	}
-	invalidateMemCache(0x0000, 0x10000);
+	invalidateDeviceRWCache();
 }
 
 void MSXMegaRam::setBank(byte page, byte block)
 {
 	bank[page] = block & maskBlocks;
 	word adr = page * 0x2000;
-	invalidateMemCache(adr + 0x0000, 0x2000);
-	invalidateMemCache(adr + 0x8000, 0x2000);
+	invalidateDeviceRWCache(adr + 0x0000, 0x2000);
+	invalidateDeviceRWCache(adr + 0x8000, 0x2000);
 }
 
 template<typename Archive>
 void MSXMegaRam::serialize(Archive& ar, unsigned /*version*/)
 {
 	ar.template serializeBase<MSXDevice>(*this);
-	ar.serialize("ram", ram);
-	ar.serialize("bank", bank);
-	ar.serialize("writeMode", writeMode);
-	ar.serialize("romMode", romMode);
+	ar.serialize("ram",       ram,
+	             "bank",      bank,
+	             "writeMode", writeMode,
+	             "romMode",   romMode);
 }
 INSTANTIATE_SERIALIZE_METHODS(MSXMegaRam);
 REGISTER_MSXDEVICE(MSXMegaRam, "MegaRAM");

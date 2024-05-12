@@ -3,15 +3,12 @@
 
 namespace openmsx {
 
-DriveMultiplexer::DriveMultiplexer(DiskDrive* drv[4])
+DriveMultiplexer::DriveMultiplexer(std::span<std::unique_ptr<DiskDrive>, 4> drv)
 {
-	motor = false;
-	side = false;
-	selected = NO_DRIVE;
-	drive[DRIVE_A]  = drv[0];
-	drive[DRIVE_B]  = drv[1];
-	drive[DRIVE_C]  = drv[2];
-	drive[DRIVE_D]  = drv[3];
+	drive[DRIVE_A]  = drv[0].get();
+	drive[DRIVE_B]  = drv[1].get();
+	drive[DRIVE_C]  = drv[2].get();
+	drive[DRIVE_D]  = drv[3].get();
 	drive[NO_DRIVE] = &dummyDrive;
 }
 
@@ -30,12 +27,17 @@ bool DriveMultiplexer::isDiskInserted() const
 	return drive[selected]->isDiskInserted();
 }
 
+bool DriveMultiplexer::isDiskInserted(DriveNum num) const
+{
+	return drive[num]->isDiskInserted();
+}
+
 bool DriveMultiplexer::isWriteProtected() const
 {
 	return drive[selected]->isWriteProtected();
 }
 
-bool DriveMultiplexer::isDoubleSided() const
+bool DriveMultiplexer::isDoubleSided()
 {
 	return drive[selected]->isDoubleSided();
 }
@@ -44,6 +46,11 @@ void DriveMultiplexer::setSide(bool side_)
 {
 	side = side_;
 	drive[selected]->setSide(side);
+}
+
+bool DriveMultiplexer::getSide() const
+{
+	return side;
 }
 
 void DriveMultiplexer::step(bool direction, EmuTime::param time)
@@ -62,6 +69,11 @@ void DriveMultiplexer::setMotor(bool status, EmuTime::param time)
 	drive[selected]->setMotor(status, time);
 }
 
+bool DriveMultiplexer::getMotor() const
+{
+	return motor;
+}
+
 bool DriveMultiplexer::indexPulse(EmuTime::param time)
 {
 	return drive[selected]->indexPulse(time);
@@ -77,12 +89,12 @@ unsigned DriveMultiplexer::getTrackLength()
 	return drive[selected]->getTrackLength();
 }
 
-void DriveMultiplexer::writeTrackByte(int idx, byte val, bool addIdam)
+void DriveMultiplexer::writeTrackByte(int idx, uint8_t val, bool addIdam)
 {
 	drive[selected]->writeTrackByte(idx, val, addIdam);
 }
 
-byte DriveMultiplexer::readTrackByte(int idx)
+uint8_t DriveMultiplexer::readTrackByte(int idx)
 {
 	return drive[selected]->readTrackByte(idx);
 }
@@ -102,9 +114,19 @@ bool DriveMultiplexer::diskChanged()
 	return drive[selected]->diskChanged();
 }
 
+bool DriveMultiplexer::diskChanged(DriveNum num)
+{
+	return drive[num]->diskChanged();
+}
+
 bool DriveMultiplexer::peekDiskChanged() const
 {
 	return drive[selected]->peekDiskChanged();
+}
+
+bool DriveMultiplexer::peekDiskChanged(DriveNum num) const
+{
+	return drive[num]->peekDiskChanged();
 }
 
 bool DriveMultiplexer::isDummyDrive() const
@@ -123,7 +145,7 @@ void DriveMultiplexer::invalidateWd2793ReadTrackQuirk()
 }
 
 
-static std::initializer_list<enum_string<DriveMultiplexer::DriveNum>> driveNumInfo = {
+static constexpr std::initializer_list<enum_string<DriveMultiplexer::DriveNum>> driveNumInfo = {
 	{ "A",    DriveMultiplexer::DRIVE_A },
 	{ "B",    DriveMultiplexer::DRIVE_B },
 	{ "C",    DriveMultiplexer::DRIVE_C },
@@ -135,9 +157,9 @@ SERIALIZE_ENUM(DriveMultiplexer::DriveNum, driveNumInfo);
 template<typename Archive>
 void DriveMultiplexer::serialize(Archive& ar, unsigned /*version*/)
 {
-	ar.serialize("selected", selected);
-	ar.serialize("motor", motor);
-	ar.serialize("side", side);
+	ar.serialize("selected", selected,
+	             "motor",    motor,
+	             "side",     side);
 }
 INSTANTIATE_SERIALIZE_METHODS(DriveMultiplexer);
 

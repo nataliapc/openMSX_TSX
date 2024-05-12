@@ -19,16 +19,18 @@ class VideoLayer : public Layer, protected Observer<Setting>
 {
 public:
 	VideoLayer(const VideoLayer&) = delete;
+	VideoLayer(VideoLayer&&) = delete;
 	VideoLayer& operator=(const VideoLayer&) = delete;
+	VideoLayer& operator=(VideoLayer&&) = delete;
 
-	/** Returns the ID for this videolayer.
+	/** Returns the ID for this VideoLayer.
 	  * These IDs are globally unique. The 'videosource' setting uses
 	  * these IDs as possible values.
 	  */
-	int getVideoSource() const;
-	int getVideoSourceSetting() const;
+	[[nodiscard]] int getVideoSource() const;
+	[[nodiscard]] int getVideoSourceSetting() const;
 
-	/** Create a raw (=non-postprocessed) screenshot. The 'height'
+	/** Create a raw (=non-post-processed) screenshot. The 'height'
 	 * parameter should be either '240' or '480'. The current image will be
 	 * scaled to '320x240' or '640x480' and written to a png file. */
 	virtual void takeRawScreenShot(
@@ -43,16 +45,16 @@ public:
 		video9000Source = video9000Source_;
 		activeVideo9000 = active;
 	}
-	bool needRender() const;
-	bool needRecord() const;
+	[[nodiscard]] bool needRender() const;
+	[[nodiscard]] bool needRecord() const;
 
 protected:
 	VideoLayer(MSXMotherBoard& motherBoard,
 	           const std::string& videoSource);
-	~VideoLayer();
+	~VideoLayer() override;
 
 	// Observer<Setting> interface:
-	void update(const Setting& setting) override;
+	void update(const Setting& setting) noexcept override;
 
 private:
 	/** Calculates the current Z coordinate of this layer. */
@@ -61,9 +63,10 @@ private:
 	void calcCoverage();
 
 	// MSXEventListener
-	void signalEvent(const std::shared_ptr<const Event>& event,
-	                         EmuTime::param time) override;
+	void signalMSXEvent(const Event& event,
+	                    EmuTime::param time) noexcept override;
 
+private:
 	/** This layer belongs to a specific machine. */
 	MSXMotherBoard& motherBoard;
 	/** Settings shared between all renderers. */
@@ -76,9 +79,9 @@ private:
 	BooleanSetting& powerSetting;
 
 	/** Video source ID of the Video9000 layer. */
-	int video9000Source;
+	int video9000Source = 0;
 	/** Active when Video9000 is shown. */
-	Video9000Active activeVideo9000;
+	Video9000Active activeVideo9000 = INACTIVE;
 };
 
 } // namespace openmsx

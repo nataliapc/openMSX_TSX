@@ -2,10 +2,15 @@
 #define FRAMESOURCE_HH
 
 #include "aligned.hh"
-#include <algorithm>
-#include <cassert>
+#include "narrow.hh"
+#include "xrange.hh"
 
-struct SDL_PixelFormat;
+#include <algorithm>
+#include <array>
+#include <bit>
+#include <cassert>
+#include <cstdint>
+#include <span>
 
 namespace openmsx {
 
@@ -14,6 +19,8 @@ namespace openmsx {
 class FrameSource
 {
 public:
+	using Pixel = uint32_t;
+
 	/** What role does this frame play in interlacing?
 	  */
 	enum FieldType {
@@ -35,20 +42,20 @@ public:
 
 	/** Gets the role this frame plays in interlacing.
 	  */
-	FieldType getField() const {
+	[[nodiscard]] FieldType getField() const {
 		return fieldType;
 	}
 
 	/** Gets the number of lines in this frame.
 	  */
-	unsigned getHeight() const {
+	[[nodiscard]] unsigned getHeight() const {
 		return height;
 	}
 
 	/** Gets the number of display pixels on the given line.
 	  * @return line width (=1 for a vertical border line)
 	  */
-	virtual unsigned getLineWidth(unsigned line) const = 0;
+	[[nodiscard]] virtual unsigned getLineWidth(unsigned line) const = 0;
 
 	/** Get the width of (all) lines in this frame.
 	 * This only makes sense when all lines have the same width, so this
@@ -56,11 +63,11 @@ public:
 	 * is for example not always the case for MSX frames, but it is for
 	 * video frames (for superimpose).
 	 */
-	unsigned getWidth() const {
+	[[nodiscard]] unsigned getWidth() const {
 		assert(height > 0);
 		unsigned result = getLineWidth(0);
-		for (unsigned line = 1; line < height; ++line) {
-			assert(result == getLineWidth(line));
+		for (auto line : xrange(1u, height)) {
+			assert(result == getLineWidth(line)); (void)line;
 		}
 		return result;
 	}
@@ -70,12 +77,9 @@ public:
 	  * line. But it's fine to call this on non-border lines as well, in
 	  * that case the color of the first pixel of the line is returned.
 	  */
-	template <typename Pixel>
-	inline const Pixel getLineColor(unsigned line) const {
-		SSE_ALIGNED(Pixel buf[1280]); // large enough for widest line
-		unsigned width; // not used
-		return reinterpret_cast<const Pixel*>(
-			getLineInfo(line, width, buf, 1280))[0];
+	[[nodiscard]] inline Pixel getLineColor(unsigned line) const {
+		ALIGNAS_SSE std::array<Pixel, 1280> buf; // large enough for widest line
+		return getUnscaledLine(line, buf)[0];
 	}
 
 	/** Gets a pointer to the pixels of the given line number.
@@ -87,132 +91,66 @@ public:
 	  * value of this function will point to the line data (some internal
 	  * buffer or the work buffer).
 	  */
-	template <typename Pixel>
-	inline const Pixel* getLinePtr(int line, unsigned width, Pixel* buf) const
+	[[nodiscard]] inline std::span<const Pixel> getLine(int line, std::span<Pixel> buf) const
 	{
-		line = std::min<unsigned>(std::max(0, line), getHeight() - 1);
-		unsigned internalWidth;
-		auto* internalData = reinterpret_cast<const Pixel*>(
-			getLineInfo(line, internalWidth, buf, width));
-		if (internalWidth == width) {
-			return internalData;
+		line = std::clamp(line, 0, narrow<int>(getHeight() - 1));
+		auto unscaledLine = getUnscaledLine(line, buf);
+		if (unscaledLine.size() == buf.size()) {
+			// Already the correct width.
+			return unscaledLine;
 		} else {
 			// slow path, non-inlined
 			// internalData might be equal to buf
-			scaleLine(internalData, buf, internalWidth, width);
+			scaleLine(unscaledLine, buf);
 			return buf;
 		}
 	}
 
-	/** Similar to the above getLinePtr() method, but now tries to get
-	  * multiple lines at once. This is not always possible, so the actual
-	  * number of lines is returned in 'actualLines', it will always be at
-	  * least 1.
+	/** Get a specific line, with the 'native' line-width.
+	  * @param line The line number for the requested line.
+	  * @param helpBuf Buffer space that can _optionally_ be used by the
+	  *                implementation.
+	  * @return Returns a span of the requested line. This span may or may
+	            not use the helper input buffer.
 	  */
-	template <typename Pixel>
-	inline const Pixel* getMultiLinePtr(
-		int line, unsigned numLines, unsigned& actualLines,
-		unsigned width, Pixel* buf) const
-	{
-		actualLines = 1;
-		if ((line < 0) || (int(height) <= line)) {
-			return getLinePtr(line, width, buf);
-		}
-		unsigned internalWidth;
-		auto* internalData = reinterpret_cast<const Pixel*>(
-			getLineInfo(line, internalWidth, buf, width));
-		if (internalWidth != width) {
-			scaleLine(internalData, buf, internalWidth, width);
-			return buf;
-		}
-		if (!hasContiguousStorage()) {
-			return internalData;
-		}
-		while (--numLines) {
-			++line;
-			if ((line == int(height)) || (getLineWidth(line) != width)) {
-				break;
-			}
-			++actualLines;
-		}
-		return internalData;
-	}
-
-	/** Abstract implementation of getLinePtr().
-	  * Pixel type is unspecified (implementations that care about the
-	  * exact type should get it via some other mechanism).
-	  * @param line The line number for the requisted line.
-	  * @param lineWidth Output parameter, the width of the returned line
-	  *                  in pixel units.
-	  * @param buf Buffer space that can _optionally_ be used by the
-	  *            implementation.
-	  * @param bufWidth The size of the above buffer, in pixel units.
-	  * @return Pointer to the first pixel of the requested line. This might
-	  *         be the same as the given 'buf' parameter or it might be some
-	  *         internal buffer.
-	  */
-	virtual const void* getLineInfo(
-		unsigned line, unsigned& lineWidth,
-		void* buf, unsigned bufWidth) const = 0;
+	[[nodiscard]] virtual std::span<const Pixel> getUnscaledLine(
+		unsigned line, std::span<Pixel> helpBuf) const = 0;
 
 	/** Get a pointer to a given line in this frame, the frame is scaled
 	  * to 320x240 pixels. The difference between this method and
 	  * getLinePtr() is that this method also does vertical scaling.
 	  * This is used for video recording.
 	  */
-	template <typename Pixel>
-	const Pixel* getLinePtr320_240(unsigned line, Pixel* buf) const;
+	[[nodiscard]] std::span<const Pixel, 320> getLinePtr320_240(unsigned line, std::span<Pixel, 320> buf) const;
 
 	/** Get a pointer to a given line in this frame, the frame is scaled
 	  * to 640x480 pixels. Same as getLinePtr320_240, but then for a
 	  * higher resolution output.
 	  */
-	template <typename Pixel>
-	const Pixel* getLinePtr640_480(unsigned line, Pixel* buf) const;
+	[[nodiscard]] std::span<const Pixel, 640> getLinePtr640_480(unsigned line, std::span<Pixel, 640> buf) const;
 
 	/** Get a pointer to a given line in this frame, the frame is scaled
 	  * to 960x720 pixels. Same as getLinePtr320_240, but then for a
 	  * higher resolution output.
 	  */
-	template <typename Pixel>
-	const Pixel* getLinePtr960_720(unsigned line, Pixel* buf) const;
-
-	/** Returns the distance (in pixels) between two consecutive lines.
-	  * Is meant to be used in combination with getMultiLinePtr(). The
-	  * result is only meaningful when hasContiguousStorage() returns
-	  * true (also only in that case does getMultiLinePtr() return more
-	  * than 1 line).
-	  */
-	virtual unsigned getRowLength() const {
-		return 0;
-	}
-
-	const SDL_PixelFormat& getSDLPixelFormat() const {
-		return pixelFormat;
-	}
+	[[nodiscard]] std::span<const Pixel, 960> getLinePtr960_720(unsigned line, std::span<Pixel, 960> buf) const;
 
 protected:
-	explicit FrameSource(const SDL_PixelFormat& format);
-	~FrameSource() {}
+	FrameSource() = default;
+	~FrameSource() = default;
 
 	void setHeight(unsigned height_) { height = height_; }
 
 	/** Returns true when two consecutive rows are also consecutive in
 	  * memory.
 	  */
-	virtual bool hasContiguousStorage() const {
+	[[nodiscard]] virtual bool hasContiguousStorage() const {
 		return false;
 	}
 
-	template <typename Pixel> void scaleLine(
-		const Pixel* in, Pixel* out,
-		unsigned inWidth, unsigned outWidth) const;
+	void scaleLine(std::span<const Pixel> in, std::span<Pixel> out) const;
 
 private:
-	/** Pixel format. Needed for getLinePtr scaling
-	  */
-	const SDL_PixelFormat& pixelFormat;
-
 	/** Number of lines in this frame.
 	  */
 	unsigned height;

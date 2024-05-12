@@ -1,6 +1,9 @@
 #include "Socket.hh"
-#include "MSXException.hh"
+
+#include "MSXException.hh" // FatalError
 #include "utf8_checked.hh"
+
+#include <bit>
 #include <cerrno>
 #include <cstring>
 
@@ -59,9 +62,9 @@ void sock_close(SOCKET sd)
 }
 
 
-int sock_recv(SOCKET sd, char* buf, size_t count)
+ptrdiff_t sock_recv(SOCKET sd, char* buf, size_t count)
 {
-	int num = recv(sd, buf, int(count), 0);
+	ptrdiff_t num = recv(sd, buf, count, 0);
 	if (num >  0) return num; // normal case
 	if (num == 0) return -1;  // socket was closed by client
 #ifdef _WIN32
@@ -71,8 +74,8 @@ int sock_recv(SOCKET sd, char* buf, size_t count)
 	// socket is readable under Win9x, it doesn't happen on
 	// WinNT/2000 or on Unix.
 	int err;
-	int errlen = sizeof(err);
-	getsockopt(sd, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&err), &errlen);
+	int errLen = sizeof(err);
+	getsockopt(sd, SOL_SOCKET, SO_ERROR, std::bit_cast<char*>(&err), &errLen);
 	if (err == WSAEWOULDBLOCK) return 0;
 	return -1;
 #else
@@ -82,14 +85,14 @@ int sock_recv(SOCKET sd, char* buf, size_t count)
 }
 
 
-int sock_send(SOCKET sd, const char* buf, size_t count)
+ptrdiff_t sock_send(SOCKET sd, const char* buf, size_t count)
 {
-	int num = send(sd, buf, int(count), 0);
+	ptrdiff_t num = send(sd, buf, count, 0);
 	if (num >= 0) return num; // normal case
 #ifdef _WIN32
 	int err;
-	int errlen = sizeof(err);
-	getsockopt(sd, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&err), &errlen);
+	int errLen = sizeof(err);
+	getsockopt(sd, SOL_SOCKET, SO_ERROR, std::bit_cast<char*>(&err), &errLen);
 	if (err == WSAEWOULDBLOCK) return 0;
 	return -1;
 #else

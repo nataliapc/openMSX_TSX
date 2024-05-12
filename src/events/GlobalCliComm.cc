@@ -4,17 +4,11 @@
 #include "Thread.hh"
 #include "ScopedAssign.hh"
 #include "stl.hh"
-#include <algorithm>
 #include <cassert>
 #include <iostream>
+#include <utility>
 
 namespace openmsx {
-
-GlobalCliComm::GlobalCliComm()
-	: delivering(false)
-	, allowExternalCommands(false)
-{
-}
 
 GlobalCliComm::~GlobalCliComm()
 {
@@ -22,10 +16,10 @@ GlobalCliComm::~GlobalCliComm()
 	assert(!delivering);
 }
 
-void GlobalCliComm::addListener(std::unique_ptr<CliListener> listener)
+CliListener* GlobalCliComm::addListener(std::unique_ptr<CliListener> listener)
 {
 	// can be called from any thread
-	std::lock_guard<std::mutex> lock(mutex);
+	std::scoped_lock lock(mutex);
 	auto* p = listener.get();
 	listeners.push_back(std::move(listener));
 	if (allowExternalCommands) {
@@ -33,15 +27,15 @@ void GlobalCliComm::addListener(std::unique_ptr<CliListener> listener)
 			conn->start();
 		}
 	}
+	return p;
 }
 
 std::unique_ptr<CliListener> GlobalCliComm::removeListener(CliListener& listener)
 {
 	// can be called from any thread
-	std::lock_guard<std::mutex> lock(mutex);
-	auto it = rfind_if_unguarded(listeners,
-		[&](const std::unique_ptr<CliListener>& ptr) {
-			return ptr.get() == &listener; });
+	std::scoped_lock lock(mutex);
+	auto it = rfind_unguarded(listeners, &listener,
+		[](const auto& ptr) { return ptr.get(); });
 	auto result = std::move(*it);
 	move_pop_back(listeners, it);
 	return result;
@@ -58,7 +52,7 @@ void GlobalCliComm::setAllowExternalCommands()
 	}
 }
 
-void GlobalCliComm::log(LogLevel level, string_view message)
+void GlobalCliComm::log(LogLevel level, std::string_view message, float fraction)
 {
 	assert(Thread::isMainThread());
 
@@ -70,42 +64,51 @@ void GlobalCliComm::log(LogLevel level, string_view message)
 		// One example of a recursive invocation is when something goes
 		// wrong in the Tcl proc attached to message_callback (e.g. the
 		// font used to display the message could not be loaded).
-		std::cerr << "Recursive cliComm message: " << message << std::endl;
+		std::cerr << "Recursive cliComm message: " << message << '\n';
 		return;
 	}
-	ScopedAssign<bool> sa(delivering, true);
+	ScopedAssign sa(delivering, true);
 
-	std::lock_guard<std::mutex> lock(mutex);
+	std::scoped_lock lock(mutex);
 	if (!listeners.empty()) {
 		for (auto& l : listeners) {
-			l->log(level, message);
+			l->log(level, message, fraction);
 		}
 	} else {
 		// don't let the message get lost
-		std::cerr << message << std::endl;
+		std::cerr << message;
+		if (level == PROGRESS && fraction >= 0.0f) {
+			std::cerr << "... " << int(100.0f * fraction) << '%';
+		}
+		std::cerr << '\n';
 	}
 }
 
-void GlobalCliComm::update(UpdateType type, string_view name, string_view value)
+void GlobalCliComm::update(UpdateType type, std::string_view name, std::string_view value)
 {
 	assert(type < NUM_UPDATES);
-	auto it = prevValues[type].find(name);
-	if (it != end(prevValues[type])) {
+	updateHelper(type, {}, name, value);
+}
+
+void GlobalCliComm::updateFiltered(UpdateType type, std::string_view name, std::string_view value)
+{
+	assert(type < NUM_UPDATES);
+	if (auto [it, inserted] = prevValues[type].try_emplace(name, value);
+	    !inserted) { // was already present ..
 		if (it->second == value) {
-			return;
+			return; // .. with the same value
+		} else {
+			it->second = value; // .. but with a different value
 		}
-		it->second = value.str();
-	} else {
-		prevValues[type].emplace_noDuplicateCheck(name.str(), value.str());
 	}
 	updateHelper(type, {}, name, value);
 }
 
-void GlobalCliComm::updateHelper(UpdateType type, string_view machine,
-                                 string_view name, string_view value)
+void GlobalCliComm::updateHelper(UpdateType type, std::string_view machine,
+                                 std::string_view name, std::string_view value)
 {
 	assert(Thread::isMainThread());
-	std::lock_guard<std::mutex> lock(mutex);
+	std::scoped_lock lock(mutex);
 	for (auto& l : listeners) {
 		l->update(type, machine, name, value);
 	}

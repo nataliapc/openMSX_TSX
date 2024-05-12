@@ -1,14 +1,15 @@
 #ifndef SOUNDDRIVER_HH
 #define SOUNDDRIVER_HH
 
-#include <cstdint>
+#include "Mixer.hh"
+#include <span>
 
 namespace openmsx {
 
 class SoundDriver
 {
 public:
-	virtual ~SoundDriver() {}
+	virtual ~SoundDriver() = default;
 
 	/** Mute the sound system
 	 */
@@ -21,17 +22,17 @@ public:
 	/** Returns the actual sample frequency. This might be different
 	  * from the requested frequency ('frequency' setting).
 	  */
-	virtual unsigned getFrequency() const = 0;
+	[[nodiscard]] virtual unsigned getFrequency() const = 0;
 
 	/** Get the number of samples that should be created 'per fragment'.
 	  * This is not the same value as the 'samples setting'.
 	  */
-	virtual unsigned getSamples() const = 0;
+	[[nodiscard]] virtual unsigned getSamples() const = 0;
 
-	virtual void uploadBuffer(int16_t* buffer, unsigned len) = 0;
+	virtual void uploadBuffer(std::span<const StereoFloat> buffer) = 0;
 
 protected:
-	SoundDriver() {}
+	SoundDriver() = default;
 };
 
 } // namespace openmsx

@@ -11,13 +11,18 @@
     <manufacturer>Toshiba</manufacturer>
     <code>HX-51I</code>
     <release_year>1985</release_year>
-    <description/>
+    <description>Basic European 64kB MSX1, sold in Italy and Spain. The memory layout can cause poorly written software to crash.</description>
     <type>MSX</type>
+    <region>eu</region>
   </info>
 
   <CassettePort/>
 
   <devices>
+
+    <T7937 id="T7937">
+      <subtype></subtype>
+    </T7937>
 
     <PPI id="ppi">
       <sound>
@@ -41,8 +46,8 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <PrinterPort id="Printer Port">

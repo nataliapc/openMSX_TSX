@@ -2,22 +2,33 @@
 #define COMPLETER_HH
 
 #include "inline.hh"
-#include "string_view.hh"
+
+#include <concepts>
+#include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace openmsx {
 
 class FileContext;
+class Interpreter;
 class InterpreterOutput;
+class TclObject;
 
 class Completer
 {
 public:
-	const std::string& getName() const { return name; }
+	Completer(const Completer&) = delete;
+	Completer(Completer&&) = delete;
+	Completer& operator=(const Completer&) = delete;
+	Completer& operator=(Completer&&) = delete;
+
+	[[nodiscard]] const std::string& getName() const { return theName; }
 
 	/** Print help for this command.
 	  */
-	virtual std::string help(const std::vector<std::string>& tokens) const = 0;
+	[[nodiscard]] virtual std::string help(std::span<const TclObject> tokens) const = 0;
 
 	/** Attempt tab completion for this command.
 	  * @param tokens Tokenized command line;
@@ -26,13 +37,15 @@ public:
 	  */
 	virtual void tabCompletion(std::vector<std::string>& tokens) const = 0;
 
+	[[nodiscard]] virtual Interpreter& getInterpreter() const = 0;
+
 	template<typename ITER>
 	static void completeString(std::vector<std::string>& tokens,
 	                           ITER begin, ITER end,
 	                           bool caseSensitive = true);
 	template<typename RANGE>
 	static void completeString(std::vector<std::string>& tokens,
-	                           const RANGE& possibleValues,
+	                           RANGE&& possibleValues,
 	                           bool caseSensitive = true);
 	template<typename RANGE>
 	static void completeFileName(std::vector<std::string>& tokens,
@@ -42,39 +55,56 @@ public:
 	                             const FileContext& context);
 
 	static std::vector<std::string> formatListInColumns(
-		const std::vector<string_view>& input);
+		std::span<const std::string_view> input);
+
+	// helper functions to check the number of arguments
+	struct AtLeast { unsigned min; };
+	struct Between { unsigned min; unsigned max; };
+	struct Prefix { unsigned n; }; // how many items from 'tokens' to show in error
+	void checkNumArgs(std::span<const TclObject> tokens, unsigned exactly, const char* errMessage) const;
+	void checkNumArgs(std::span<const TclObject> tokens, AtLeast atLeast,  const char* errMessage) const;
+	void checkNumArgs(std::span<const TclObject> tokens, Between between,  const char* errMessage) const;
+	void checkNumArgs(std::span<const TclObject> tokens, unsigned exactly, Prefix prefix, const char* errMessage) const;
+	void checkNumArgs(std::span<const TclObject> tokens, AtLeast atLeast,  Prefix prefix, const char* errMessage) const;
+	void checkNumArgs(std::span<const TclObject> tokens, Between between,  Prefix prefix, const char* errMessage) const;
 
 	// should only be called by CommandConsole
 	static void setOutput(InterpreterOutput* output_) { output = output_; }
 
 protected:
-	explicit Completer(string_view name);
-	~Completer() {}
+	template<typename String>
+		requires(!std::same_as<Completer, std::remove_cvref_t<String>>) // don't block copy-constructor
+	explicit Completer(String&& name_)
+		: theName(std::forward<String>(name_))
+	{
+	}
+
+	~Completer() = default;
 
 private:
-	static bool equalHead(string_view s1, string_view s2, bool caseSensitive);
+	static bool equalHead(std::string_view s1, std::string_view s2, bool caseSensitive);
 	template<typename ITER>
-	static std::vector<string_view> filter(
-		string_view str, ITER begin, ITER end, bool caseSensitive);
+	static std::vector<std::string_view> filter(
+		std::string_view str, ITER begin, ITER end, bool caseSensitive);
 	template<typename RANGE>
-	static std::vector<string_view> filter(
-		string_view str, const RANGE& range, bool caseSensitive);
-	static bool completeImpl(std::string& str, std::vector<string_view> matches,
+	static std::vector<std::string_view> filter(
+		std::string_view str, RANGE&& range, bool caseSensitive);
+	static bool completeImpl(std::string& str, std::vector<std::string_view> matches,
 	                         bool caseSensitive);
 	static void completeFileNameImpl(std::vector<std::string>& tokens,
 	                                 const FileContext& context,
-	                                 std::vector<string_view> matches);
+	                                 std::vector<std::string_view> matches);
 
-	const std::string name;
-	static InterpreterOutput* output;
+	const std::string theName;
+	static inline InterpreterOutput* output = nullptr;
 };
 
 
 template<typename ITER>
-NEVER_INLINE std::vector<string_view> Completer::filter(
-	string_view str, ITER begin, ITER end, bool caseSensitive)
+NEVER_INLINE std::vector<std::string_view> Completer::filter(
+	std::string_view str, ITER begin, ITER end, bool caseSensitive)
 {
-	std::vector<string_view> result;
+	std::vector<std::string_view> result;
 	for (auto it = begin; it != end; ++it) {
 		if (equalHead(str, *it, caseSensitive)) {
 			result.push_back(*it);
@@ -84,8 +114,8 @@ NEVER_INLINE std::vector<string_view> Completer::filter(
 }
 
 template<typename RANGE>
-inline std::vector<string_view> Completer::filter(
-	string_view str, const RANGE& range, bool caseSensitive)
+inline std::vector<std::string_view> Completer::filter(
+	std::string_view str, RANGE&& range, bool caseSensitive)
 {
 	return filter(str, std::begin(range), std::end(range), caseSensitive);
 }
@@ -93,12 +123,12 @@ inline std::vector<string_view> Completer::filter(
 template<typename RANGE>
 void Completer::completeString(
 	std::vector<std::string>& tokens,
-	const RANGE& possibleValues,
+	RANGE&& possibleValues,
 	bool caseSensitive)
 {
 	auto& str = tokens.back();
 	if (completeImpl(str,
-	                 filter(str, possibleValues, caseSensitive),
+	                 filter(str, std::forward<RANGE>(possibleValues), caseSensitive),
 	                 caseSensitive)) {
 		tokens.emplace_back();
 	}

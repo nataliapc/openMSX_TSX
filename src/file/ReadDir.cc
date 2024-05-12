@@ -2,9 +2,9 @@
 
 namespace openmsx {
 
-ReadDir::ReadDir(const std::string& directory)
+ReadDir::ReadDir(zstring_view directory)
+	: dir(opendir(directory.empty() ? "." : directory.c_str()))
 {
-	dir = opendir(directory.empty() ? "." : directory.c_str());
 }
 
 ReadDir::~ReadDir()

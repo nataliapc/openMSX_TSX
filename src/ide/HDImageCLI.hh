@@ -12,11 +12,11 @@ class HDImageCLI final : public CLIOption
 public:
 	explicit HDImageCLI(CommandLineParser& parser);
 	void parseOption(const std::string& option,
-	                 array_ref<std::string>& cmdLine) override;
+	                 std::span<std::string>& cmdLine) override;
 	void parseDone() override;
-	string_view optionHelp() const override;
+	[[nodiscard]] std::string_view optionHelp() const override;
 
-	static std::string getImageForId(int id);
+	[[nodiscard]] static std::string getImageForId(int id);
 
 private:
 	CommandLineParser& parser;

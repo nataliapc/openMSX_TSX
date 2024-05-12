@@ -18,13 +18,14 @@ class File;
 class XSADiskImage final : public SectorBasedDisk
 {
 public:
-	XSADiskImage(Filename& filename, File& file);
+	XSADiskImage(const Filename& filename, File& file);
 
 private:
 	// SectorBasedDisk
-	void readSectorImpl (size_t sector,       SectorBuffer& buf) override;
+	void readSectorsImpl(
+		std::span<SectorBuffer> buffers, size_t startSector) override;
 	void writeSectorImpl(size_t sector, const SectorBuffer& buf) override;
-	bool isWriteProtectedImpl() const override;
+	[[nodiscard]] bool isWriteProtectedImpl() const override;
 
 	MemBuffer<SectorBuffer> data;
 };

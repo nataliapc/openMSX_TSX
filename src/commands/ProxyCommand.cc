@@ -1,18 +1,14 @@
 #include "ProxyCommand.hh"
 #include "GlobalCommandController.hh"
 #include "MSXCommandController.hh"
-#include "TclObject.hh"
 #include "CommandException.hh"
 #include "MSXMotherBoard.hh"
 #include "Reactor.hh"
 #include "checked_cast.hh"
 
-using std::vector;
-using std::string;
-
 namespace openmsx {
 
-ProxyCmd::ProxyCmd(Reactor& reactor_, string_view name_)
+ProxyCmd::ProxyCmd(Reactor& reactor_, std::string_view name_)
 	: Command(reactor_.getGlobalCommandController(), name_)
 	, reactor(reactor_)
 {
@@ -25,11 +21,11 @@ Command* ProxyCmd::getMachineCommand() const
 	return motherBoard->getMSXCommandController().findCommand(getName());
 }
 
-void ProxyCmd::execute(array_ref<TclObject> tokens, TclObject& result)
+void ProxyCmd::execute(std::span<const TclObject> tokens, TclObject& result)
 {
 	if (Command* command = getMachineCommand()) {
 		if (!command->isAllowedInEmptyMachine()) {
-			auto controller = checked_cast<MSXCommandController*>(
+			auto* controller = checked_cast<MSXCommandController*>(
 				&command->getCommandController());
 			if (!controller->getMSXMotherBoard().getMachineConfig()) {
 				throw CommandException(
@@ -42,7 +38,7 @@ void ProxyCmd::execute(array_ref<TclObject> tokens, TclObject& result)
 	}
 }
 
-string ProxyCmd::help(const vector<string>& tokens) const
+std::string ProxyCmd::help(std::span<const TclObject> tokens) const
 {
 	if (Command* command = getMachineCommand()) {
 		return command->help(tokens);
@@ -51,7 +47,7 @@ string ProxyCmd::help(const vector<string>& tokens) const
 	}
 }
 
-void ProxyCmd::tabCompletion(vector<string>& tokens) const
+void ProxyCmd::tabCompletion(std::vector<std::string>& tokens) const
 {
 	if (Command* command = getMachineCommand()) {
 		command->tabCompletion(tokens);

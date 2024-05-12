@@ -4,53 +4,58 @@
 #include "Command.hh"
 #include "InfoTopic.hh"
 #include "Setting.hh"
+#include "TclObject.hh"
+
 #include "hash_set.hh"
-#include "string_view.hh"
-#include "xxhash.hh"
+
+#include <string_view>
 
 namespace openmsx {
 
-class BaseSetting;
+class SettingsConfig;
 class GlobalCommandController;
-class XMLElement;
 
 /** Manages all settings.
   */
 class SettingsManager
 {
 public:
-	SettingsManager(const SettingsManager&) = delete;
-	SettingsManager& operator=(const SettingsManager&) = delete;
-
 	explicit SettingsManager(GlobalCommandController& commandController);
+	SettingsManager(const SettingsManager&) = delete;
+	SettingsManager(SettingsManager&&) = delete;
+	SettingsManager& operator=(const SettingsManager&) = delete;
+	SettingsManager& operator=(SettingsManager&&) = delete;
 	~SettingsManager();
 
 	/** Find the setting with given name.
 	  * @return The requested setting or nullptr.
 	  */
-	BaseSetting* findSetting(string_view name) const;
-	BaseSetting* findSetting(string_view prefix, string_view baseName) const;
+	[[nodiscard]] BaseSetting* findSetting(std::string_view name) const;
+	[[nodiscard]] BaseSetting* findSetting(std::string_view prefix, std::string_view baseName) const;
 
-	void loadSettings(const XMLElement& config);
+	void loadSettings(const SettingsConfig& config) const;
 
 	void registerSetting  (BaseSetting& setting);
 	void unregisterSetting(BaseSetting& setting);
 
-private:
-	BaseSetting& getByName(string_view cmd, string_view name) const;
-	std::vector<std::string> getTabSettingNames() const;
+	[[nodiscard]] const auto& getAllSettings() const { return settings; }
 
+private:
+	[[nodiscard]] BaseSetting& getByName(std::string_view cmd, std::string_view name) const;
+	[[nodiscard]] std::vector<std::string> getTabSettingNames() const;
+
+private:
 	struct SettingInfo final : InfoTopic {
 		explicit SettingInfo(InfoCommand& openMSXInfoCommand);
-		void execute(array_ref<TclObject> tokens,
+		void execute(std::span<const TclObject> tokens,
 			     TclObject& result) const override;
-		std::string help(const std::vector<std::string>& tokens) const override;
+		[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override;
 		void tabCompletion(std::vector<std::string>& tokens) const override;
 	} settingInfo;
 
 	struct SetCompleter final : CommandCompleter {
 		explicit SetCompleter(CommandController& commandController);
-		std::string help(const std::vector<std::string>& tokens) const override;
+		[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override;
 		void tabCompletion(std::vector<std::string>& tokens) const override;
 	} setCompleter;
 
@@ -59,7 +64,7 @@ private:
 		SettingCompleter(CommandController& commandController,
 				 SettingsManager& manager,
 				 const std::string& name);
-		std::string help(const std::vector<std::string>& tokens) const override;
+		[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override;
 		void tabCompletion(std::vector<std::string>& tokens) const override;
 	private:
 		SettingsManager& manager;
@@ -68,7 +73,7 @@ private:
 	SettingCompleter unsetCompleter;
 
 	struct NameFromSetting {
-		const TclObject& operator()(BaseSetting* s) const {
+		[[nodiscard]] const TclObject& operator()(const BaseSetting* s) const {
 			return s->getFullNameObj();
 		}
 	};

@@ -3,7 +3,7 @@
 
 #include "DynamicClock.hh"
 #include "Scheduler.hh"
-#include <algorithm>
+#include "narrow.hh"
 #include <cassert>
 
 namespace openmsx {
@@ -25,7 +25,7 @@ protected:
 #else
 	// 64-bit addition is expensive
 	// (if executed several million times per second)
-	inline void add(unsigned ticks) { remaining -= ticks; }
+	inline void add(unsigned ticks) { remaining -= narrow_cast<int>(ticks); }
 	inline void sync() const {
 		clock.fastAdd(limit - remaining);
 		limit = remaining;
@@ -33,15 +33,15 @@ protected:
 #endif
 
 	// These are similar to the corresponding methods in DynamicClock.
-	EmuTime::param getTime() const { sync(); return clock.getTime(); }
-	const EmuTime getTimeFast() const { return clock.getFastAdd(limit - remaining); }
-	const EmuTime getTimeFast(int cc) const {
+	[[nodiscard]] EmuTime::param getTime() const { sync(); return clock.getTime(); }
+	[[nodiscard]] EmuTime getTimeFast() const { return clock.getFastAdd(limit - remaining); }
+	[[nodiscard]] EmuTime getTimeFast(int cc) const {
 		return clock.getFastAdd(limit - remaining + cc);
 	}
 	void setTime(EmuTime::param time) { sync(); clock.reset(time); }
 	void setFreq(unsigned freq) { clock.setFreq(freq); }
 	void advanceTime(EmuTime::param time);
-	EmuTime calcTime(EmuTime::param time, unsigned ticks) const {
+	[[nodiscard]] EmuTime calcTime(EmuTime::param time, unsigned ticks) const {
 		return clock.add(time, ticks);
 	}
 
@@ -94,7 +94,7 @@ protected:
 		if (limitEnabled) {
 			sync();
 			assert(remaining == limit);
-			limit = clock.getTicksTillUp(time) - 1;
+			limit = narrow_cast<int>(clock.getTicksTillUp(time) - 1);
 			remaining = limit;
 		} else {
 			assert(limit < 0);
@@ -110,7 +110,7 @@ protected:
 		limit = -1;
 		remaining = limit - extra;
 	}
-	inline bool limitReached() const {
+	[[nodiscard]] inline bool limitReached() const {
 		return remaining < 0;
 	}
 
@@ -120,9 +120,9 @@ protected:
 private:
 	mutable DynamicClock clock;
 	Scheduler& scheduler;
-	int remaining;
-	mutable int limit;
-	bool limitEnabled;
+	int remaining = -1;
+	mutable int limit = -1;
+	bool limitEnabled = false;
 };
 
 } // namespace openmsx

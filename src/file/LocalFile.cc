@@ -12,18 +12,19 @@
 #include "LocalFile.hh"
 #include "FileException.hh"
 #include "FileNotFoundException.hh"
-#include "PreCacheFile.hh"
+#include "narrow.hh"
+#include "one_of.hh"
+
+#include <bit>
 #include <cstring> // for strchr, strerror
 #include <cerrno>
 #include <cassert>
 #include <memory>
 
-using std::string;
-
 namespace openmsx {
 
-LocalFile::LocalFile(string_view filename_, File::OpenMode mode)
-	: filename(FileOperations::expandTilde(filename_))
+LocalFile::LocalFile(std::string filename_, File::OpenMode mode)
+	: filename(std::move(filename_))
 #if HAVE_MMAP || defined _WIN32
 	, mmem(nullptr)
 #endif
@@ -33,14 +34,13 @@ LocalFile::LocalFile(string_view filename_, File::OpenMode mode)
 	, readOnly(false)
 {
 	if (mode == File::SAVE_PERSISTENT) {
-		auto pos = filename.find_last_of('/');
-		if (pos != string::npos) {
-			FileOperations::mkdirp(string_view(filename).substr(0, pos));
+		if (auto pos = filename.find_last_of('/'); pos != std::string::npos) {
+			FileOperations::mkdirp(filename.substr(0, pos));
 		}
 	}
 
-	const string name = FileOperations::getNativePath(filename);
-	if ((mode == File::SAVE_PERSISTENT) || (mode == File::TRUNCATE)) {
+	const std::string& name = FileOperations::getNativePath(filename);
+	if (mode == one_of(File::SAVE_PERSISTENT, File::TRUNCATE)) {
 		// open file read/write truncated
 		file = FileOperations::openFile(name, "wb+");
 	} else if (mode == File::CREATE) {
@@ -70,11 +70,11 @@ LocalFile::LocalFile(string_view filename_, File::OpenMode mode)
 				strerror(err));
 		}
 	}
-	getSize(); // check filesize
+	(void)getSize(); // query filesize, but ignore result
 }
 
-LocalFile::LocalFile(string_view filename_, const char* mode)
-	: filename(FileOperations::expandTilde(filename_))
+LocalFile::LocalFile(std::string filename_, const char* mode)
+	: filename(std::move(filename_))
 #if HAVE_MMAP || defined _WIN32
 	, mmem(nullptr)
 #endif
@@ -84,12 +84,12 @@ LocalFile::LocalFile(string_view filename_, const char* mode)
 	, readOnly(false)
 {
 	assert(strchr(mode, 'b'));
-	const string name = FileOperations::getNativePath(filename);
+	const std::string name = FileOperations::getNativePath(filename);
 	file = FileOperations::openFile(name, mode);
 	if (!file) {
 		throw FileException("Error opening file \"", filename, '"');
 	}
-	getSize(); // check filesize
+	(void)getSize(); // query filesize, but ignore result
 }
 
 LocalFile::~LocalFile()
@@ -99,13 +99,12 @@ LocalFile::~LocalFile()
 
 void LocalFile::preCacheFile()
 {
-	cache = std::make_unique<PreCacheFile>(
-		FileOperations::getNativePath(filename));
+	cache.emplace(FileOperations::getNativePath(filename));
 }
 
-void LocalFile::read(void* buffer, size_t num)
+void LocalFile::read(std::span<uint8_t> buffer)
 {
-	if (fread(buffer, 1, num, file.get()) != num) {
+	if (fread(buffer.data(), 1, buffer.size(), file.get()) != buffer.size()) {
 		if (ferror(file.get())) {
 			throw FileException("Error reading file");
 		}
@@ -115,9 +114,9 @@ void LocalFile::read(void* buffer, size_t num)
 	}
 }
 
-void LocalFile::write(const void* buffer, size_t num)
+void LocalFile::write(std::span<const uint8_t> buffer)
 {
-	if (fwrite(buffer, 1, num, file.get()) != num) {
+	if (fwrite(buffer.data(), 1, buffer.size(), file.get()) != buffer.size()) {
 		if (ferror(file.get())) {
 			throw FileException("Error writing file");
 		}
@@ -125,10 +124,10 @@ void LocalFile::write(const void* buffer, size_t num)
 }
 
 #if defined _WIN32
-const byte* LocalFile::mmap(size_t& size)
+std::span<const uint8_t> LocalFile::mmap()
 {
-	size = getSize();
-	if (size == 0) return nullptr;
+	size_t size = getSize();
+	if (size == 0) return {static_cast<uint8_t*>(nullptr), size};
 
 	if (!mmem) {
 		int fd = _fileno(file.get());
@@ -145,7 +144,7 @@ const byte* LocalFile::mmap(size_t& size)
 			throw FileException(
 				"CreateFileMapping failed: ", GetLastError());
 		}
-		mmem = static_cast<byte*>(MapViewOfFile(hMmap, FILE_MAP_COPY, 0, 0, 0));
+		mmem = static_cast<uint8_t*>(MapViewOfFile(hMmap, FILE_MAP_COPY, 0, 0, 0));
 		if (!mmem) {
 			DWORD gle = GetLastError();
 			CloseHandle(hMmap);
@@ -153,7 +152,7 @@ const byte* LocalFile::mmap(size_t& size)
 			throw FileException("MapViewOfFile failed: ", gle);
 		}
 	}
-	return mmem;
+	return {mmem, size};
 }
 
 void LocalFile::munmap()
@@ -161,7 +160,7 @@ void LocalFile::munmap()
 	if (mmem) {
 		// TODO: make this a valid failure path
 		// When pages are dirty, UnmapViewOfFile is a save operation,
-		// and that can fail. However, mummap is called from
+		// and that can fail. However, munmap is called from
 		// the destructor, for which there is no expectation
 		// that it will fail. So this area needs some work.
 		// It is NOT an option to throw an exception (not even
@@ -180,29 +179,34 @@ void LocalFile::munmap()
 }
 
 #elif HAVE_MMAP
-const byte* LocalFile::mmap(size_t& size)
+std::span<const uint8_t> LocalFile::mmap()
 {
-	size = getSize();
-	if (size == 0) return nullptr;
+	size_t size = getSize();
+	if (size == 0) return {static_cast<uint8_t*>(nullptr), size};
 
 	if (!mmem) {
-		mmem = static_cast<byte*>(
+		mmem = static_cast<uint8_t*>(
 		          ::mmap(nullptr, size, PROT_READ | PROT_WRITE,
 		                 MAP_PRIVATE, fileno(file.get()), 0));
 		// MAP_FAILED is #define'd using an old-style cast, we
 		// have to redefine it ourselves to avoid a warning
-		auto MY_MAP_FAILED = reinterpret_cast<void*>(-1);
+		auto* MY_MAP_FAILED = std::bit_cast<void*>(intptr_t(-1));
 		if (mmem == MY_MAP_FAILED) {
 			throw FileException("Error mmapping file");
 		}
 	}
-	return mmem;
+	return {mmem, size};
 }
 
 void LocalFile::munmap()
 {
 	if (mmem) {
-		::munmap(const_cast<byte*>(mmem), getSize());
+		try {
+			::munmap(mmem, getSize());
+		} catch (FileException&) {
+			// In theory getSize() could throw. Does that ever
+			// happen in practice?
+		}
 		mmem = nullptr;
 	}
 }
@@ -236,7 +240,7 @@ void LocalFile::seek(size_t pos)
 #if defined _WIN32
 	int ret = _fseeki64(file.get(), pos, SEEK_SET);
 #else
-	int ret = fseek(file.get(), pos, SEEK_SET);
+	int ret = fseek(file.get(), narrow_cast<long>(pos), SEEK_SET);
 #endif
 	if (ret != 0) {
 		throw FileException("Error seeking file");
@@ -252,7 +256,7 @@ size_t LocalFile::getPos()
 void LocalFile::truncate(size_t size)
 {
 	int fd = fileno(file.get());
-	if (ftruncate(fd, size)) {
+	if (ftruncate(fd, narrow_cast<off_t>(size))) {
 		throw FileException("Error truncating file");
 	}
 }
@@ -263,12 +267,12 @@ void LocalFile::flush()
 	fflush(file.get());
 }
 
-const string LocalFile::getURL() const
+const std::string& LocalFile::getURL() const
 {
 	return filename;
 }
 
-const string LocalFile::getLocalReference()
+std::string LocalFile::getLocalReference()
 {
 	return filename;
 }

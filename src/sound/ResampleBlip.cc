@@ -1,41 +1,47 @@
 #include "ResampleBlip.hh"
 #include "ResampledSoundDevice.hh"
-#include "likely.hh"
+#include "narrow.hh"
+#include "one_of.hh"
+#include "ranges.hh"
 #include "vla.hh"
-#include <algorithm>
+#include "xrange.hh"
+#include <array>
 #include <cassert>
 
 namespace openmsx {
 
-template <unsigned CHANNELS>
+template<unsigned CHANNELS>
 ResampleBlip<CHANNELS>::ResampleBlip(
-		ResampledSoundDevice& input_,
-		const DynamicClock& hostClock_, unsigned emuSampleRate)
-	: input(input_)
+		ResampledSoundDevice& input_, const DynamicClock& hostClock_)
+	: ResampleAlgo(input_)
 	, hostClock(hostClock_)
-	, emuClock(hostClock.getTime(), emuSampleRate)
-	, step(FP::roundRatioDown(hostClock.getFreq(), emuSampleRate))
+	, step([&]{ // calculate 'hostClock.getFreq() / getEmuClock().getFreq()', but with less rounding errors
+			uint64_t emuPeriod = input_.getEmuClock().getPeriod().length(); // unknown units
+			uint64_t hostPeriod = hostClock.getPeriod().length(); // unknown units, but same as above
+			return FP::roundRatioDown(narrow<unsigned>(emuPeriod),
+			                          narrow<unsigned>(hostPeriod));
+		}())
 {
-	for (auto& l : lastInput) l = 0;
+	ranges::fill(lastInput, 0.0f);
 }
 
-template <unsigned CHANNELS>
-bool ResampleBlip<CHANNELS>::generateOutput(int* dataOut, unsigned hostNum,
-                                            EmuTime::param time)
+template<unsigned CHANNELS>
+bool ResampleBlip<CHANNELS>::generateOutputImpl(float* dataOut, size_t hostNum,
+                                                EmuTime::param time)
 {
-	unsigned emuNum = emuClock.getTicksTill(time);
-	if (emuNum > 0) {
+	auto& emuClk = getEmuClock();
+	if (unsigned emuNum = emuClk.getTicksTill(time); emuNum > 0) {
 		// 3 extra for padding, CHANNELS extra for sentinel
 		// Clang will produce a link error if the length expression is put
 		// inside the macro.
 		const unsigned len = emuNum * CHANNELS + std::max(3u, CHANNELS);
-		VLA_SSE_ALIGNED(int, buf, len);
-		EmuTime emu1 = emuClock.getFastAdd(1); // time of 1st emu-sample
+		VLA_SSE_ALIGNED(float, buf, len);
+		EmuTime emu1 = emuClk.getFastAdd(1); // time of 1st emu-sample
 		assert(emu1 > hostClock.getTime());
-		if (input.generateInput(buf, emuNum)) {
+		if (input.generateInput(buf.data(), emuNum)) {
 			FP pos1;
 			hostClock.getTicksTill(emu1, pos1);
-			for (unsigned ch = 0; ch < CHANNELS; ++ch) {
+			for (auto ch : xrange(CHANNELS)) {
 				// In case of PSG (and to a lesser degree SCC) it happens
 				// very often that two consecutive samples have the same
 				// value. We can benefit from this by setting a sentinel
@@ -43,12 +49,12 @@ bool ResampleBlip<CHANNELS>::generateOutput(int* dataOut, unsigned hostNum,
 				// into the 'samples differ' branch.
 				assert(emuNum > 0);
 				buf[CHANNELS * emuNum + ch] =
-					buf[CHANNELS * (emuNum - 1) + ch] + 1;
+					buf[CHANNELS * (emuNum - 1) + ch] + 1.0f;
 				FP pos = pos1;
-				int last = lastInput[ch]; // local var is slightly faster
+				auto last = lastInput[ch]; // local var is slightly faster
 				for (unsigned i = 0; /**/; ++i) {
-					int delta = buf[CHANNELS * i + ch] - last;
-					if (unlikely(delta != 0)) {
+					if (auto delta = buf[CHANNELS * i + ch] - last;
+					    delta != 0) [[unlikely]] {
 						if (i == emuNum) {
 							break;
 						}
@@ -65,42 +71,38 @@ bool ResampleBlip<CHANNELS>::generateOutput(int* dataOut, unsigned hostNum,
 			// input all zero
 			BlipBuffer::TimeIndex pos;
 			hostClock.getTicksTill(emu1, pos);
-			for (unsigned ch = 0; ch < CHANNELS; ++ch) {
-				if (lastInput[ch] != 0) {
-					int delta = -lastInput[ch];
-					lastInput[ch] = 0;
+			for (auto ch : xrange(CHANNELS)) {
+				if (lastInput[ch] != 0.0f) {
+					auto delta = -lastInput[ch];
+					lastInput[ch] = 0.0f;
 					blip[ch].addDelta(pos, delta);
 				}
 			}
 		}
-		emuClock += emuNum;
-		assert(emuClock.getTime() <= time);
-		assert(emuClock.getFastAdd(1) > time);
+		emuClk += emuNum;
 	}
 
-	bool results[CHANNELS];
-	for (unsigned ch = 0; ch < CHANNELS; ++ch) {
+	std::array<bool, CHANNELS> results;
+	for (auto ch : xrange(CHANNELS)) {
 		results[ch] = blip[ch].template readSamples<CHANNELS>(dataOut + ch, hostNum);
 	}
-	static_assert((CHANNELS == 1) || (CHANNELS == 2), "either mono or stereo");
-	bool result;
-	if (CHANNELS == 1) {
-		result = results[0];
+	static_assert(CHANNELS == one_of(1u, 2u), "either mono or stereo");
+	if constexpr (CHANNELS == 1) {
+		return results[0];
 	} else {
 		if (results[0] == results[1]) {
 			// Both muted or both unmuted
-			result = results[0];
+			return results[0];
 		} else {
 			// One channel muted, the other not.
 			// We have to set the muted channel to all-zero.
 			unsigned offset = results[0] ? 1 : 0;
-			for (unsigned i = 0; i < hostNum; ++i) {
-				dataOut[2 * i + offset] = 0;
+			for (auto i : xrange(hostNum)) {
+				dataOut[2 * i + offset] = 0.0f;
 			}
-			result = true;
+			return true;
 		}
 	}
-	return result;
 }
 
 // Force template instantiation.

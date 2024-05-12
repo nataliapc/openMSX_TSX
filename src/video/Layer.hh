@@ -20,7 +20,7 @@ public:
 		Z_MSX_PASSIVE = 30,
 		Z_MSX_ACTIVE = 40,
 		Z_OSDGUI = 50,
-		Z_CONSOLE = 100
+		Z_IMGUI = 60,
 	};
 
 	/** Describes how much of the screen is currently covered by a particular
@@ -47,11 +47,12 @@ public:
 
 	/** Query the Z-index of this layer.
 	  */
-	ZIndex getZ() const { return z; }
+	[[nodiscard]] ZIndex getZ() const { return z; }
+	[[nodiscard]] bool isActive() const { return getZ() == Z_MSX_ACTIVE; }
 
 	/** Query the coverage of this layer.
 	 */
-	Coverage getCoverage() const { return coverage; }
+	[[nodiscard]] Coverage getCoverage() const { return coverage; }
 
 	/** Store pointer to Display.
 	  * Will be called by Display::addLayer().
@@ -60,7 +61,10 @@ public:
 
 protected:
 	/** Construct a layer. */
-	explicit Layer(Coverage coverage = COVER_NONE, ZIndex z = Z_DUMMY);
+	explicit Layer(Coverage coverage_ = COVER_NONE, ZIndex z_ = Z_DUMMY)
+		: coverage(coverage_), z(z_)
+	{
+	}
 
 	/** Changes the current coverage of this layer.
 	  */
@@ -72,7 +76,7 @@ protected:
 
 private:
 	/** The display this layer is part of. */
-	LayerListener* display;
+	LayerListener* display = nullptr;
 
 	/** Inspected by Display to determine which layers to paint. */
 	Coverage coverage;
@@ -90,6 +94,10 @@ class ScopedLayerHider
 {
 public:
 	explicit ScopedLayerHider(Layer& layer);
+	ScopedLayerHider(const ScopedLayerHider&) = delete;
+	ScopedLayerHider(ScopedLayerHider&&) = delete;
+	ScopedLayerHider& operator=(const ScopedLayerHider&) = delete;
+	ScopedLayerHider& operator=(ScopedLayerHider&&) = delete;
 	~ScopedLayerHider();
 private:
 	Layer& layer;

@@ -2,95 +2,25 @@
 #define STL_HH
 
 #include <algorithm>
+#include <cassert>
+#include <functional>
+#include <iterator>
+#include <initializer_list>
+#include <map>
+#include <numeric>
 #include <tuple>
 #include <utility>
-#include <cassert>
+#include <variant>
+#include <vector>
 
-// Dereference the two given (pointer-like) parameters and then compare
-// them with the less-than operator.
-struct LessDeref
-{
-	template<typename PTR>
-	bool operator()(PTR p1, PTR p2) const { return *p1 < *p2; }
+// Predicate that can be called with any number of parameters (of any type) and
+// just always returns 'true'. This can be useful as a default parameter value.
+struct always_true {
+	template<typename ...Args>
+	bool operator()(Args&& ...) const {
+		return true;
+	}
 };
-
-// C++14 has an std::equal_to functor that is very much like this version.
-// TODO remove this version once we switch to C++14.
-struct EqualTo
-{
-       template<typename T1, typename T2>
-       bool operator()(const T1& t1, const T2& t2) const { return t1 == t2; }
-};
-
-// Heterogeneous version of std::less.
-struct LessThan
-{
-	template<typename T1, typename T2>
-	bool operator()(const T1& t1, const T2& t2) const { return t1 < t2; }
-};
-
-
-// Compare the N-th element of two tuples using a custom comparison functor.
-// Also provides overloads to compare the N-the element of a tuple with a
-// single value (of a compatible type).
-// ATM the functor cannot take constructor arguments, possibly refactor this in
-// the future.
-template<int N, typename CMP> struct CmpTupleElement
-{
-	template<typename... Args>
-	bool operator()(const std::tuple<Args...>& x, const std::tuple<Args...>& y) const {
-		return cmp(std::get<N>(x), std::get<N>(y));
-	}
-
-	template<typename T, typename... Args>
-	bool operator()(const T& x, const std::tuple<Args...>& y) const {
-		return cmp(x, std::get<N>(y));
-	}
-
-	template<typename T, typename... Args>
-	bool operator()(const std::tuple<Args...>& x, const T& y) const {
-		return cmp(std::get<N>(x), y);
-	}
-
-	template<typename T1, typename T2>
-	bool operator()(const std::pair<T1, T2>& x, const std::pair<T1, T2>& y) const {
-		return cmp(std::get<N>(x), std::get<N>(y));
-	}
-
-	template<typename T, typename T1, typename T2>
-	bool operator()(const T& x, const std::pair<T1, T2>& y) const {
-		return cmp(x, std::get<N>(y));
-	}
-
-	template<typename T, typename T1, typename T2>
-	bool operator()(const std::pair<T1, T2>& x, const T& y) const {
-		return cmp(std::get<N>(x), y);
-	}
-
-private:
-	CMP cmp;
-};
-
-// Similar to CmpTupleElement above, but uses the less-than operator.
-template<int N> using LessTupleElement = CmpTupleElement<N, LessThan>;
-
-
-// Check whether the N-the element of a tuple is equal to the given value.
-template<int N, typename T> struct EqualTupleValueImpl
-{
-	explicit EqualTupleValueImpl(const T& t_) : t(t_) {}
-	template<typename TUPLE>
-	bool operator()(const TUPLE& tup) const {
-		return std::get<N>(tup) == t;
-	}
-private:
-	const T& t;
-};
-template<int N, typename T>
-EqualTupleValueImpl<N, T> EqualTupleValue(const T& t) {
-	return EqualTupleValueImpl<N, T>(t);
-}
-
 
 /** Check if a range contains a given value, using linear search.
   * Equivalent to 'find(first, last, val) != last', though this algorithm
@@ -99,14 +29,35 @@ EqualTupleValueImpl<N, T> EqualTupleValue(const T& t) {
   * STL already has the 'any_of' algorithm.
   */
 template<typename ITER, typename VAL>
-inline bool contains(ITER first, ITER last, const VAL& val)
+[[nodiscard]] constexpr bool contains(ITER first, ITER last, const VAL& val)
 {
-	return std::find(first, last, val) != last;
+	// c++20: return std::find(first, last, val) != last;
+	while (first != last) {
+		if (*first == val) return true;
+		++first;
+	}
+	return false;
 }
 template<typename RANGE, typename VAL>
-inline bool contains(const RANGE& range, const VAL& val)
+[[nodiscard]] constexpr bool contains(const RANGE& range, const VAL& val)
 {
 	return contains(std::begin(range), std::end(range), val);
+}
+
+template<typename ITER, typename VAL, typename Proj>
+[[nodiscard]] /*constexpr*/ bool contains(ITER first, ITER last, const VAL& val, Proj proj)
+{
+	// c++20: return std::find(first, last, val) != last;
+	while (first != last) {
+		if (std::invoke(proj, *first) == val) return true;
+		++first;
+	}
+	return false;
+}
+template<typename RANGE, typename VAL, typename Proj>
+[[nodiscard]] /*constexpr*/ bool contains(const RANGE& range, const VAL& val, Proj proj)
+{
+	return contains(std::begin(range), std::end(range), val, proj);
 }
 
 
@@ -117,21 +68,16 @@ inline bool contains(const RANGE& range, const VAL& val)
   * the 'last' parameter. Sometimes you see 'find_unguarded' without a 'last'
   * parameter, we could consider providing such an overload as well.
   */
-template<typename ITER, typename VAL>
-inline ITER find_unguarded(ITER first, ITER last, const VAL& val)
+template<typename ITER, typename VAL, typename Proj = std::identity>
+[[nodiscard]] /*constexpr*/ ITER find_unguarded(ITER first, ITER last, const VAL& val, Proj proj = {})
 {
-	(void)last;
-	while (1) {
-		assert(first != last);
-		if (*first == val) return first;
-		++first;
-	}
+	return find_if_unguarded(first, last,
+		[&](const auto& e) { return std::invoke(proj, e) == val; });
 }
-template<typename RANGE, typename VAL>
-inline auto find_unguarded(RANGE& range, const VAL& val)
--> decltype(std::begin(range))
+template<typename RANGE, typename VAL, typename Proj = std::identity>
+[[nodiscard]] /*constexpr*/ auto find_unguarded(RANGE& range, const VAL& val, Proj proj = {})
 {
-	return find_unguarded(std::begin(range), std::end(range), val);
+	return find_unguarded(std::begin(range), std::end(range), val, proj);
 }
 
 /** Faster alternative to 'find_if' when it's guaranteed that the predicate
@@ -139,18 +85,17 @@ inline auto find_unguarded(RANGE& range, const VAL& val)
   * See also 'find_unguarded'.
   */
 template<typename ITER, typename PRED>
-inline ITER find_if_unguarded(ITER first, ITER last, PRED pred)
+[[nodiscard]] constexpr ITER find_if_unguarded(ITER first, ITER last, PRED pred)
 {
 	(void)last;
-	while (1) {
+	while (true) {
 		assert(first != last);
 		if (pred(*first)) return first;
 		++first;
 	}
 }
 template<typename RANGE, typename PRED>
-inline auto find_if_unguarded(RANGE& range, PRED pred)
--> decltype(std::begin(range))
+[[nodiscard]] constexpr auto find_if_unguarded(RANGE& range, PRED pred)
 {
 	return find_if_unguarded(std::begin(range), std::end(range), pred);
 }
@@ -160,21 +105,18 @@ inline auto find_if_unguarded(RANGE& range, PRED pred)
   * Note that we only need to provide range versions. Because for the iterator
   * versions it is already possible to pass reverse iterators.
   */
-template<typename RANGE, typename VAL>
-inline auto rfind_unguarded(RANGE& range, const VAL& val)
--> decltype(std::begin(range))
+template<typename RANGE, typename VAL, typename Proj = std::identity>
+[[nodiscard]] /*constexpr*/ auto rfind_unguarded(RANGE& range, const VAL& val, Proj proj = {})
 {
-	//auto it = find_unguarded(std::rbegin(range), std::rend(range), val); // c++14
-	auto it = find_unguarded(range.rbegin(), range.rend(), val);
+	auto it = find_unguarded(std::rbegin(range), std::rend(range), val, proj);
 	++it;
 	return it.base();
 }
 
 template<typename RANGE, typename PRED>
-inline auto rfind_if_unguarded(RANGE& range, PRED pred)
--> decltype(std::begin(range))
+[[nodiscard]] constexpr auto rfind_if_unguarded(RANGE& range, PRED pred)
 {
-	auto it = find_if_unguarded(range.rbegin(), range.rend(), pred);
+	auto it = find_if_unguarded(std::rbegin(range), std::rend(range), pred);
 	++it;
 	return it.base();
 }
@@ -224,7 +166,7 @@ void move_pop_back(VECTOR& v, typename VECTOR::iterator it)
   *    to the return value of the remove() algorithm.
   */
 template<typename ForwardIt, typename OutputIt, typename UnaryPredicate>
-std::pair<OutputIt, ForwardIt> partition_copy_remove(
+[[nodiscard]] std::pair<OutputIt, ForwardIt> partition_copy_remove(
 	ForwardIt first, ForwardIt last, OutputIt out_true, UnaryPredicate p)
 {
 	first = std::find_if(first, last, p);
@@ -239,7 +181,282 @@ l_true:				*out_true++  = std::move(*first++);
 			}
 		}
 	}
-	return std::make_pair(out_true, out_false);
+	return std::pair(out_true, out_false);
+}
+
+template<typename ForwardRange, typename OutputIt, typename UnaryPredicate>
+[[nodiscard]] auto partition_copy_remove(ForwardRange&& range, OutputIt out_true, UnaryPredicate p)
+{
+	return partition_copy_remove(std::begin(range), std::end(range), out_true, p);
+}
+
+
+// Like range::transform(), but with equal source and destination.
+template<typename ForwardRange, typename UnaryOperation>
+auto transform_in_place(ForwardRange&& range, UnaryOperation op)
+{
+	return std::transform(std::begin(range), std::end(range), std::begin(range), op);
+}
+
+
+// Returns (a copy of) the minimum value in [first, last).
+// Requires: first != last.
+template<typename InputIterator, typename Proj = std::identity>
+[[nodiscard]] /*constexpr*/ auto min_value(InputIterator first, InputIterator last, Proj proj = {})
+{
+	assert(first != last);
+	auto result = std::invoke(proj, *first++);
+	while (first != last) {
+		result = std::min(result, std::invoke(proj, *first++));
+	}
+	return result;
+}
+
+template<typename InputRange, typename Proj = std::identity>
+[[nodiscard]] /*constexpr*/ auto min_value(InputRange&& range, Proj proj = {})
+{
+	return min_value(std::begin(range), std::end(range), proj);
+}
+
+// Returns (a copy of) the maximum value in [first, last).
+// Requires: first != last.
+template<typename InputIterator, typename Proj = std::identity>
+[[nodiscard]] /*constexpr*/ auto max_value(InputIterator first, InputIterator last, Proj proj = {})
+{
+	assert(first != last);
+	auto result = std::invoke(proj, *first++);
+	while (first != last) {
+		result = std::max(result, std::invoke(proj, *first++));
+	}
+	return result;
+}
+
+template<typename InputRange, typename Proj = std::identity>
+[[nodiscard]] /*constexpr*/ auto max_value(InputRange&& range, Proj proj = {})
+{
+	return max_value(std::begin(range), std::end(range), proj);
+}
+
+
+// Returns the sum of the elements in the given range.
+// Assumes: elements can be summed via operator+, with a default constructed
+// value being the identity-element for this operator.
+template<typename InputRange, typename Proj = std::identity>
+[[nodiscard]] /*constexpr*/ auto sum(InputRange&& range, Proj proj = {})
+{
+	using Iter = decltype(std::begin(range));
+	using VT = typename std::iterator_traits<Iter>::value_type;
+	using RT = decltype(std::invoke(proj, std::declval<VT>()));
+
+	auto first = std::begin(range);
+	auto last = std::end(range);
+	RT init{};
+	while (first != last) {
+		init = std::move(init) + std::invoke(proj, *first++);
+	}
+	return init;
+}
+
+// to_vector
+namespace detail {
+	template<typename T, typename Iterator>
+	using ToVectorType = std::conditional_t<
+		std::is_same_v<T, void>,
+		typename std::iterator_traits<Iterator>::value_type,
+		T>;
+}
+
+// Convert any range to a vector. Optionally specify the type of the elements
+// in the result.
+// Example:
+//   auto v1 = to_vector(view::drop(my_list, 3));
+//   auto v2 = to_vector<Base*>(getDerivedPtrs());
+template<typename T = void, typename Range>
+[[nodiscard]] auto to_vector(Range&& range)
+	-> std::vector<detail::ToVectorType<T, decltype(std::begin(range))>>
+{
+	return {std::begin(range), std::end(range)};
+}
+
+// Optimized version for r-value input and no type conversion.
+template<typename T>
+[[nodiscard]] auto to_vector(std::vector<T>&& v)
+{
+	return std::move(v);
+}
+
+
+// append() / concat()
+namespace detail {
+
+template<typename... Ranges>
+[[nodiscard]] constexpr size_t sum_of_sizes(const Ranges&... ranges)
+{
+    return (0 + ... + std::distance(std::begin(ranges), std::end(ranges)));
+}
+
+template<typename Result>
+void append(Result&)
+{
+	// nothing
+}
+
+template<typename Result, typename Range, typename... Tail>
+void append(Result& x, Range&& y, Tail&&... tail)
+{
+#ifdef _GLIBCXX_DEBUG
+	// Range can be a view::transform
+	// but vector::insert in libstdc++ debug mode will wrongly try
+	// to take its address to check for self-insertion (see
+	// gcc/include/c++/7.1.0/debug/functions.h
+	// __foreign_iterator_aux functions). So avoid vector::insert
+	for (auto&& e : y) {
+		x.emplace_back(std::forward<decltype(e)>(e));
+	}
+#else
+	x.insert(std::end(x), std::begin(y), std::end(y));
+#endif
+	detail::append(x, std::forward<Tail>(tail)...);
+}
+
+// Allow move from an rvalue-vector.
+// But don't allow to move from any rvalue-range. It breaks stuff like
+//   append(v, view::reverse(w));
+template<typename Result, typename T2, typename... Tail>
+void append(Result& x, std::vector<T2>&& y, Tail&&... tail)
+{
+	x.insert(std::end(x),
+		 std::move_iterator(std::begin(y)),
+		 std::move_iterator(std::end(y)));
+	detail::append(x, std::forward<Tail>(tail)...);
+}
+
+} // namespace detail
+
+// Append a range to a vector.
+template<typename T, typename... Tail>
+void append(std::vector<T>& v, Tail&&... tail)
+{
+	auto extra = detail::sum_of_sizes(std::forward<Tail>(tail)...);
+	auto current = v.size();
+	if (auto required = current + extra;
+	    v.capacity() < required) {
+		v.reserve(current + std::max(current, extra));
+	}
+	detail::append(v, std::forward<Tail>(tail)...);
+}
+
+// If both source and destination are vectors of the same type and the
+// destination is empty and the source is an rvalue, then move the whole vector
+// at once instead of moving element by element.
+template<typename T>
+void append(std::vector<T>& v, std::vector<T>&& range)
+{
+	if (v.empty()) {
+		v = std::move(range);
+	} else {
+		v.insert(std::end(v),
+		         std::move_iterator(std::begin(range)),
+		         std::move_iterator(std::end(range)));
+	}
+}
+
+template<typename T>
+void append(std::vector<T>& x, std::initializer_list<T> list)
+{
+	x.insert(x.end(), list);
+}
+
+
+template<typename T = void, typename Range, typename... Tail>
+[[nodiscard]] auto concat(const Range& range, Tail&&... tail)
+{
+	using T2 = detail::ToVectorType<T, decltype(std::begin(range))>;
+	std::vector<T2> result;
+	append(result, range, std::forward<Tail>(tail)...);
+	return result;
+}
+
+template<typename T, typename... Tail>
+[[nodiscard]] std::vector<T> concat(std::vector<T>&& v, Tail&&... tail)
+{
+	append(v, std::forward<Tail>(tail)...);
+	return std::move(v);
+}
+
+
+// Concatenate two std::arrays (at compile time).
+template<typename T, size_t X, size_t Y>
+constexpr auto concatArray(const std::array<T, X>& x, const std::array<T, Y>& y)
+{
+	std::array<T, X + Y> result = {};
+	// c++20:  std::ranges::copy(x, &result[0]);
+	// c++20:  std::ranges::copy(y, &result[X]);
+	for (size_t i = 0; i < X; ++i) result[0 + i] = x[i];
+	for (size_t i = 0; i < Y; ++i) result[X + i] = y[i];
+	return result;
+}
+// TODO implement in a generic way for any number of arrays
+template<typename T, size_t X, size_t Y, size_t Z>
+constexpr auto concatArray(const std::array<T, X>& x,
+                           const std::array<T, Y>& y,
+                           const std::array<T, Z>& z)
+{
+	std::array<T, X + Y + Z> result = {};
+	for (size_t i = 0; i < X; ++i) result[        i] = x[i];
+	for (size_t i = 0; i < Y; ++i) result[X     + i] = y[i];
+	for (size_t i = 0; i < Z; ++i) result[X + Y + i] = z[i];
+	return result;
+}
+
+
+// lookup in std::map
+template<typename Key, typename Value, typename Key2>
+[[nodiscard]] const Value* lookup(const std::map<Key, Value>& m, const Key2& k)
+{
+	auto it = m.find(k);
+	return (it != m.end()) ? &it->second : nullptr;
+}
+
+template<typename Key, typename Value, typename Key2>
+[[nodiscard]] Value* lookup(std::map<Key, Value>& m, const Key2& k)
+{
+	auto it = m.find(k);
+	return (it != m.end()) ? &it->second : nullptr;
+}
+
+// will likely become part of future c++ standard
+template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
+// explicit deduction guide (not needed as of C++20)
+template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
+
+
+// --- Utility to retrieve the index for a given type from a std::variant ---
+
+template<typename> struct get_index_tag {};
+
+template<typename T, typename V> struct get_index;
+
+template<typename T, typename... Ts>
+struct get_index<T, std::variant<Ts...>>
+    : std::integral_constant<size_t, std::variant<get_index_tag<Ts>...>(get_index_tag<T>()).index()> {};
+
+
+// Utility to initialize an array via a generator function,
+// without first default constructing the elements.
+
+template<typename T, typename F, size_t... Is>
+[[nodiscard]] static constexpr auto generate_array(F f, std::index_sequence<Is...>)
+   -> std::array<T, sizeof...(Is)>
+{
+    return {{f(Is)...}};
+}
+
+template<size_t N, typename F>
+[[nodiscard]] static constexpr auto generate_array(F f)
+{
+    using T = decltype(f(0));
+    return generate_array<T>(f, std::make_index_sequence<N>{});
 }
 
 #endif

@@ -2,7 +2,7 @@
 #define INFOTOPIC_HH
 
 #include "Completer.hh"
-#include "array_ref.hh"
+#include <span>
 #include <string>
 #include <vector>
 
@@ -15,6 +15,11 @@ class InfoCommand;
 class InfoTopic : public Completer
 {
 public:
+	InfoTopic(const InfoTopic&) = delete;
+	InfoTopic(InfoTopic&&) = delete;
+	InfoTopic& operator=(const InfoTopic&) = delete;
+	InfoTopic& operator=(InfoTopic&&) = delete;
+
 	/** Show info on this topic
 	  * @param tokens Tokenized command line;
 	  *     tokens[1] is the topic.
@@ -23,14 +28,14 @@ public:
 	  * @throw CommandException Thrown when there was an error while
 	  *                         executing this InfoTopic.
 	  */
-	virtual void execute(array_ref<TclObject> tokens,
+	virtual void execute(std::span<const TclObject> tokens,
 	                     TclObject& result) const = 0;
 
 	/** Print help for this topic.
 	  * @param tokens Tokenized command line;
 	  *     tokens[1] is the topic.
 	  */
-	std::string help(const std::vector<std::string>& tokens) const override = 0;
+	[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override = 0;
 
 	/** Attempt tab completion for this topic.
 	  * Default implementation does nothing.
@@ -40,7 +45,7 @@ public:
 	  */
 	void tabCompletion(std::vector<std::string>& tokens) const override;
 
-	Interpreter& getInterpreter() const;
+	[[nodiscard]] Interpreter& getInterpreter() const final;
 
 protected:
 	InfoTopic(InfoCommand& infoCommand, const std::string& name);

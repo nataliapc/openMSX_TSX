@@ -4,10 +4,10 @@
 #include "MSXException.hh"
 #include "unreachable.hh"
 #include "endian.hh"
+#include "narrow.hh"
 #include "serialize.hh"
 #include "serialize_stl.hh"
 #include <memory>
-#include <string>
 
 // TODO:
 // - replace transferDelayCounter with 0xFF's in responseQueue?
@@ -17,55 +17,52 @@
 namespace openmsx {
 
 // data response tokens
-static const byte DRT_ACCEPTED    = 0x05;
-static const byte DRT_WRITE_ERROR = 0x0D;
+static constexpr byte DRT_ACCEPTED    = 0x05;
+static constexpr byte DRT_WRITE_ERROR = 0x0D;
 
 // start block tokens and stop tran token
-static const byte START_BLOCK_TOKEN     = 0xFE;
-static const byte START_BLOCK_TOKEN_MBW = 0xFC;
-static const byte STOP_TRAN_TOKEN       = 0xFD;
+static constexpr byte START_BLOCK_TOKEN     = 0xFE;
+static constexpr byte START_BLOCK_TOKEN_MBW = 0xFC;
+static constexpr byte STOP_TRAN_TOKEN       = 0xFD;
 
 // data error token
-static const byte DATA_ERROR_TOKEN_ERROR        = 0x01;
-static const byte DATA_ERROR_TOKEN_OUT_OF_RANGE = 0x08;
+static constexpr byte DATA_ERROR_TOKEN_ERROR        = 0x01;
+static constexpr byte DATA_ERROR_TOKEN_OUT_OF_RANGE = 0x08;
 
 // responses
-static const byte R1_BUSY            = 0x00;
-static const byte R1_IDLE            = 0x01; // TODO: why is lots of code checking for this instead of R1_BUSY?
-static const byte R1_ILLEGAL_COMMAND = 0x04;
-static const byte R1_PARAMETER_ERROR = 0x80;
+static constexpr byte R1_BUSY            = 0x00;
+static constexpr byte R1_IDLE            = 0x01; // TODO: why is lots of code checking for this instead of R1_BUSY?
+static constexpr byte R1_ILLEGAL_COMMAND = 0x04;
+static constexpr byte R1_PARAMETER_ERROR = 0x80;
 
 SdCard::SdCard(const DeviceConfig& config)
 	: hd(config.getXML() ? std::make_unique<HD>(config) : nullptr)
-	, cmdIdx(0)
-	, transferDelayCounter(0)
-	, mode(COMMAND)
-	, currentSector(0)
-	, currentByteInSector(0)
 {
 }
 
 SdCard::~SdCard() = default;
 
 // helper methods for 'transfer' to avoid duplication
-byte SdCard::readCurrentByteFromCurrentSector() {
-	byte retval;
-	if (currentByteInSector == -1) {
-		retval = START_BLOCK_TOKEN;
-		try {
-			hd->readSector(currentSector, sectorBuf);
-		} catch (MSXException&) {
-			retval = DATA_ERROR_TOKEN_ERROR;
+byte SdCard::readCurrentByteFromCurrentSector()
+{
+	byte result = [&] {
+		if (currentByteInSector == -1) {
+			try {
+				hd->readSector(currentSector, sectorBuf);
+				return START_BLOCK_TOKEN;
+			} catch (MSXException&) {
+				return DATA_ERROR_TOKEN_ERROR;
+			}
+		} else {
+			// output next byte from stream
+			return sectorBuf.raw[currentByteInSector];
 		}
-	} else {
-		// output next byte from stream
-		retval = sectorBuf.raw[currentByteInSector];
-	}
+	}();
 	currentByteInSector++;
 	if (currentByteInSector == sizeof(sectorBuf)) {
-		responseQueue.push_back({0x00, 0x00}); // 2 CRC's (dummy)
+		responseQueue.push_back({byte(0x00), byte(0x00)}); // 2 CRC's (dummy)
 	}
-	return retval;
+	return result;
 }
 
 byte SdCard::transfer(byte value, bool cs)
@@ -202,7 +199,7 @@ byte SdCard::transfer(byte value, bool cs)
 		}
 		break;
 	}
-	
+
 	return retval;
 }
 
@@ -227,7 +224,7 @@ void SdCard::executeCommand()
 			byte(0x01), // voltage accepted
 			cmdBuf[4]});// check pattern
 		break;
-	case 9:{ // SEND_CSD 
+	case 9:{ // SEND_CSD
 		responseQueue.push_back({
 			R1_BUSY, // OK (ignored on MegaSD code, used in FUZIX)
 		// now follows a CSD version 2.0 (for SDHC)
@@ -240,7 +237,7 @@ void SdCard::executeCommand()
 			byte(0x00),        // CCC / (READ_BL_LEN)
 			byte(0x00)});      // (RBP)/(WBM)/(RBM)/ DSR_IMP
 		// SD_CARD_SIZE = (C_SIZE + 1) * 512kByte
-		auto c_size = unsigned((hd->getNbSectors() * sizeof(sectorBuf)) / (512 * 1024) - 1);
+		auto c_size = narrow<uint32_t>((hd->getNbSectors() * sizeof(sectorBuf)) / size_t(512 * 1024) - 1);
 		responseQueue.push_back({
 			byte((c_size >> 16) & 0x3F), // C_SIZE 1
 			byte((c_size >>  8) & 0xFF), // C_SIZE 2
@@ -277,7 +274,7 @@ void SdCard::executeCommand()
 		responseQueue.push_back(R1_IDLE); // R1 (OK)
 		mode = COMMAND;
 		break;
-	case 16: // SET_BLOCKLEN
+	case 16: // SET_BLOCK_LEN
 		responseQueue.push_back(R1_IDLE); // OK, we don't really care
 		break;
 	case 17: // READ_SINGLE_BLOCK
@@ -316,14 +313,14 @@ void SdCard::executeCommand()
 			byte(0x00),   // OCR Reg part 3
 			byte(0x00)}); // OCR Reg part 4
 		break;
-	
+
 	default:
 		responseQueue.push_back(R1_ILLEGAL_COMMAND);
 		break;
 	}
 }
 
-static std::initializer_list<enum_string<SdCard::Mode>> modeInfo = {
+static constexpr std::initializer_list<enum_string<SdCard::Mode>> modeInfo = {
 	{ "COMMAND",     SdCard::COMMAND  },
 	{ "READ",        SdCard::READ },
 	{ "MULTI_READ",  SdCard::MULTI_READ },
@@ -335,15 +332,15 @@ SERIALIZE_ENUM(SdCard::Mode, modeInfo);
 template<typename Archive>
 void SdCard::serialize(Archive& ar, unsigned /*version*/)
 {
-	ar.serialize("mode", mode);
-	ar.serialize("cmdBuf", cmdBuf);
-	ar.serialize_blob("sectorBuf", sectorBuf.raw, sizeof(sectorBuf));
+	ar.serialize("mode",   mode,
+	             "cmdBuf", cmdBuf);
+	ar.serialize_blob("sectorBuf", sectorBuf.raw);
 	if (hd) ar.serialize("hd", *hd);
-	ar.serialize("cmdIdx", cmdIdx);
-	ar.serialize("transferDelayCounter", transferDelayCounter);
-	ar.serialize("responseQueue", responseQueue);
-	ar.serialize("currentSector", currentSector);
-	ar.serialize("currentByteInSector", currentByteInSector);
+	ar.serialize("cmdIdx",               cmdIdx,
+	             "transferDelayCounter", transferDelayCounter,
+	             "responseQueue",        responseQueue,
+	             "currentSector",        currentSector,
+	             "currentByteInSector",  currentByteInSector);
 }
 INSTANTIATE_SERIALIZE_METHODS(SdCard);
 

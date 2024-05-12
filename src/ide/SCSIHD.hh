@@ -12,6 +12,7 @@
 
 #include "HD.hh"
 #include "SCSIDevice.hh"
+#include <array>
 
 namespace openmsx {
 
@@ -20,11 +21,13 @@ class DeviceConfig;
 class SCSIHD final : public HD, public SCSIDevice
 {
 public:
-	SCSIHD(const SCSIHD&) = delete;
-	SCSIHD& operator=(const SCSIHD&) = delete;
-
-	SCSIHD(const DeviceConfig& targetconfig,
+	SCSIHD(const DeviceConfig& targetConfig,
 	       AlignedBuffer& buf, unsigned mode);
+	SCSIHD(const SCSIHD&) = delete;
+	SCSIHD(SCSIHD&&) = delete;
+	SCSIHD& operator=(const SCSIHD&) = delete;
+	SCSIHD& operator=(SCSIHD&&) = delete;
+	~SCSIHD() override = default;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
@@ -33,28 +36,29 @@ private:
 	// SCSI Device
 	void reset() override;
 	bool isSelected() override;
-	unsigned executeCmd(const byte* cdb, SCSI::Phase& phase,
-	                    unsigned& blocks) override;
-	unsigned executingCmd(SCSI::Phase& phase, unsigned& blocks) override;
-	byte getStatusCode() override;
-	int msgOut(byte value) override;
-	byte msgIn() override;
+	[[nodiscard]] unsigned executeCmd(std::span<const uint8_t, 12> cdb, SCSI::Phase& phase,
+	                                  unsigned& blocks) override;
+	[[nodiscard]] unsigned executingCmd(SCSI::Phase& phase, unsigned& blocks) override;
+	[[nodiscard]] uint8_t getStatusCode() override;
+	int msgOut(uint8_t value) override;
+	uint8_t msgIn() override;
 	void disconnect() override;
 	void busReset() override;
 
-	unsigned dataIn(unsigned& blocks) override;
-	unsigned dataOut(unsigned& blocks) override;
+	[[nodiscard]] unsigned dataIn(unsigned& blocks) override;
+	[[nodiscard]] unsigned dataOut(unsigned& blocks) override;
 
-	unsigned inquiry();
-	unsigned modeSense();
-	unsigned requestSense();
-	bool checkReadOnly();
-	unsigned readCapacity();
-	bool checkAddress();
-	unsigned readSectors(unsigned& blocks);
-	unsigned writeSectors(unsigned& blocks);
+	[[nodiscard]] unsigned inquiry();
+	[[nodiscard]] unsigned modeSense();
+	[[nodiscard]] unsigned requestSense();
+	[[nodiscard]] bool checkReadOnly();
+	[[nodiscard]] unsigned readCapacity();
+	[[nodiscard]] bool checkAddress();
+	[[nodiscard]] unsigned readSectors(unsigned& blocks);
+	[[nodiscard]] unsigned writeSectors(unsigned& blocks);
 	void formatUnit();
 
+private:
 	AlignedBuffer& buffer;
 
 	const unsigned mode;
@@ -63,11 +67,11 @@ private:
 	unsigned currentSector;
 	unsigned currentLength;
 
-	const byte scsiId;     // SCSI ID 0..7
+	const uint8_t scsiId;  // SCSI ID 0..7
 	bool unitAttention;    // Unit Attention (was: reset)
-	byte message;
-	byte lun;
-	byte cdb[12];          // Command Descriptor Block
+	uint8_t message;
+	uint8_t lun;
+	std::array<uint8_t, 12> cdb; // Command Descriptor Block
 };
 
 } // namespace openmsx

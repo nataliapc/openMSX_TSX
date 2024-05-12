@@ -1,20 +1,28 @@
 #include "serialize.hh"
+
 #include "Base64.hh"
 #include "HexDump.hh"
-#include "XMLLoader.hh"
 #include "XMLElement.hh"
-#include "ConfigException.hh"
 #include "XMLException.hh"
 #include "DeltaBlock.hh"
 #include "MemBuffer.hh"
 #include "FileOperations.hh"
 #include "Version.hh"
 #include "Date.hh"
+#include "narrow.hh"
+#include "one_of.hh"
+#include "stl.hh"
+#include "build-info.hh"
+
+#include <bit>
 #include "cstdiop.hh" // for dup()
+#include <cstdint>
 #include <cstring>
+#include <iostream>
 #include <limits>
 
 using std::string;
+using std::string_view;
 
 namespace openmsx {
 
@@ -29,11 +37,6 @@ template class ArchiveBase<XmlOutputArchive>;
 
 ////
 
-OutputArchiveBase2::OutputArchiveBase2()
-	: lastId(0)
-{
-}
-
 unsigned OutputArchiveBase2::generateID1(const void* p)
 {
 	#ifdef linux
@@ -41,8 +44,8 @@ unsigned OutputArchiveBase2::generateID1(const void* p)
 	       !addressOnStack(p));
 	#endif
 	++lastId;
-	assert(polyIdMap.find(p) == end(polyIdMap));
-	polyIdMap[p] = lastId;
+	assert(!polyIdMap.contains(p));
+	polyIdMap.emplace_noDuplicateCheck(p, lastId);
 	return lastId;
 }
 unsigned OutputArchiveBase2::generateID2(
@@ -53,52 +56,51 @@ unsigned OutputArchiveBase2::generateID2(
 	       !addressOnStack(p));
 	#endif
 	++lastId;
-	auto key = std::make_pair(p, std::type_index(typeInfo));
-	assert(idMap.find(key) == end(idMap));
-	idMap[key] = lastId;
+	auto key = std::pair(p, std::type_index(typeInfo));
+	assert(!idMap.contains(key));
+	idMap.emplace_noDuplicateCheck(key, lastId);
 	return lastId;
 }
 
 unsigned OutputArchiveBase2::getID1(const void* p)
 {
-	auto it = polyIdMap.find(p);
-	return it != end(polyIdMap) ? it->second : 0;
+	auto* v = lookup(polyIdMap, p);
+	return v ? *v : 0;
 }
 unsigned OutputArchiveBase2::getID2(
 	const void* p, const std::type_info& typeInfo)
 {
-	auto it = idMap.find({p, std::type_index(typeInfo)});
-	return it != end(idMap) ? it->second : 0;
+	auto* v = lookup(idMap, std::pair(p, std::type_index(typeInfo)));
+	return v ? *v : 0;
 }
 
 
 template<typename Derived>
 void OutputArchiveBase<Derived>::serialize_blob(
-	const char* tag, const void* data_, size_t len, bool /*diff*/)
+	const char* tag, std::span<const uint8_t> data, bool /*diff*/)
 {
-	auto* data = static_cast<const uint8_t*>(data_);
-
 	string encoding;
 	string tmp;
 	if (false) {
 		// useful for debugging
 		encoding = "hex";
-		tmp = HexDump::encode(data, len);
+		tmp = HexDump::encode(data);
 	} else if (false) {
 		encoding = "base64";
-		tmp = Base64::encode(data, len);
+		tmp = Base64::encode(data);
 	} else {
 		encoding = "gz-base64";
 		// TODO check for overflow?
+		auto len = data.size();
 		auto dstLen = uLongf(len + len / 1000 + 12 + 1); // worst-case
-		MemBuffer<byte> buf(dstLen);
+		MemBuffer<uint8_t> buf(dstLen);
 		if (compress2(buf.data(), &dstLen,
-		              reinterpret_cast<const Bytef*>(data),
+		              std::bit_cast<const Bytef*>(data.data()),
 		              uLong(len), 9)
 		    != Z_OK) {
 			throw MSXException("Error while compressing blob.");
 		}
-		tmp = Base64::encode(buf.data(), dstLen);
+		tmp = Base64::encode(std::span{buf.data(), dstLen});
 	}
 	this->self().beginTag(tag);
 	this->self().attribute("encoding", encoding);
@@ -114,27 +116,27 @@ template class OutputArchiveBase<XmlOutputArchive>;
 
 void* InputArchiveBase2::getPointer(unsigned id)
 {
-	auto it = idMap.find(id);
-	return it != end(idMap) ? it->second : nullptr;
+	auto* v = lookup(idMap, id);
+	return v ? *v : nullptr;
 }
 
 void InputArchiveBase2::addPointer(unsigned id, const void* p)
 {
-	assert(idMap.find(id) == end(idMap));
-	idMap[id] = const_cast<void*>(p);
+	assert(!idMap.contains(id));
+	idMap.emplace_noDuplicateCheck(id, const_cast<void*>(p));
 }
 
 unsigned InputArchiveBase2::getId(const void* ptr) const
 {
-	for (const auto& p : idMap) {
-		if (p.second == ptr) return p.first;
+	for (const auto& [id, pt] : idMap) {
+		if (pt == ptr) return id;
 	}
 	return 0;
 }
 
 template<typename Derived>
 void InputArchiveBase<Derived>::serialize_blob(
-	const char* tag, void* data, size_t len, bool /*diff*/)
+	const char* tag, std::span<uint8_t> data, bool /*diff*/)
 {
 	this->self().beginTag(tag);
 	string encoding;
@@ -144,22 +146,22 @@ void InputArchiveBase<Derived>::serialize_blob(
 	this->self().endTag(tag);
 
 	if (encoding == "gz-base64") {
-		auto p = Base64::decode(tmp);
-		auto dstLen = uLongf(len); // TODO check for overflow?
-		if ((uncompress(reinterpret_cast<Bytef*>(data), &dstLen,
-		                reinterpret_cast<const Bytef*>(p.first.data()), uLong(p.second))
+		auto [buf, bufSize] = Base64::decode(tmp);
+		auto dstLen = uLongf(data.size()); // TODO check for overflow?
+		if ((uncompress(std::bit_cast<Bytef*>(data.data()), &dstLen,
+		                std::bit_cast<const Bytef*>(buf.data()), uLong(bufSize))
 		     != Z_OK) ||
-		    (dstLen != len)) {
+		    (dstLen != data.size())) {
 			throw MSXException("Error while decompressing blob.");
 		}
-	} else if ((encoding == "hex") || (encoding == "base64")) {
+	} else if (encoding == one_of("hex", "base64")) {
 		bool ok = (encoding == "hex")
-		        ? HexDump::decode_inplace(tmp, static_cast<uint8_t*>(data), len)
-		        : Base64 ::decode_inplace(tmp, static_cast<uint8_t*>(data), len);
+		        ? HexDump::decode_inplace(tmp, data)
+		        : Base64 ::decode_inplace(tmp, data);
 		if (!ok) {
 			throw XMLException(
 				"Length of decoded blob different from "
-				"expected value (", len, ')');
+				"expected value (", data.size(), ')');
 		}
 	} else {
 		throw XMLException("Unsupported encoding \"", encoding, "\" for blob");
@@ -171,15 +173,15 @@ template class InputArchiveBase<XmlInputArchive>;
 
 ////
 
-void MemOutputArchive::save(const std::string& s)
+void MemOutputArchive::save(std::string_view s)
 {
 	auto size = s.size();
-	byte* buf = buffer.allocate(sizeof(size) + size);
-	memcpy(buf, &size, sizeof(size));
-	memcpy(buf + sizeof(size), s.data(), size);
+	auto buf = buffer.allocate(sizeof(size) + size);
+	memcpy(buf.data(), &size, sizeof(size));
+	ranges::copy(s, subspan(buf, sizeof(size)));
 }
 
-MemBuffer<byte> MemOutputArchive::releaseBuffer(size_t& size)
+MemBuffer<uint8_t> MemOutputArchive::releaseBuffer(size_t& size)
 {
 	return buffer.release(size);
 }
@@ -192,7 +194,7 @@ void MemInputArchive::load(std::string& s)
 	load(length);
 	s.resize(length);
 	if (length) {
-		get(&s[0], length);
+		get(s.data(), length);
 	}
 }
 
@@ -200,9 +202,9 @@ string_view MemInputArchive::loadStr()
 {
 	size_t length;
 	load(length);
-	const byte* p = buffer.getCurrentPos();
+	const uint8_t* p = buffer.getCurrentPos();
 	buffer.skip(length);
-	return string_view(reinterpret_cast<const char*>(p), length);
+	return {std::bit_cast<const char*>(p), length};
 }
 
 ////
@@ -212,30 +214,27 @@ string_view MemInputArchive::loadStr()
 // compression has a relatively large setup time). I choose this value
 // semi-arbitrary. I only made it >= 52 so that the (incompressible) RP5C01
 // registers won't be compressed.
-static const size_t SMALL_SIZE = 64;
-void MemOutputArchive::serialize_blob(const char* /*tag*/, const void* data,
-                                      size_t len, bool diff)
+static constexpr size_t SMALL_SIZE = 64;
+void MemOutputArchive::serialize_blob(const char* /*tag*/, std::span<const uint8_t> data,
+                                      bool diff)
 {
 	// Delta-compress in-memory blobs, see DeltaBlock.hh for more details.
-	if (len > SMALL_SIZE) {
+	if (data.size() > SMALL_SIZE) {
 		auto deltaBlockIdx = unsigned(deltaBlocks.size());
 		save(deltaBlockIdx); // see comment below in MemInputArchive
 		deltaBlocks.push_back(diff
-			? lastDeltaBlocks.createNew(
-				data, static_cast<const uint8_t*>(data), len)
-			: lastDeltaBlocks.createNullDiff(
-				data, static_cast<const uint8_t*>(data), len));
+			? lastDeltaBlocks.createNew(data.data(), data)
+			: lastDeltaBlocks.createNullDiff(data.data(), data));
 	} else {
-		byte* buf = buffer.allocate(len);
-		memcpy(buf, data, len);
+		auto buf = buffer.allocate(data.size());
+		ranges::copy(data, buf);
 	}
-
 }
 
-void MemInputArchive::serialize_blob(const char* /*tag*/, void* data,
-                                     size_t len, bool /*diff*/)
+void MemInputArchive::serialize_blob(const char* /*tag*/, std::span<uint8_t> data,
+                                     bool /*diff*/)
 {
-	if (len > SMALL_SIZE) {
+	if (data.size() > SMALL_SIZE) {
 		// Usually blobs are saved in the same order as they are loaded
 		// (via the serialize_blob() methods in respectively
 		// MemOutputArchive and MemInputArchive). In that case keeping
@@ -245,68 +244,104 @@ void MemInputArchive::serialize_blob(const char* /*tag*/, void* data,
 		// is possible that certain blobs are stored in the savestate,
 		// but skipped while loading. That's why we do need the index.
 		unsigned deltaBlockIdx; load(deltaBlockIdx);
-		deltaBlocks[deltaBlockIdx]->apply(static_cast<uint8_t*>(data), len);
+		deltaBlocks[deltaBlockIdx]->apply(data);
 	} else {
-		memcpy(data, buffer.getCurrentPos(), len);
-		buffer.skip(len);
+		ranges::copy(std::span{buffer.getCurrentPos(), data.size()}, data);
+		buffer.skip(data.size());
 	}
 }
 
 ////
 
-XmlOutputArchive::XmlOutputArchive(const string& filename)
-	: root("serial")
+XmlOutputArchive::XmlOutputArchive(zstring_view filename_)
+	: filename(filename_)
+	, writer(*this)
 {
-	root.addAttribute("openmsx_version", Version::full());
-	root.addAttribute("date_time", Date::toString(time(nullptr)));
-	root.addAttribute("platform", TARGET_PLATFORM);
 	{
 		auto f = FileOperations::openFile(filename, "wb");
-		if (!f) goto error;
+		if (!f) error();
 		int duped_fd = dup(fileno(f.get()));
-		if (duped_fd == -1) goto error;
+		if (duped_fd == -1) error();
 		file = gzdopen(duped_fd, "wb9");
 		if (!file) {
-			close(duped_fd);
-			goto error;
+			::close(duped_fd);
+			error();
 		}
-		current.push_back(&root);
-		return; // success
-		// on scope-exit 'File* f' is closed, and 'gzFile file'
+		// on scope-exit 'f' is closed, and 'file'
 		// uses the dup()'ed file descriptor.
 	}
 
-error:
-	throw XMLException("Could not open compressed file \"", filename, "\"");
+	static constexpr std::string_view header =
+		"<?xml version=\"1.0\" ?>\n"
+		"<!DOCTYPE openmsx-serialize SYSTEM 'openmsx-serialize.dtd'>\n";
+	write(header);
+
+	writer.begin("serial");
+	writer.attribute("openmsx_version", Version::full());
+	writer.attribute("date_time", Date::toString(time(nullptr)));
+	writer.attribute("platform", TARGET_PLATFORM);
+}
+
+void XmlOutputArchive::close()
+{
+	if (!file) return; // already closed
+
+	writer.end("serial");
+
+	if (gzclose(file) != Z_OK) {
+		error();
+	}
+	file = nullptr;
 }
 
 XmlOutputArchive::~XmlOutputArchive()
 {
-	assert(current.back() == &root);
-	const char* header =
-	    "<?xml version=\"1.0\" ?>\n"
-	    "<!DOCTYPE openmsx-serialize SYSTEM 'openmsx-serialize.dtd'>\n";
-	gzwrite(file, const_cast<char*>(header), unsigned(strlen(header)));
-	string dump = root.dump();
-	gzwrite(file, const_cast<char*>(dump.data()), unsigned(dump.size()));
-	gzclose(file);
+	try {
+		close();
+	} catch (...) {
+		// Eat exception. Explicitly call close() if you want to handle errors.
+	}
+}
+
+void XmlOutputArchive::write(std::span<const char> buf)
+{
+	if ((gzwrite(file, buf.data(), unsigned(buf.size())) == 0) && !buf.empty()) {
+		error();
+	}
+}
+
+void XmlOutputArchive::write1(char c)
+{
+	if (gzputc(file, c) == -1) {
+		error();
+	}
+}
+
+void XmlOutputArchive::check(bool condition) const
+{
+	assert(condition); (void)condition;
+}
+
+void XmlOutputArchive::error()
+{
+	if (file) {
+		gzclose(file);
+		file = nullptr;
+	}
+	throw XMLException("could not write \"", filename, '"');
 }
 
 void XmlOutputArchive::saveChar(char c)
 {
-	save(string(1, c));
+	writer.data(std::string_view(&c, 1));
 }
-void XmlOutputArchive::save(const string& str)
+void XmlOutputArchive::save(std::string_view str)
 {
-	assert(!current.empty());
-	assert(current.back()->getData().empty());
-	current.back()->setData(str);
+	writer.data(str);
 }
 void XmlOutputArchive::save(bool b)
 {
-	assert(!current.empty());
-	assert(current.back()->getData().empty());
-	current.back()->setData(b ? "true" : "false");
+	writer.data(b ? "true" : "false");
 }
 void XmlOutputArchive::save(unsigned char b)
 {
@@ -333,11 +368,9 @@ void XmlOutputArchive::save(unsigned long long ull)
 	saveImpl(ull);
 }
 
-void XmlOutputArchive::attribute(const char* name, const string& str)
+void XmlOutputArchive::attribute(const char* name, std::string_view str)
 {
-	assert(!current.empty());
-	assert(!current.back()->hasAttribute(name));
-	current.back()->addAttribute(name, str);
+	writer.attribute(name, str);
 }
 void XmlOutputArchive::attribute(const char* name, int i)
 {
@@ -350,49 +383,46 @@ void XmlOutputArchive::attribute(const char* name, unsigned u)
 
 void XmlOutputArchive::beginTag(const char* tag)
 {
-	assert(!current.empty());
-	auto& elem = current.back()->addChild(tag);
-	current.push_back(&elem);
+	writer.begin(tag);
 }
 void XmlOutputArchive::endTag(const char* tag)
 {
-	assert(!current.empty());
-	assert(current.back()->getName() == tag); (void)tag;
-	current.pop_back();
+	writer.end(tag);
 }
 
 ////
 
 XmlInputArchive::XmlInputArchive(const string& filename)
-	: rootElem(XMLLoader::load(filename, "openmsx-serialize.dtd"))
 {
-	elems.emplace_back(&rootElem, 0);
+	xmlDoc.load(filename, "openmsx-serialize.dtd");
+	const auto* root = xmlDoc.getRoot();
+	elems.emplace_back(root, root->getFirstChild());
 }
 
-string_view XmlInputArchive::loadStr()
+string_view XmlInputArchive::loadStr() const
 {
-	if (!elems.back().first->getChildren().empty()) {
+	if (currentElement()->hasChildren()) {
 		throw XMLException("No child tags expected for primitive type");
 	}
-	return elems.back().first->getData();
+	return currentElement()->getData();
 }
-void XmlInputArchive::load(string& t)
+void XmlInputArchive::load(string& t) const
 {
-	t = loadStr().str();
+	t = loadStr();
 }
-void XmlInputArchive::loadChar(char& c)
+void XmlInputArchive::loadChar(char& c) const
 {
 	std::string str;
 	load(str);
 	std::istringstream is(str);
 	is >> c;
 }
-void XmlInputArchive::load(bool& b)
+void XmlInputArchive::load(bool& b) const
 {
 	string_view s = loadStr();
-	if ((s == "true") || (s == "1")) {
+	if (s == one_of("true", "1")) {
 		b = true;
-	} else if ((s == "false") || (s == "0")) {
+	} else if (s == one_of("false", "0")) {
 		b = false;
 	} else {
 		throw XMLException("Bad value found for boolean: ", s);
@@ -412,26 +442,14 @@ void XmlInputArchive::load(bool& b)
 // This routine is only used to parse strings we've written ourselves (and the
 // savestate/replay XML files are not meant to be manually edited). So the
 // above limitations don't really matter. And we can use the speed gain.
-template<bool IS_SIGNED> struct ConditionalNegate;
-template<> struct ConditionalNegate<true> {
-	template<typename T> void operator()(bool negate, T& t) {
-		if (negate) t = -t; // ok to negate a signed type
-	}
-};
-template<> struct ConditionalNegate<false> {
-	template<typename T> void operator()(bool negate, T& /*t*/) {
-		assert(!negate); (void)negate; // can't negate unsigned type
-	}
-};
-template<typename T> static inline void fastAtoi(string_view str, T& t)
+template<std::integral T> static inline void fastAtoi(string_view str, T& t)
 {
 	t = 0;
 	bool neg = false;
 	size_t i = 0;
 	size_t l = str.size();
 
-	static const bool IS_SIGNED = std::numeric_limits<T>::is_signed;
-	if (IS_SIGNED) {
+	if constexpr (std::numeric_limits<T>::is_signed) {
 		if (l == 0) return;
 		if (str[0] == '-') {
 			neg = true;
@@ -440,69 +458,77 @@ template<typename T> static inline void fastAtoi(string_view str, T& t)
 	}
 	for (/**/; i < l; ++i) {
 		unsigned d = str[i] - '0';
-		if (unlikely(d > 9)) {
+		if (d > 9) [[unlikely]] {
 			throw XMLException("Invalid integer: ", str);
 		}
 		t = 10 * t + d;
 	}
-	// The following stuff does the equivalent of:
-	//    if (neg) t = -t;
-	// Though this expression triggers a warning on VC++ when T is an
-	// unsigned type. This complex template stuff avoids the warning.
-	ConditionalNegate<IS_SIGNED> negateFunctor;
-	negateFunctor(neg, t);
+	if constexpr (std::numeric_limits<T>::is_signed) {
+		if (neg) t = -t;
+	} else {
+		assert(!neg); (void)neg;
+	}
 }
-void XmlInputArchive::load(int& i)
+void XmlInputArchive::load(int& i) const
 {
 	string_view str = loadStr();
 	fastAtoi(str, i);
 }
-void XmlInputArchive::load(unsigned& u)
+void XmlInputArchive::load(unsigned& u) const
 {
 	string_view str = loadStr();
-	fastAtoi(str, u);
+	try {
+		fastAtoi(str, u);
+	} catch (XMLException&) {
+		// One reason could be that the type of a member was corrected
+		// from 'int' to 'unsigned'. In that case loading an old
+		// savestate (that contains a negative value) might fail. So try
+		// again parsing as an 'int'.
+		int i;
+		fastAtoi(str, i);
+		u = narrow_cast<unsigned>(i);
+	}
 }
-void XmlInputArchive::load(unsigned long long& ull)
+void XmlInputArchive::load(unsigned long long& ull) const
 {
 	string_view str = loadStr();
 	fastAtoi(str, ull);
 }
-void XmlInputArchive::load(unsigned char& b)
+void XmlInputArchive::load(unsigned char& b) const
 {
-	unsigned i;
-	load(i);
-	b = i;
+	unsigned u;
+	load(u);
+	b = narrow_cast<unsigned char>(u);
 }
-void XmlInputArchive::load(signed char& c)
+void XmlInputArchive::load(signed char& c) const
 {
 	int i;
 	load(i);
-	c = i;
+	c = narrow_cast<signed char>(i);
 }
-void XmlInputArchive::load(char& c)
+void XmlInputArchive::load(char& c) const
 {
 	int i;
 	load(i);
-	c = i;
+	c = narrow_cast<char>(i);
 }
 
 void XmlInputArchive::beginTag(const char* tag)
 {
-	auto* child = elems.back().first->findNextChild(
-		tag, elems.back().second);
+	const auto* child = currentElement()->findChild(tag, elems.back().second);
 	if (!child) {
 		string path;
-		for (auto& e : elems) {
-			strAppend(path, e.first->getName(), '/');
+		for (auto& [e, _] : elems) {
+			strAppend(path, e->getName(), '/');
 		}
 		throw XMLException("No child tag \"", tag,
 		                   "\" found at location \"", path, '\"');
 	}
-	elems.emplace_back(child, 0);
+	elems.emplace_back(child, child->getFirstChild());
 }
 void XmlInputArchive::endTag(const char* tag)
 {
-	const auto& elem = *elems.back().first;
+	const auto& elem = *currentElement();
 	if (elem.getName() != tag) {
 		throw XMLException("End tag \"", elem.getName(),
 		                   "\" not equal to begin tag \"", tag, "\"");
@@ -512,33 +538,29 @@ void XmlInputArchive::endTag(const char* tag)
 	elems.pop_back();
 }
 
-void XmlInputArchive::attribute(const char* name, string& t)
+void XmlInputArchive::attribute(const char* name, string& t) const
 {
-	try {
-		t = elems.back().first->getAttribute(name);
-	} catch (ConfigException& e) {
-		throw XMLException(std::move(e).getMessage());
+	const auto* attr = currentElement()->findAttribute(name);
+	if (!attr) {
+		throw XMLException("Missing attribute \"", name, "\".");
 	}
+	t = attr->getValue();
 }
-void XmlInputArchive::attribute(const char* name, int& i)
+void XmlInputArchive::attribute(const char* name, int& i) const
 {
 	attributeImpl(name, i);
 }
-void XmlInputArchive::attribute(const char* name, unsigned& u)
+void XmlInputArchive::attribute(const char* name, unsigned& u) const
 {
 	attributeImpl(name, u);
 }
-bool XmlInputArchive::hasAttribute(const char* name)
+bool XmlInputArchive::hasAttribute(const char* name) const
 {
-	return elems.back().first->hasAttribute(name);
-}
-bool XmlInputArchive::findAttribute(const char* name, unsigned& value)
-{
-	return elems.back().first->findAttributeInt(name, value);
+	return currentElement()->findAttribute(name);
 }
 int XmlInputArchive::countChildren() const
 {
-	return int(elems.back().first->getChildren().size());
+	return int(currentElement()->numChildren());
 }
 
 } // namespace openmsx

@@ -2,37 +2,55 @@
 #define OSDRECTANGLE_HH
 
 #include "OSDImageBasedWidget.hh"
+#include "stl.hh"
+#include <array>
+#include <cstdint>
 #include <memory>
 
 namespace openmsx {
 
-class BaseImage;
+class GLImage;
 
 class OSDRectangle final : public OSDImageBasedWidget
 {
+private:
+	static constexpr auto rectangleProperties = [] {
+		using namespace std::literals;
+		return concatArray(
+			imageBasedProperties,
+			std::array{
+				"-w"sv, "-h"sv, "-relw"sv, "-relh"sv,
+				"-scale"sv, "-image"sv,
+				"-bordersize"sv, "-relbordersize"sv,
+				"-borderrgba"sv,
+			});
+	}();
+
 public:
 	OSDRectangle(Display& display, const TclObject& name);
 
-	std::vector<string_view> getProperties() const override;
+	[[nodiscard]] std::span<const std::string_view> getProperties() const override {
+		return rectangleProperties;
+	}
 	void setProperty(Interpreter& interp,
-	                 string_view name, const TclObject& value) override;
-	void getProperty(string_view name, TclObject& result) const override;
-	string_view getType() const override;
+	                 std::string_view name, const TclObject& value) override;
+	void getProperty(std::string_view name, TclObject& result) const override;
+	[[nodiscard]] std::string_view getType() const override;
 
 private:
-	bool takeImageDimensions() const;
+	[[nodiscard]] bool takeImageDimensions() const;
 
-	gl::vec2 getSize(const OutputRectangle& output) const override;
-	uint8_t getFadedAlpha() const override;
-	std::unique_ptr<BaseImage> createSDL(OutputRectangle& output) override;
-	std::unique_ptr<BaseImage> createGL (OutputRectangle& output) override;
-	template <typename IMAGE> std::unique_ptr<BaseImage> create(
-		OutputRectangle& output);
+	[[nodiscard]] gl::vec2 getSize(const OutputSurface& output) const override;
+	[[nodiscard]] uint8_t getFadedAlpha() const override;
+	[[nodiscard]] std::unique_ptr<GLImage> create(OutputSurface& output) override;
 
+private:
 	std::string imageName;
 	gl::vec2 size, relSize;
-	float scale, borderSize, relBorderSize;
-	unsigned borderRGBA;
+	float scale = 1.0f;
+	float borderSize = 0.0f;
+	float  relBorderSize = 0.0f;
+	uint32_t borderRGBA = 0x000000ff;
 };
 
 } // namespace openmsx

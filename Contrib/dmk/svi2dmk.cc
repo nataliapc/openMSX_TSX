@@ -1,14 +1,16 @@
-#include <string>
-#include <stdexcept>
+#include "dmk-common.hh"
+
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
-#include <cstring>
 #include <cstdlib>
+#include <cstring>
+#include <span>
+#include <stdexcept>
+#include <string>
 #include <sys/stat.h>
 #include <sys/types.h>
-
-using namespace std;
 
 static const int TRACK_LENGTH = 6250;
 static const int DMK_TRACK_LEN = TRACK_LENGTH + 128;
@@ -18,58 +20,12 @@ static const int GAP2  = 22;
 static const int GAP3  = 34;
 static const int GAP4a = 80;
 
-struct DmkHeader
-{
-	uint8_t writeProtected;
-	uint8_t numTracks;
-	uint8_t trackLen[2];
-	uint8_t flags;
-	uint8_t reserved[7];
-	uint8_t format[4];
-};
 
-
-class File
-{
-public:
-	File(const char* filename, const char* mode)
-		: f(fopen(filename, mode))
-	{
-		if (!f) {
-			throw runtime_error(string("Couldn't open: ") + filename);
-		}
-	}
-
-	~File()
-	{
-		fclose(f);
-	}
-
-	void read(void* data, int size)
-	{
-		if (fread(data, size, 1, f) != 1) {
-			throw runtime_error("Couldn't read file");
-		}
-	}
-	void write(const void* data, int size)
-	{
-		if (fwrite(data, size, 1, f) != 1) {
-			throw runtime_error("Couldn't write file");
-		}
-	}
-
-private:
-	FILE* f;
-};
-
-
-static uint16_t calculateCrc(const uint8_t* p, int n)
+static uint16_t calculateCrc(std::span<const uint8_t> buf)
 {
 	uint16_t crc = 0xffff;
-	for (int i = 0; i < n; ++i) {
-		for (int j = 8; j < 16; ++j) {
-			crc = (crc << 1) ^ ((((crc ^ (p[i] << j)) & 0x8000) ? 0x1021 : 0));
-		}
+	for (auto e : buf) {
+		updateCrc(crc, e);
 	}
 	return crc;
 }
@@ -89,8 +45,7 @@ static void convertTrack(int cyl, int head,
 	int gap4b = TRACK_LENGTH - (GAP4a + 12 + 4 + GAP1 + sectorsPerTrack * rawSectorLen);
 	assert(gap4b > 0);
 
-	uint8_t buf[DMK_TRACK_LEN];
-	memset(buf, 0, sizeof(buf));
+	std::array<uint8_t, DMK_TRACK_LEN> buf = {};
 	uint8_t* ip = &buf[  0]; // pointer in IDAM table
 	uint8_t* tp = &buf[128]; // pointer in actual track data
 
@@ -111,7 +66,7 @@ static void convertTrack(int cyl, int head,
 		*tp++ = head;               // H
 		*tp++ = sec + 1;            // R
 		*tp++ = sectorSizeCode;     // N
-		auto addrCrc = calculateCrc(tp - 8, 8);
+		auto addrCrc = calculateCrc(std::span{tp - 8, 8});
 		*tp++ = addrCrc >> 8;       // CRC-1
 		*tp++ = addrCrc & 0xff;     // CRC-2
 		fill(tp, GAP2, 0x4e);       // gap2
@@ -119,7 +74,7 @@ static void convertTrack(int cyl, int head,
 		fill(tp,    3, 0xa1);       // data mark
 		fill(tp,    1, 0xfb);       //
 		inf.read(tp, sectorSize);
-		auto dataCrc = calculateCrc(tp - 4, sectorSize + 4);
+		auto dataCrc = calculateCrc(std::span{tp - 4, unsigned(sectorSize + 4)});
 		tp += sectorSize;
 		*tp++ = dataCrc >> 8;
 		*tp++ = dataCrc & 0xff;
@@ -145,7 +100,7 @@ static void convert(const char* input, const char* output)
 		doubleSided = true;
 		break;
 	default:
-		throw runtime_error(
+		throw std::runtime_error(
 			"input filesize should be exactly 172032 or 346112 bytes.\n");
 	}
 
@@ -185,9 +140,10 @@ static void convert(const char* input, const char* output)
 	}
 }
 
-int main(int argc, char** argv)
+int main(int argc, const char** argv)
 {
-	if (argc != 3) {
+	std::span arg(argv, argc);
+	if (arg.size() != 3) {
 		printf("svi2dmk\n"
 		       "-------\n"
 		       "\n"
@@ -202,12 +158,12 @@ int main(int argc, char** argv)
 		       "172032 bytes for single sided disks or 346112 bytes for double\n"
 		       "sided disks.\n"
 		       "\n"
-		       "Usage: %s <input.dsk> <output.dmk>\n", argv[0]);
+		       "Usage: %s <input.dsk> <output.dmk>\n", arg[0]);
 		exit(1);
 	}
 
 	try {
-		convert(argv[1], argv[2]);
+		convert(arg[1], arg[2]);
 	} catch (std::exception& e) {
 		fprintf(stderr, "Error: %s\n", e.what());
 		exit(2);

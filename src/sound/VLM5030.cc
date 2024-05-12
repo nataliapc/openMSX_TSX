@@ -36,7 +36,7 @@ silent  :   ---  :  ---   :   ---  :   ---  :   ---  :0000SS01:
 speech  :11111122:22233334:44455566:67778889:99AAAEEE:EEPPPPP0:
 
 EEEEE  : energy : volume 0=off,0x1f=max
-PPPPP  : pitch  : 0=noize , 1=fast,0x1f=slow
+PPPPP  : pitch  : 0=noise , 1=fast,0x1f=slow
 111111 : K1     : 48=off
 22222  : K2     : 0=off,1=+min,0x0f=+max,0x10=off,0x11=+max,0x1f=-min
                 : 16 == special function??
@@ -52,7 +52,7 @@ AAA    : K10    :
  ---------- chirp table information ----------
 
 DAC PWM cycle == 88system clock , (11clock x 8 pattern) = 40.6KHz
-one chirp     == 5 x PWM cycle == 440systemclock(8,136Hz)
+one chirp     == 5 x PWM cycle == 440system clock(8,136Hz)
 
 chirp  0   : volume 10- 8 : with filter
 chirp  1   : volume  8- 6 : with filter
@@ -60,9 +60,9 @@ chirp  2   : volume  6- 4 : with filter
 chirp  3   : volume   4   : no filter ??
 chirp  4- 5: volume  4- 2 : with filter
 chirp  6-11: volume  2- 0 : with filter
-chirp 12-..: vokume   0   : silent
+chirp 12-..: volume   0   : silent
 
- ---------- digial output information ----------
+ ---------- digital output information ----------
  when ME pin = high , some status output to A0..15 pins
 
   A0..8   : DAC output value (abs)
@@ -75,27 +75,34 @@ chirp 12-..: vokume   0   : silent
 */
 
 #include "VLM5030.hh"
+
 #include "DeviceConfig.hh"
-#include "XMLElement.hh"
 #include "FileOperations.hh"
-#include "Math.hh"
+#include "XMLElement.hh"
 #include "serialize.hh"
+
+#include "cstd.hh"
+#include "narrow.hh"
+#include "one_of.hh"
 #include "random.hh"
+#include "ranges.hh"
+#include "xrange.hh"
+
+#include <algorithm>
+#include <array>
 #include <cmath>
-#include <cstring>
-#include <cstdint>
 
 namespace openmsx {
 
 
 // interpolator per frame
-static const int FR_SIZE = 4;
+static constexpr int FR_SIZE = 4;
 // samples per interpolator
-static const int IP_SIZE_SLOWER = 240 / FR_SIZE;
-static const int IP_SIZE_SLOW   = 200 / FR_SIZE;
-static const int IP_SIZE_NORMAL = 160 / FR_SIZE;
-static const int IP_SIZE_FAST   = 120 / FR_SIZE;
-static const int IP_SIZE_FASTER =  80 / FR_SIZE;
+static constexpr uint8_t IP_SIZE_SLOWER = 240 / FR_SIZE;
+static constexpr uint8_t IP_SIZE_SLOW   = 200 / FR_SIZE;
+static constexpr uint8_t IP_SIZE_NORMAL = 160 / FR_SIZE;
+static constexpr uint8_t IP_SIZE_FAST   = 120 / FR_SIZE;
+static constexpr uint8_t IP_SIZE_FASTER =  80 / FR_SIZE;
 
 // phase value
 enum {
@@ -112,10 +119,10 @@ enum {
 // SPC SPB SPA
 //  1   0   1  more slow (05h)     : 42ms   (150%) : 60sample
 //  1   1   x  slow      (06h,07h) : 34ms   (125%) : 50sample
-//  x   0   0  normal    (00h,04h) : 25.6ms (100%) : 40samplme
+//  x   0   0  normal    (00h,04h) : 25.6ms (100%) : 40sample
 //  0   0   1  fast      (01h)     : 20.2ms  (75%) : 30sample
 //  0   1   x  more fast (02h,03h) : 12.2ms  (50%) : 20sample
-static const int VLM5030_speed_table[8] =
+static constexpr std::array<uint8_t, 8> VLM5030_speed_table =
 {
 	IP_SIZE_NORMAL,
 	IP_SIZE_FAST,
@@ -132,7 +139,7 @@ static const int VLM5030_speed_table[8] =
 // This is the energy lookup table
 
 // sampled from real chip
-static word energytable[0x20] =
+static constexpr std::array<uint16_t, 0x20> energyTable =
 {
 	  0,  2,  4,  6, 10, 12, 14, 18, //  0-7
 	 22, 26, 30, 34, 38, 44, 48, 54, //  8-15
@@ -141,7 +148,7 @@ static word energytable[0x20] =
 };
 
 // This is the pitch lookup table
-static const byte pitchtable [0x20] =
+static constexpr std::array<uint8_t, 0x20> pitchTable =
 {
 	1,                               // 0     : random mode
 	22,                              // 1     : start=22
@@ -151,7 +158,7 @@ static const byte pitchtable [0x20] =
 	86, 94, 102,110,118,126          // 26-31 : 8step
 };
 
-static const int16_t K1_table[] = {
+static constexpr std::array<int16_t, 64> K1_table = {
 	-24898,  -25672,  -26446,  -27091,  -27736,  -28252,  -28768,  -29155,
 	-29542,  -29929,  -30316,  -30574,  -30832,  -30961,  -31219,  -31348,
 	-31606,  -31735,  -31864,  -31864,  -31993,  -32122,  -32122,  -32251,
@@ -161,26 +168,26 @@ static const int16_t K1_table[] = {
 	     0,   -1935,   -3999,   -6063,   -7998,   -9804,  -11610,  -13416,
 	-15093,  -16642,  -18061,  -19480,  -20770,  -21931,  -22963,  -23995
 };
-static const int16_t K2_table[] = {
+static constexpr std::array<int16_t, 32> K2_table = {
 	     0,   -3096,   -6321,   -9417,  -12513,  -15351,  -18061,  -20770,
 	-23092,  -25285,  -27220,  -28897,  -30187,  -31348,  -32122,  -32638,
 	     0,   32638,   32122,   31348,   30187,   28897,   27220,   25285,
 	 23092,   20770,   18061,   15351,   12513,    9417,    6321,    3096
 };
-static const int16_t K3_table[] = {
+static constexpr std::array<int16_t, 16> K3_table = {
 	    0,   -3999,   -8127,  -12255,  -16384,  -20383,  -24511,  -28639,
 	32638,   28639,   24511,   20383,   16254,   12255,    8127,    3999
 };
-static const int16_t K5_table[] = {
+static constexpr std::array<int16_t, 8> K5_table = {
 	0,   -8127,  -16384,  -24511,   32638,   24511,   16254,    8127
 };
 
-int VLM5030::getBits(unsigned sbit, unsigned bits)
+unsigned VLM5030::getBits(unsigned sBit, unsigned bits) const
 {
-	unsigned offset = address + (sbit / 8);
+	unsigned offset = address + (sBit / 8);
 	unsigned data = rom[(offset + 0) & address_mask] +
 	                rom[(offset + 1) & address_mask] * 256;
-	data >>= (sbit & 7);
+	data >>= (sBit & 7);
 	data &= (0xFF >> (8 - bits));
 	return data;
 }
@@ -191,17 +198,13 @@ int VLM5030::parseFrame()
 	// remember previous frame
 	old_energy = new_energy;
 	old_pitch = new_pitch;
-	for (int i = 0; i <= 9; ++i) {
-		old_k[i] = new_k[i];
-	}
+	old_k = new_k;
 	// command byte check
-	byte cmd = rom[address & address_mask];
-	if (cmd & 0x01) {
+	if (uint8_t cmd = rom[address & address_mask];
+	    cmd & 0x01) {
 		// extend frame
 		new_energy = new_pitch = 0;
-		for (int i = 0; i <= 9; ++i) {
-			new_k[i] = 0;
-		}
+		ranges::fill(new_k, 0);
 		++address;
 		if (cmd & 0x02) {
 			// end of speech
@@ -213,9 +216,9 @@ int VLM5030::parseFrame()
 		}
 	}
 	// pitch
-	new_pitch  = (pitchtable[getBits(1, 5)] + pitch_offset) & 0xff;
+	new_pitch  = narrow_cast<uint8_t>((pitchTable[getBits(1, 5)] + pitch_offset) & 0xff);
 	// energy
-	new_energy = energytable[getBits(6, 5)];
+	new_energy = energyTable[getBits(6, 5)];
 
 	// 10 K's
 	new_k[9] = K5_table[getBits(11, 3)];
@@ -234,7 +237,7 @@ int VLM5030::parseFrame()
 }
 
 // decode and buffering data
-void VLM5030::generateChannels(int** bufs, unsigned num)
+void VLM5030::generateChannels(std::span<float*> bufs, unsigned num)
 {
 	// Single channel device: replace content of bufs[0] (not add to it).
 	if (phase == PH_IDLE) {
@@ -245,10 +248,9 @@ void VLM5030::generateChannels(int** bufs, unsigned num)
 	int buf_count = 0;
 
 	// running
-	if (phase == PH_RUN || phase == PH_STOP) {
+	if (phase == one_of(PH_RUN, PH_STOP)) {
 		// playing speech
 		while (num > 0) {
-			int current_val;
 			// check new interpolator or new frame
 			if (sample_count == 0) {
 				if (phase == PH_STOP) {
@@ -260,8 +262,8 @@ void VLM5030::generateChannels(int** bufs, unsigned num)
 				// interpolator changes
 				if (interp_count == 0) {
 					// change to new frame
-					interp_count = parseFrame(); // with change phase
-					if (interp_count == 0 ) {
+					interp_count = narrow_cast<uint8_t>(parseFrame()); // with change phase
+					if (interp_count == 0) {
 						// end mark found
 						interp_count = FR_SIZE;
 						sample_count = frame_size; // end -> stop time
@@ -270,23 +272,17 @@ void VLM5030::generateChannels(int** bufs, unsigned num)
 					// Set old target as new start of frame
 					current_energy = old_energy;
 					current_pitch = old_pitch;
-					for (int i = 0; i <= 9; ++i) {
-						current_k[i] = old_k[i];
-					}
+					ranges::copy(old_k, current_k); // no assignment because arrays have different type (intentional?)
 					// is this a zero energy frame?
 					if (current_energy == 0) {
 						target_energy = 0;
-						target_pitch = current_pitch;
-						for (int i = 0; i <= 9; ++i) {
-							target_k[i] = current_k[i];
-						}
+						target_pitch = narrow_cast<uint8_t>(current_pitch);
+						ranges::copy(current_k, target_k); // no assignment because arrays have different type (intentional?)
 					} else {
 						// normal frame
 						target_energy = new_energy;
 						target_pitch = new_pitch;
-						for (int i = 0; i <= 9; ++i) {
-							target_k[i] = new_k[i];
-						}
+						target_k = new_k;
 					}
 				}
 				// next interpolator
@@ -298,24 +294,26 @@ void VLM5030::generateChannels(int** bufs, unsigned num)
 				if (old_pitch > 1) {
 					current_pitch = old_pitch + (target_pitch - old_pitch) * interp_effect / FR_SIZE;
 				}
-				for (int i = 0; i <= 9; ++i)
+				for (auto i : xrange(10))
 					current_k[i] = old_k[i] + (target_k[i] - old_k[i]) * interp_effect / FR_SIZE;
 			}
-			// calcrate digital filter
-			if (old_energy == 0) {
-				// generate silent samples here
-				current_val = 0x00;
-			} else if (old_pitch <= 1) {
-				// generate unvoiced samples here
-				current_val = random_bool() ?  int(current_energy)
-				                            : -int(current_energy);
-			} else {
-				// generate voiced samples here
-				current_val = (pitch_count == 0) ? current_energy : 0;
-			}
+			// calculate digital filter
+			int current_val = [&] {
+				if (old_energy == 0) {
+					// generate silent samples here
+					return 0;
+				} else if (old_pitch <= 1) {
+					// generate unvoiced samples here
+					return random_bool() ?  int(current_energy)
+					                     : -int(current_energy);
+				} else {
+					// generate voiced samples here
+					return (pitch_count == 0) ? int(current_energy) : 0;
+				}
+			}();
 
 			// Lattice filter here
-			int u[11];
+			std::array<int, 11> u;
 			u[10] = current_val;
 			for (int i = 9; i >= 0; --i) {
 				u[i] = u[i + 1] - ((current_k[i] * x[i]) / 32768);
@@ -326,7 +324,7 @@ void VLM5030::generateChannels(int** bufs, unsigned num)
 			x[0] = u[0];
 
 			// clipping, buffering
-			bufs[0][buf_count] = Math::clip<-511, 511>(u[0]);
+			bufs[0][buf_count] = narrow<float>(std::clamp(u[0], -511, 511));
 			++buf_count;
 			--sample_count;
 			++pitch_count;
@@ -345,7 +343,7 @@ phase_stop:
 			// pin_BSY = true;
 			phase = PH_WAIT;
 		} else {
-			sample_count -= num;
+			sample_count -= narrow<uint8_t>(num);
 		}
 		break;
 	case PH_END:
@@ -354,7 +352,7 @@ phase_stop:
 			pin_BSY = false;
 			phase = PH_IDLE;
 		} else {
-			sample_count -= num;
+			sample_count -= narrow<uint8_t>(num);
 		}
 	}
 	// silent buffering
@@ -364,24 +362,24 @@ phase_stop:
 	}
 }
 
-int VLM5030::getAmplificationFactorImpl() const
+float VLM5030::getAmplificationFactorImpl() const
 {
-	return 1 << (15 - 9);
+	return 1.0f / (1 << 9);
 }
 
-// setup parameteroption when RST=H
-void VLM5030::setupParameter(byte param)
+// setup parameter option when RST=H
+void VLM5030::setupParameter(uint8_t param)
 {
 	// latch parameter value
 	parameter = param;
 
-	// bit 0,1 : 4800bps / 9600bps , interporator step
+	// bit 0,1 : 4800bps / 9600bps , interpolator step
 	if (param & 2) {          // bit 1 = 1 , 9600bps
-		interp_step = 4;  // 9600bps : no interporator
+		interp_step = 4;  // 9600bps : no interpolator
 	} else if (param & 1) {   // bit1 = 0 & bit0 = 1 , 4800bps
-		interp_step = 2;  // 4800bps : 2 interporator
+		interp_step = 2;  // 4800bps : 2 interpolator
 	} else {                  // bit1 = bit0 = 0 : 2400bps
-		interp_step = 1;  // 2400bps : 4 interporator
+		interp_step = 1;  // 2400bps : 4 interpolator
 	}
 
 	// bit 3,4,5 : speed (frame size)
@@ -408,12 +406,12 @@ void VLM5030::reset()
 	new_energy = new_pitch = 0;
 	current_energy = current_pitch = 0;
 	target_energy = target_pitch = 0;
-	memset(old_k, 0, sizeof(old_k));
-	memset(new_k, 0, sizeof(new_k));
-	memset(current_k, 0, sizeof(current_k));
-	memset(target_k, 0, sizeof(target_k));
+	ranges::fill(old_k, 0);
+	ranges::fill(new_k, 0);
+	ranges::fill(current_k, 0);
+	ranges::fill(target_k, 0);
 	interp_count = sample_count = pitch_count = 0;
-	memset(x, 0, sizeof(x));
+	ranges::fill(x, 0);
 	// reset parameters
 	setupParameter(0x00);
 }
@@ -426,12 +424,12 @@ bool VLM5030::getBSY(EmuTime::param time) const
 }
 
 // latch control data
-void VLM5030::writeData(byte data)
+void VLM5030::writeData(uint8_t data)
 {
 	latch_data = data;
 }
 
-void VLM5030::writeControl(byte data, EmuTime::param time)
+void VLM5030::writeControl(uint8_t data, EmuTime::param time)
 {
 	updateStream(time);
 	setRST((data & 0x01) != 0);
@@ -476,7 +474,7 @@ void VLM5030::setST(bool pin)
 		pin_ST = false;
 		if (pin_VCU) {
 			// direct access mode & address High
-			vcu_addr_h = (int(latch_data) << 8) + 0x01;
+			vcu_addr_h = narrow<uint16_t>((latch_data << 8) + 0x01);
 		} else {
 			// check access mode
 			if (vcu_addr_h) {
@@ -486,8 +484,8 @@ void VLM5030::setST(bool pin)
 			} else {
 				// indirect access mode
 				int table = (latch_data & 0xfe) + ((int(latch_data) & 1) << 8);
-				address = ((rom[(table + 0) & address_mask]) << 8) |
-				            rom[(table + 1) & address_mask];
+				address = uint16_t((rom[(table + 0) & address_mask] << 8) |
+				                   (rom[(table + 1) & address_mask] << 0));
 			}
 			// reset process status
 			sample_count = frame_size;
@@ -507,37 +505,35 @@ void VLM5030::setST(bool pin)
 }
 
 
-static XMLElement getRomConfig(const std::string& name, const std::string& romFilename)
+static XMLElement* getRomConfig(
+	DeviceConfig& config, const std::string& name, std::string_view romFilename)
 {
-	XMLElement voiceROMconfig(name);
-	voiceROMconfig.addAttribute("id", "name");
-	auto& romElement = voiceROMconfig.addChild("rom");
-	romElement.addChild( // load by sha1sum
-		"sha1", "4f36d139ee4baa7d5980f765de9895570ee05f40");
-	romElement.addChild( // load by predefined filename in software rom's dir
-		"filename", strCat(FileOperations::stripExtension(romFilename), "_voice.rom"));
-	romElement.addChild( // or hardcoded filename in ditto dir
-		"filename", "keyboardmaster/voice.rom");
+	auto& doc = config.getXMLDocument();
+	auto* voiceROMconfig = doc.allocateElement(doc.allocateString(name));
+	voiceROMconfig->setFirstAttribute(doc.allocateAttribute("id", "name"));
+	auto* romElement = voiceROMconfig->setFirstChild(doc.allocateElement("rom"));
+	romElement->setFirstChild(doc.allocateElement( // load by sha1sum
+			"sha1", "4f36d139ee4baa7d5980f765de9895570ee05f40"))
+	         ->setNextSibling(doc.allocateElement( // load by predefined filename in software rom's dir
+			"filename",
+			doc.allocateString(tmpStrCat(FileOperations::stripExtension(romFilename), "_voice.rom"))))
+		 ->setNextSibling(doc.allocateElement( // or hardcoded filename in ditto dir
+			"filename", "keyboardmaster/voice.rom"));
 	return voiceROMconfig;
 }
 
-VLM5030::VLM5030(const std::string& name_, const std::string& desc,
-                 const std::string& romFilename, const DeviceConfig& config)
-	: ResampledSoundDevice(config.getMotherBoard(), name_, desc, 1)
-	, rom(name_ + " ROM", "rom", DeviceConfig(config, getRomConfig(name_, romFilename)))
-{
-	// reset input pins
-	pin_RST = pin_ST = pin_VCU = false;
-	latch_data = 0;
+static constexpr auto INPUT_RATE = unsigned(cstd::round(3579545 / 440.0));
 
+VLM5030::VLM5030(const std::string& name_, static_string_view desc,
+                 std::string_view romFilename, const DeviceConfig& config)
+	: ResampledSoundDevice(config.getMotherBoard(), name_, desc, 1, INPUT_RATE, false)
+	, rom(name_ + " ROM", "rom", DeviceConfig(config, *getRomConfig(const_cast<DeviceConfig&>(config), name_, romFilename)))
+{
 	reset();
 	phase = PH_IDLE;
 
-	address_mask = rom.getSize() - 1;
-
-	const int CLOCK_FREQ = 3579545;
-	float input = CLOCK_FREQ / 440.0f;
-	setInputRate(lrintf(input));
+	assert(rom.size() != 0);
+	address_mask = narrow<unsigned>(rom.size() - 1);
 
 	registerSound(config);
 }
@@ -550,35 +546,35 @@ VLM5030::~VLM5030()
 template<typename Archive>
 void VLM5030::serialize(Archive& ar, unsigned /*version*/)
 {
-	ar.serialize("address_mask", address_mask);
-	ar.serialize("frame_size", frame_size);
-	ar.serialize("pitch_offset", pitch_offset);
-	ar.serialize("current_energy", current_energy);
-	ar.serialize("current_pitch", current_pitch);
-	ar.serialize("current_k", current_k);
-	ar.serialize("x", x);
-	ar.serialize("address", address);
-	ar.serialize("vcu_addr_h", vcu_addr_h);
-	ar.serialize("old_k", old_k);
-	ar.serialize("new_k", new_k);
-	ar.serialize("target_k", target_k);
-	ar.serialize("old_energy", old_energy);
-	ar.serialize("new_energy", new_energy);
-	ar.serialize("target_energy", target_energy);
-	ar.serialize("old_pitch", old_pitch);
-	ar.serialize("new_pitch", new_pitch);
-	ar.serialize("target_pitch", target_pitch);
-	ar.serialize("interp_step", interp_step);
-	ar.serialize("interp_count", interp_count);
-	ar.serialize("sample_count", sample_count);
-	ar.serialize("pitch_count", pitch_count);
-	ar.serialize("latch_data", latch_data);
-	ar.serialize("parameter", parameter);
-	ar.serialize("phase", phase);
-	ar.serialize("pin_BSY", pin_BSY);
-	ar.serialize("pin_ST", pin_ST);
-	ar.serialize("pin_VCU", pin_VCU);
-	ar.serialize("pin_RST", pin_RST);
+	ar.serialize("address_mask",   address_mask,
+	             "frame_size",     frame_size,
+	             "pitch_offset",   pitch_offset,
+	             "current_energy", current_energy,
+	             "current_pitch",  current_pitch,
+	             "current_k",      current_k,
+	             "x",              x,
+	             "address",        address,
+	             "vcu_addr_h",     vcu_addr_h,
+	             "old_k",          old_k,
+	             "new_k",          new_k,
+	             "target_k",       target_k,
+	             "old_energy",     old_energy,
+	             "new_energy",     new_energy,
+	             "target_energy",  target_energy,
+	             "old_pitch",      old_pitch,
+	             "new_pitch",      new_pitch,
+	             "target_pitch",   target_pitch,
+	             "interp_step",    interp_step,
+	             "interp_count",   interp_count,
+	             "sample_count",   sample_count,
+	             "pitch_count",    pitch_count,
+	             "latch_data",     latch_data,
+	             "parameter",      parameter,
+	             "phase",          phase,
+	             "pin_BSY",        pin_BSY,
+	             "pin_ST",         pin_ST,
+	             "pin_VCU",        pin_VCU,
+	             "pin_RST",        pin_RST);
 }
 
 INSTANTIATE_SERIALIZE_METHODS(VLM5030);

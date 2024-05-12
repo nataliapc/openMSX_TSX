@@ -7,7 +7,7 @@
 #include "Display.hh"
 #include "VideoSystem.hh"
 #include "VideoSourceSetting.hh"
-#include "FinishFrameEvent.hh"
+#include "Event.hh"
 #include "RealTime.hh"
 #include "Timer.hh"
 #include "EventDistributor.hh"
@@ -15,7 +15,10 @@
 #include "Reactor.hh"
 #include "RenderSettings.hh"
 #include "IntegerSetting.hh"
+#include "narrow.hh"
+#include "one_of.hh"
 #include "unreachable.hh"
+#include <cassert>
 
 namespace openmsx {
 
@@ -28,11 +31,6 @@ V9990PixelRenderer::V9990PixelRenderer(V9990& vdp_)
 	, rasterizer(vdp.getReactor().getDisplay().
 	                getVideoSystem().createV9990Rasterizer(vdp))
 {
-	frameSkipCounter = 999; // force drawing of frame;
-	finishFrameDuration = 0;
-	drawFrame = false; // don't draw before frameStart is called
-	prevDrawFrame = false;
-
 	reset(vdp.getMotherBoard().getCurrentTime());
 
 	renderSettings.getMaxFrameSkipSetting().attach(*this);
@@ -113,7 +111,7 @@ void V9990PixelRenderer::frameEnd(EmuTime::param time)
 		auto time1 = Timer::getTime();
 		rasterizer->frameEnd(time);
 		auto time2 = Timer::getTime();
-		auto current = time2 - time1;
+		auto current = narrow_cast<float>(time2 - time1);
 		const float ALPHA = 0.2f;
 		finishFrameDuration = finishFrameDuration * (1 - ALPHA) +
 		                      current * ALPHA;
@@ -129,11 +127,10 @@ void V9990PixelRenderer::frameEnd(EmuTime::param time)
 	}
 	if (vdp.getMotherBoard().isActive() &&
 	    !vdp.getMotherBoard().isFastForwarding()) {
-		eventDistributor.distributeEvent(
-			std::make_shared<FinishFrameEvent>(
-				rasterizer->getPostProcessor()->getVideoSource(),
-				videoSourceSetting.getSource(),
-				skipEvent));
+		eventDistributor.distributeEvent(FinishFrameEvent(
+			rasterizer->getPostProcessor()->getVideoSource(),
+			videoSourceSetting.getSource(),
+			skipEvent));
 	}
 }
 
@@ -153,23 +150,25 @@ void V9990PixelRenderer::renderUntil(EmuTime::param time)
 	int limitTicks = vdp.getUCTicksThisFrame(time);
 	assert(limitTicks <=
 	       V9990DisplayTiming::getUCTicksPerFrame(vdp.isPalTiming()));
-	int toX, toY;
-	switch (accuracy) {
-	case RenderSettings::ACC_PIXEL:
-		toX = limitTicks % V9990DisplayTiming::UC_TICKS_PER_LINE;
-		toY = limitTicks / V9990DisplayTiming::UC_TICKS_PER_LINE;
-		break;
-	case RenderSettings::ACC_LINE:
-	case RenderSettings::ACC_SCREEN:
-		// TODO figure out rounding point
-		toX = 0;
-		toY = (limitTicks + V9990DisplayTiming::UC_TICKS_PER_LINE - 400) /
-		             V9990DisplayTiming::UC_TICKS_PER_LINE;
-		break;
-	default:
-		UNREACHABLE;
-		toX = toY = 0; // avoid warning
-	}
+	auto [toX, toY] = [&] {
+		switch (accuracy) {
+		case RenderSettings::ACC_PIXEL:
+			return std::pair{
+				limitTicks % V9990DisplayTiming::UC_TICKS_PER_LINE,
+				limitTicks / V9990DisplayTiming::UC_TICKS_PER_LINE
+			};
+		case RenderSettings::ACC_LINE:
+		case RenderSettings::ACC_SCREEN:
+			// TODO figure out rounding point
+			return std::pair{
+				0,
+				(limitTicks + V9990DisplayTiming::UC_TICKS_PER_LINE - 400) /
+				     V9990DisplayTiming::UC_TICKS_PER_LINE
+			};
+		default:
+			UNREACHABLE;
+		}
+	}();
 
 	if ((toX == lastX) && (toY == lastY)) return;
 
@@ -315,15 +314,13 @@ void V9990PixelRenderer::updateScrollBYLow(EmuTime::param time)
 	}
 }
 
-void V9990PixelRenderer::update(const Setting& setting)
+void V9990PixelRenderer::update(const Setting& setting) noexcept
 {
-	if (&setting == &renderSettings.getMinFrameSkipSetting() ||
-	    &setting == &renderSettings.getMaxFrameSkipSetting()) {
-		// Force drawing of frame
-		frameSkipCounter = 999;
-	} else {
-		UNREACHABLE;
-	}
+	assert(&setting == one_of(&renderSettings.getMinFrameSkipSetting(),
+	                          &renderSettings.getMaxFrameSkipSetting()));
+	(void)setting;
+	// Force drawing of frame
+	frameSkipCounter = 999;
 }
 
 } // namespace openmsx

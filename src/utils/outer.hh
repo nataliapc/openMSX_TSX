@@ -1,6 +1,7 @@
 #ifndef OUTER_HH
 #define OUTER_HH
 
+#include <bit>
 #include <cstddef>
 
 // Example usage:
@@ -35,6 +36,10 @@
 // reference to the outer object. The first parameter is the type of the outer
 // object, the second parameter is the name of the 'this' member variable in
 // the outer object.
-#define OUTER(type, member) *reinterpret_cast<type*>(reinterpret_cast<uintptr_t>(this) - offsetof(type, member));
+
+template<typename T> int checkInvalidOuterUsage(T) { return 0; }
+
+#define OUTER(type, member) (checkInvalidOuterUsage<const decltype(std::declval<type&>().member)*>(this), \
+                             *std::bit_cast<type*>(std::bit_cast<uintptr_t>(this) - offsetof(type, member)))
 
 #endif

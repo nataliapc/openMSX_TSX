@@ -15,14 +15,14 @@
  *  bank A(0xa000-0xbfff): 0x7800 - 0x7FFF (0x7800 used)
  *
  * ESE-RAM Bank Map:
- *  BANK 00H-7FH (read only)
- *  BANK 80H-FFH (write and read. mirror of 00H-7FH)
+ *  BANK 0x00-0x7F (read only)
+ *  BANK 0x80-0xFF (write and read. mirror of 0x00-0x7F)
  *
  * MEGA-SCSI Bank Map:
- *  BANK 00H-3FH (sram read only. mirror of 80H-BFH)
- *  BANK 40H-7EH (mirror of 7FH. Use is prohibited)
- *  BANK 7FH     (SPC)
- *  BANK 80H-FFH (sram write and read)
+ *  BANK 0x00-0x3F (sram read only. mirror of 0x80-0xBF)
+ *  BANK 0x40-0x7E (mirror of 0x7F. Use is prohibited)
+ *  BANK 0x7F      (SPC)
+ *  BANK 0x80-0xFF (sram write and read)
  *
  * SPC Bank:
  *  0x0000 - 0x0FFF :
@@ -36,23 +36,26 @@
  *      un mapped
  *
  * Note:
- *  It is possible to access it by putting it out to 8000H - BFFFH
- *  though the SPC bank is arranged in chiefly 4000H-5FFF.
+ *  It is possible to access it by putting it out to 0x8000 - 0xBFFF
+ *  though the SPC bank is arranged in chiefly 0x4000-0x5FFF.
  */
 
 #include "MegaSCSI.hh"
 #include "MSXException.hh"
+#include "narrow.hh"
+#include "one_of.hh"
 #include "serialize.hh"
+#include "xrange.hh"
 #include <cassert>
 
 namespace openmsx {
 
-static const byte SPC = 0x7F;
+static constexpr byte SPC = 0x7F;
 
-unsigned MegaSCSI::getSramSize() const
+size_t MegaSCSI::getSramSize() const
 {
-	unsigned sramSize = getDeviceConfig().getChildDataAsInt("sramsize", 1024); // size in kb
-	if (sramSize != 1024 && sramSize != 512 && sramSize != 256 && sramSize != 128) {
+	size_t sramSize = getDeviceConfig().getChildDataAsInt("sramsize", 1024); // size in kb
+	if (sramSize != one_of(1024u, 512u, 256u, 128u)) {
 		throw MSXException(
 			"SRAM size for ", getName(),
 			" should be 128, 256, 512 or 1024kB and not ",
@@ -66,13 +69,13 @@ MegaSCSI::MegaSCSI(const DeviceConfig& config)
 	, mb89352(config)
 	, sram(getName() + " SRAM", getSramSize(), config)
 	, romBlockDebug(*this, mapped, 0x4000, 0x8000, 13)
-	, blockMask((sram.getSize() / 0x2000) - 1)
+	, blockMask(narrow<byte>((sram.size() / 0x2000) - 1))
 {
 }
 
 void MegaSCSI::reset(EmuTime::param /*time*/)
 {
-	for (int i = 0; i < 4; ++i) {
+	for (auto i : xrange(4)) {
 		setSRAM(i, 0);
 	}
 	mb89352.reset(true);
@@ -80,7 +83,6 @@ void MegaSCSI::reset(EmuTime::param /*time*/)
 
 byte MegaSCSI::readMem(word address, EmuTime::param /*time*/)
 {
-	byte result;
 	if ((0x4000 <= address) && (address < 0xC000)) {
 		unsigned page = (address / 0x2000) - 2;
 		word addr = address & 0x1FFF;
@@ -88,17 +90,16 @@ byte MegaSCSI::readMem(word address, EmuTime::param /*time*/)
 			// SPC read
 			if (addr < 0x1000) {
 				// Data Register
-				result = mb89352.readDREG();
+				return mb89352.readDREG();
 			} else {
-				result = mb89352.readRegister(addr & 0x0F);
+				return mb89352.readRegister(addr & 0x0F);
 			}
 		} else {
-			result = sram[0x2000 * mapped[page] + addr];
+			return sram[0x2000 * mapped[page] + addr];
 		}
 	} else {
-		result = 0xFF;
+		return 0xFF;
 	}
-	return result;
 }
 
 byte MegaSCSI::peekMem(word address, EmuTime::param /*time*/) const
@@ -126,7 +127,7 @@ const byte* MegaSCSI::getReadCacheLine(word address) const
 			return &sram[0x2000 * mapped[page] + address];
 		}
 	} else {
-		return unmappedRead;
+		return unmappedRead.data();
 	}
 }
 
@@ -162,12 +163,12 @@ byte* MegaSCSI::getWriteCacheLine(word address) const
 			return nullptr;
 		}
 	}
-	return unmappedWrite;
+	return unmappedWrite.data();
 }
 
 void MegaSCSI::setSRAM(unsigned region, byte block)
 {
-	invalidateMemCache(region * 0x2000 + 0x4000, 0x2000);
+	invalidateDeviceRWCache(region * 0x2000 + 0x4000, 0x2000);
 	assert(region < 4);
 	isWriteable[region] = (block & 0x80) != 0;
 	mapped[region] = ((block & 0xC0) == 0x40) ? 0x7F : (block & blockMask);
@@ -176,10 +177,10 @@ void MegaSCSI::setSRAM(unsigned region, byte block)
 template<typename Archive>
 void MegaSCSI::serialize(Archive& ar, unsigned /*version*/)
 {
-	ar.serialize("SRAM", sram);
-	ar.serialize("MB89352", mb89352);
-	ar.serialize("isWriteable", isWriteable);
-	ar.serialize("mapped", mapped);
+	ar.serialize("SRAM",        sram,
+	             "MB89352",     mb89352,
+	             "isWriteable", isWriteable,
+	             "mapped",      mapped);
 }
 INSTANTIATE_SERIALIZE_METHODS(MegaSCSI);
 REGISTER_MSXDEVICE(MegaSCSI, "MegaSCSI");

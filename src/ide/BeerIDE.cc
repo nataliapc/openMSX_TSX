@@ -1,13 +1,15 @@
 #include "BeerIDE.hh"
 #include "IDEDeviceFactory.hh"
 #include "IDEDevice.hh"
+#include "GlobalSettings.hh"
+#include "narrow.hh"
 #include "serialize.hh"
 
 namespace openmsx {
 
 BeerIDE::BeerIDE(const DeviceConfig& config)
 	: MSXDevice(config)
-	, i8255(*this, getCurrentTime(), getCliComm())
+	, i8255(*this, getCurrentTime(), config.getGlobalSettings().getInvalidPpiModeSetting())
 	, rom(getName() + " ROM", "rom", config)
 {
 	device = IDEDeviceFactory::create(
@@ -39,7 +41,7 @@ const byte* BeerIDE::getReadCacheLine(word start) const
 	if (0x4000 <= start && start < 0x8000) {
 		return &rom[start & 0x3FFF];
 	}
-	return unmappedRead;
+	return unmappedRead.data();
 }
 
 byte BeerIDE::readIO(word port, EmuTime::param time)
@@ -65,7 +67,7 @@ byte BeerIDE::readA(EmuTime::param time)
 }
 byte BeerIDE::peekA(EmuTime::param /*time*/) const
 {
-	return (dataReg & 0xFF);
+	return narrow_cast<byte>(dataReg & 0xFF);
 }
 void BeerIDE::writeA(byte value, EmuTime::param /*time*/)
 {
@@ -79,7 +81,7 @@ byte BeerIDE::readB(EmuTime::param time)
 }
 byte BeerIDE::peekB(EmuTime::param /*time*/) const
 {
-	return (dataReg >> 8);
+	return narrow_cast<byte>(dataReg >> 8);
 }
 void BeerIDE::writeB(byte value, EmuTime::param /*time*/)
 {
@@ -105,7 +107,7 @@ nibble BeerIDE::peekC0(EmuTime::param /*time*/) const
 }
 void BeerIDE::writeC1(nibble value, EmuTime::param time)
 {
-	changeControl((controlReg & 0x0F) | (value << 4), time);
+	changeControl(byte((controlReg & 0x0F) | (value << 4)), time);
 }
 void BeerIDE::writeC0(nibble value, EmuTime::param time)
 {
@@ -130,7 +132,7 @@ void BeerIDE::changeControl(byte value, EmuTime::param time)
 		if (address == 0) {
 			device->writeData(dataReg, time);
 		} else {
-			device->writeReg(address, dataReg & 0xFF, time);
+			device->writeReg(address, narrow_cast<byte>(dataReg & 0xFF), time);
 		}
 		break;
 	default: // all (6) other cases, nothing
@@ -144,8 +146,8 @@ void BeerIDE::serialize(Archive& ar, unsigned /*version*/)
 	ar.template serializeBase<MSXDevice>(*this);
 	ar.serialize("i8255", i8255);
 	ar.serializePolymorphic("device", *device);
-	ar.serialize("dataReg", dataReg);
-	ar.serialize("controlReg", controlReg);
+	ar.serialize("dataReg",    dataReg,
+	             "controlReg", controlReg);
 }
 INSTANTIATE_SERIALIZE_METHODS(BeerIDE);
 REGISTER_MSXDEVICE(BeerIDE, "BeerIDE");

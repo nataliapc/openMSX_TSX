@@ -1,10 +1,12 @@
 #ifndef TRACKBALL_HH
 #define TRACKBALL_HH
 
+#include "EmuTime.hh"
 #include "JoystickDevice.hh"
 #include "MSXEventListener.hh"
 #include "StateChangeListener.hh"
 #include "serialize_meta.hh"
+#include <cstdint>
 
 namespace openmsx {
 
@@ -17,43 +19,44 @@ class Trackball final : public JoystickDevice, private MSXEventListener
 public:
 	Trackball(MSXEventDistributor& eventDistributor,
 	          StateChangeDistributor& stateChangeDistributor);
-	~Trackball();
+	~Trackball() override;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 private:
 	void createTrackballStateChange(EmuTime::param time,
-		int deltaX, int deltaY, byte press, byte release);
+		int deltaX, int deltaY, uint8_t press, uint8_t release);
 
 	void syncCurrentWithTarget(EmuTime::param time);
 
 	// Pluggable
-	const std::string& getName() const override;
-	string_view getDescription() const override;
+	[[nodiscard]] std::string_view getName() const override;
+	[[nodiscard]] std::string_view getDescription() const override;
 	void plugHelper(Connector& connector, EmuTime::param time) override;
 	void unplugHelper(EmuTime::param time) override;
 
 	// JoystickDevice
-	byte read(EmuTime::param time) override;
-	void write(byte value, EmuTime::param time) override;
+	[[nodiscard]] uint8_t read(EmuTime::param time) override;
+	void write(uint8_t value, EmuTime::param time) override;
 
 	// MSXEventListener
-	void signalEvent(const std::shared_ptr<const Event>& event,
-	                 EmuTime::param time) override;
+	void signalMSXEvent(const Event& event,
+	                    EmuTime::param time) noexcept override;
 	// StateChangeListener
-	void signalStateChange(const std::shared_ptr<StateChange>& event) override;
-	void stopReplay(EmuTime::param time) override;
+	void signalStateChange(const StateChange& event) override;
+	void stopReplay(EmuTime::param time) noexcept override;
 
+private:
 	MSXEventDistributor& eventDistributor;
 	StateChangeDistributor& stateChangeDistributor;
 
-	EmuTime lastSync; // last time we synced current with target
-	signed char targetDeltaX, targetDeltaY; // immediately follows host events
-	signed char currentDeltaX, currentDeltaY; // follows targetXY with some delay
-	byte lastValue;
-	byte status;
-	bool smooth; // always true, except for bw-compat savestates
+	EmuTime lastSync = EmuTime::zero(); // last time we synced current with target
+	int8_t targetDeltaX = 0, targetDeltaY = 0; // immediately follows host events
+	int8_t currentDeltaX = 0, currentDeltaY = 0; // follows targetXY with some delay
+	uint8_t lastValue = 0;
+	uint8_t status = JOY_BUTTONA | JOY_BUTTONB;
+	bool smooth = true; // always true, except for bw-compat savestates
 };
 SERIALIZE_CLASS_VERSION(Trackball, 2);
 

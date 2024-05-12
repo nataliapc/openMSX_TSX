@@ -6,8 +6,9 @@
     <manufacturer>Yamaha</manufacturer>
     <code>CX5M</code>
     <release_year>1984</release_year>
-    <description>The famous synthesizer MSX, one of the few models that got to the USA. This is the first version with built in SFG-01.</description>
+    <description>The famous synthesizer MSX, one of the few models that got to the USA. This is the first version with built in SFG-01. Has 32kB RAM.</description>
     <type>MSX</type>
+    <region>eu</region>
   </info>
 
   <CassettePort/>
@@ -37,8 +38,8 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <PrinterPort id="Printer Port">
@@ -71,7 +72,8 @@
 
     <!-- Note that this device can be plugged out. What is left is not a standard MSX cartridgeslot, but a 60 pins male edge connector, carrying all MSX cartridgeslot signals. -->
       <YamahaSFG id="Yamaha SFG-01">
-        <mem base="0x0000" size="0x8000"/>
+        <variant>YM2151</variant>
+        <mem base="0x0000" size="0x10000"/>
         <sound>
           <volume>30000</volume>
         </sound>

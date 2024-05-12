@@ -1,21 +1,25 @@
 #include "FileBase.hh"
 #include "FileOperations.hh"
+#include "ranges.hh"
 #include <algorithm>
-#include <cstring>
-
-using std::string;
+#include <array>
 
 namespace openmsx {
 
-const byte* FileBase::mmap(size_t& size)
+std::span<const uint8_t> FileBase::mmap()
 {
+	auto size = getSize();
 	if (mmapBuf.empty()) {
-		size = getSize();
-		MemBuffer<byte> tmpBuf(size);
-		read(tmpBuf.data(), size);
+		auto pos = getPos();
+		seek(0);
+
+		MemBuffer<uint8_t> tmpBuf(size);
+		read(std::span{tmpBuf.data(), size});
 		std::swap(mmapBuf, tmpBuf);
+
+		seek(pos);
 	}
-	return mmapBuf.data();
+	return {mmapBuf.data(), size};
 }
 
 void FileBase::munmap()
@@ -33,27 +37,25 @@ void FileBase::truncate(size_t newSize)
 	auto remaining = newSize - oldSize;
 	seek(oldSize);
 
-	static const size_t BUF_SIZE = 4096;
-	byte buf[BUF_SIZE];
-	memset(buf, 0, sizeof(buf));
+	std::array<uint8_t, 4096> buf = {}; // zero-initialized
 	while (remaining) {
-		auto chunkSize = std::min(BUF_SIZE, remaining);
-		write(buf, chunkSize);
+		auto chunkSize = std::min(buf.size(), remaining);
+		write(subspan(buf, 0, chunkSize));
 		remaining -= chunkSize;
 	}
 }
 
-const string FileBase::getLocalReference()
+std::string FileBase::getLocalReference()
 {
 	// default implementation, file is not backed (uncompressed) on
 	// the local file system
 	return {};
 }
 
-const string FileBase::getOriginalName()
+std::string_view FileBase::getOriginalName()
 {
 	// default implementation just returns filename portion of URL
-	return FileOperations::getFilename(getURL()).str();
+	return FileOperations::getFilename(getURL());
 }
 
 } // namespace openmsx

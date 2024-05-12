@@ -25,7 +25,7 @@ proc info_panel_init {} {
 			method guess_title] \
 		mapper [dict create \
 			title "Mapper type" width 170 row 0 \
-			method {set val ""; catch {set val [dict get [openmsx_info romtype [lindex [machine_info device [guess_rom_device]] 1]] description]}; set val}] \
+			method {set val ""; catch {set val [dict get [openmsx_info romtype [dict get [machine_info device [guess_rom_device]] "mappertype"]] description]}; set val}] \
 		fps [dict create \
 			title "FPS" width 38 row 1 \
 			method {format "%2.1f" [openmsx_info fps]}] \
@@ -37,7 +37,7 @@ proc info_panel_init {} {
 			method {format "%dkB" [expr {[debug size "physical VRAM"] / 1024}]}] \
 		ram [dict create \
 			title "RAM" width 51 row 1 \
-			method {set ramsize 0; foreach device [debug list] {set desc [debug desc $device]; if {$desc eq "memory mapper" || $desc eq "ram"} {incr ramsize [debug size $device]}}; format "%dkB" [expr {$ramsize / 1024}]}] \
+			method {format "%dkB" [expr {[utils::get_machine_total_ram] / 1024}]}] \
 		mtime [dict create \
 			title "Time" width 60 row 1 \
 			method {utils::get_machine_time}] \

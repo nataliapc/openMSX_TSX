@@ -9,15 +9,16 @@
 #include "FileOperations.hh"
 #include "CommandException.hh"
 #include "TclObject.hh"
-#include "array_ref.hh"
+#include "enumerate.hh"
+#include "one_of.hh"
 #include "unreachable.hh"
+#include "xrange.hh"
+#include <array>
 #include <cassert>
+#include <span>
 #include <memory>
 
-using std::unique_ptr;
-using std::set;
 using std::string;
-using std::vector;
 
 namespace openmsx {
 
@@ -29,7 +30,7 @@ NowindCommand::NowindCommand(const string& basename,
 {
 }
 
-unique_ptr<DiskChanger> NowindCommand::createDiskChanger(
+std::unique_ptr<DiskChanger> NowindCommand::createDiskChanger(
 	const string& basename, unsigned n, MSXMotherBoard& motherBoard) const
 {
 	return std::make_unique<DiskChanger>(
@@ -38,78 +39,76 @@ unique_ptr<DiskChanger> NowindCommand::createDiskChanger(
 			false, true);
 }
 
-unsigned NowindCommand::searchRomdisk(const NowindHost::Drives& drives) const
+[[nodiscard]] static unsigned searchRomDisk(const NowindHost::Drives& drives)
 {
-	for (unsigned i = 0; i < drives.size(); ++i) {
-		if (drives[i]->isRomdisk()) {
-			return i;
+	for (auto [i, drv] : enumerate(drives)) {
+		if (drv->isRomDisk()) {
+			return unsigned(i);
 		}
 	}
 	return 255;
 }
 
 void NowindCommand::processHdimage(
-	string_view hdimage, NowindHost::Drives& drives) const
+	const string& hdImage, NowindHost::Drives& drives) const
 {
 	MSXMotherBoard& motherboard = interface.getMotherBoard();
 
 	// Possible formats are:
 	//   <filename> or <filename>:<range>
 	// Though <filename> itself can contain ':' characters. To solve this
-	// disambiguity we will always interpret the string as <filename> if
+	// ambiguity we will always interpret the string as <filename> if
 	// it is an existing filename.
-	set<unsigned> partitions;
-	auto pos = hdimage.find_last_of(':');
-	if ((pos != string::npos) && !FileOperations::exists(hdimage)) {
+	IterableBitSet<64> partitions;
+	if (auto pos = hdImage.find_last_of(':');
+	    (pos != string::npos) && !FileOperations::exists(hdImage)) {
 		partitions = StringOp::parseRange(
-			hdimage.substr(pos + 1), 1, 31);
+			std::string_view(hdImage).substr(pos + 1), 1, 31);
 	}
 
-	auto wholeDisk = std::make_shared<DSKDiskImage>(Filename(hdimage.str()));
+	auto wholeDisk = std::make_shared<DSKDiskImage>(Filename(hdImage));
 	bool failOnError = true;
 	if (partitions.empty()) {
 		// insert all partitions
 		failOnError = false;
-		for (unsigned i = 1; i <= 31; ++i) {
-			partitions.insert(i);
-		}
+		partitions.setRange(1, 32);
 	}
 
-	for (auto& p : partitions) {
+	partitions.foreachSetBit([&](size_t p) {
 		try {
 			// Explicit conversion to shared_ptr<SectorAccessibleDisk> is
 			// for some reason needed in 32-bit vs2013 build (not in 64-bit
 			// and not in vs2012, nor gcc/clang). Compiler bug???
 			auto partition = std::make_unique<DiskPartition>(
-				*wholeDisk, p,
+				*wholeDisk, unsigned(p),
 				std::shared_ptr<SectorAccessibleDisk>(wholeDisk));
 			auto drive = createDiskChanger(
 				interface.basename, unsigned(drives.size()),
 				motherboard);
-			drive->changeDisk(unique_ptr<Disk>(std::move(partition)));
+			drive->changeDisk(std::unique_ptr<Disk>(std::move(partition)));
 			drives.push_back(std::move(drive));
 		} catch (MSXException&) {
 			if (failOnError) throw;
 		}
-	}
+	});
 }
 
-void NowindCommand::execute(array_ref<TclObject> tokens, TclObject& result)
+void NowindCommand::execute(std::span<const TclObject> tokens, TclObject& result)
 {
 	auto& host = interface.host;
 	auto& drives = interface.drives;
-	unsigned oldRomdisk = searchRomdisk(drives);
+	unsigned oldRomDisk = searchRomDisk(drives);
 
 	if (tokens.size() == 1) {
 		// no arguments, show general status
 		assert(!drives.empty());
 		string r;
-		for (unsigned i = 0; i < drives.size(); ++i) {
+		for (auto [i, drv] : enumerate(drives)) {
 			strAppend(r, "nowind", i + 1, ": ");
-			if (dynamic_cast<NowindRomDisk*>(drives[i].get())) {
+			if (dynamic_cast<NowindRomDisk*>(drv.get())) {
 				strAppend(r, "romdisk\n");
-			} else if (auto changer = dynamic_cast<DiskChanger*>(
-						drives[i].get())) {
+			} else if (const auto* changer = dynamic_cast<const DiskChanger*>(
+						drv.get())) {
 				string filename = changer->getDiskName().getOriginal();
 				strAppend(r, (filename.empty() ? "--empty--" : filename),
 				          '\n');
@@ -121,69 +120,70 @@ void NowindCommand::execute(array_ref<TclObject> tokens, TclObject& result)
 		          (host.getEnablePhantomDrives() ? "enabled" : "disabled"),
 		          "\n"
 		          "allow other diskroms: ",
-		          (host.getAllowOtherDiskroms() ? "yes" : "no"),
+		          (host.getAllowOtherDiskRoms() ? "yes" : "no"),
 		          '\n');
-		result.setString(r);
+		result = r;
 		return;
 	}
 
-	// first parse complete commandline and store state in these local vars
+	// first parse complete command line and store state in these local vars
 	bool enablePhantom = false;
 	bool disablePhantom = false;
 	bool allowOther = false;
 	bool disallowOther = false;
 	bool changeDrives = false;
-	unsigned romdisk = 255;
+	unsigned romDisk = 255;
 	NowindHost::Drives tmpDrives;
 	string error;
 
-	// actually parse the commandline
-	array_ref<TclObject> args(&tokens[1], tokens.size() - 1);
+	// actually parse the command line
+	std::span<const TclObject> args(&tokens[1], tokens.size() - 1);
 	while (error.empty() && !args.empty()) {
 		bool createDrive = false;
-		string_view image;
+		std::string_view image;
 
-		string_view arg = args.front().getString();
-		args.pop_front();
-		if        ((arg == "--ctrl")    || (arg == "-c")) {
+		std::string_view arg = args.front().getString();
+		args = args.subspan(1);
+		if        (arg == one_of("--ctrl", "-c")) {
 			enablePhantom  = false;
 			disablePhantom = true;
-		} else if ((arg == "--no-ctrl") || (arg == "-C")) {
+		} else if (arg == one_of("--no-ctrl", "-C")) {
 			enablePhantom  = true;
 			disablePhantom = false;
-		} else if ((arg == "--allow")    || (arg == "-a")) {
+		} else if (arg == one_of("--allow", "-a")) {
 			allowOther    = true;
 			disallowOther = false;
-		} else if ((arg == "--no-allow") || (arg == "-A")) {
+		} else if (arg == one_of("--no-allow", "-A")) {
 			allowOther    = false;
 			disallowOther = true;
 
-		} else if ((arg == "--romdisk") || (arg == "-j")) {
-			if (romdisk != 255) {
+		} else if (arg == one_of("--romdisk", "-j")) {
+			if (romDisk != 255) {
 				error = "Can only have one romdisk";
 			} else {
-				romdisk = unsigned(tmpDrives.size());
+				romDisk = unsigned(tmpDrives.size());
 				tmpDrives.push_back(std::make_unique<NowindRomDisk>());
 				changeDrives = true;
 			}
 
-		} else if ((arg == "--image") || (arg == "-i")) {
+		} else if (arg == one_of("--image", "-i")) {
 			if (args.empty()) {
 				error = strCat("Missing argument for option: ", arg);
 			} else {
 				image = args.front().getString();
-				args.pop_front();
+				args = args.subspan(1);
 				createDrive = true;
 			}
 
-		} else if ((arg == "--hdimage") || (arg == "-m")) {
+		} else if (arg == one_of("--hdimage", "-m")) {
 			if (args.empty()) {
 				error = strCat("Missing argument for option: ", arg);
 			} else {
 				try {
-					string_view hdimage = args.front().getString();
-					args.pop_front();
-					processHdimage(hdimage, tmpDrives);
+					auto hdImage = FileOperations::expandTilde(
+						string(args.front().getString()));
+					args = args.subspan(1);
+					processHdimage(hdImage, tmpDrives);
 					changeDrives = true;
 				} catch (MSXException& e) {
 					error = std::move(e).getMessage();
@@ -202,7 +202,7 @@ void NowindCommand::execute(array_ref<TclObject> tokens, TclObject& result)
 				interface.getMotherBoard());
 			changeDrives = true;
 			if (!image.empty()) {
-				if (drive->insertDisk(image)) {
+				if (drive->insertDisk(FileOperations::expandTilde(string(image)))) {
 					error = strCat("Invalid disk image: ", image);
 				}
 			}
@@ -224,12 +224,12 @@ void NowindCommand::execute(array_ref<TclObject> tokens, TclObject& result)
 			host.setEnablePhantomDrives(false);
 			optionsChanged = true;
 		}
-		if (allowOther && !host.getAllowOtherDiskroms()) {
-			host.setAllowOtherDiskroms(true);
+		if (allowOther && !host.getAllowOtherDiskRoms()) {
+			host.setAllowOtherDiskRoms(true);
 			optionsChanged = true;
 		}
-		if (disallowOther && host.getAllowOtherDiskroms()) {
-			host.setAllowOtherDiskroms(false);
+		if (disallowOther && host.getAllowOtherDiskRoms()) {
+			host.setAllowOtherDiskRoms(false);
 			optionsChanged = true;
 		}
 		if (changeDrives) {
@@ -243,7 +243,7 @@ void NowindCommand::execute(array_ref<TclObject> tokens, TclObject& result)
 	auto prevSize = tmpDrives.size();
 	tmpDrives.clear();
 	for (auto& d : drives) {
-		if (auto disk = dynamic_cast<DiskChanger*>(d.get())) {
+		if (auto* disk = dynamic_cast<DiskChanger*>(d.get())) {
 			disk->createCommand();
 		}
 	}
@@ -257,10 +257,10 @@ void NowindCommand::execute(array_ref<TclObject> tokens, TclObject& result)
 	if (changeDrives && (prevSize != drives.size())) {
 		r += "Number of drives changed. ";
 	}
-	if (changeDrives && (romdisk != oldRomdisk)) {
-		if (oldRomdisk == 255) {
+	if (changeDrives && (romDisk != oldRomDisk)) {
+		if (oldRomDisk == 255) {
 			r += "Romdisk added. ";
-		} else if (romdisk == 255) {
+		} else if (romDisk == 255) {
 			r += "Romdisk removed. ";
 		} else {
 			r += "Romdisk changed position. ";
@@ -272,10 +272,10 @@ void NowindCommand::execute(array_ref<TclObject> tokens, TclObject& result)
 	if (!r.empty()) {
 		r += "You may need to reset the MSX for the changes to take effect.";
 	}
-	result.setString(r);
+	result = r;
 }
 
-string NowindCommand::help(const vector<string>& /*tokens*/) const
+string NowindCommand::help(std::span<const TclObject> /*tokens*/) const
 {
 	return "Similar to the disk<x> commands there is a nowind<x> command "
 	       "for each nowind interface. This command is modeled after the "
@@ -285,27 +285,27 @@ string NowindCommand::help(const vector<string>& /*tokens*/) const
 	       "Command line options\n"
 	       " long      short explanation\n"
 	       "--image    -i    specify disk image\n"
-	       "--hdimage  -m    specify harddisk image\n"
+	       "--hdimage  -m    specify hard disk image\n"
 	       "--romdisk  -j    enable romdisk\n"
 	     // "--flash    -f    update firmware\n"
 	       "--ctrl     -c    no phantom disks\n"
 	       "--no-ctrl  -C    enable phantom disks\n"
-	       "--allow    -a    allow other diskroms to initialize\n"
-	       "--no-allow -A    don't allow other diskroms to initialize\n"
+	       "--allow    -a    allow other disk roms to initialize\n"
+	       "--no-allow -A    don't allow other disk roms to initialize\n"
 	     //"--dsk2rom  -z    converts a 360kB disk to romdisk.bin\n"
 	     //"--debug    -d    enable libnowind debug info\n"
-	     //"--test     -t    testmode\n"
+	     //"--test     -t    test mode\n"
 	     //"--help     -h    help message\n"
 	       "\n"
 	       "If you don't pass any arguments to this command, you'll get "
 	       "an overview of the current nowind status.\n"
 	       "\n"
 	       "This command will create a certain amount of drives on the "
-	       "nowind interface and (optionally) insert diskimages in those "
+	       "nowind interface and (optionally) insert disk images in those "
 	       "drives. For each of these drives there will also be a "
 	       "'nowind<1..8>' command created. Those commands are similar to "
 	       "e.g. the diska command. They can be used to access the more "
-	       "advanced diskimage insertion options. See 'help nowind<1..8>' "
+	       "advanced disk image insertion options. See 'help nowind<1..8>' "
 	       "for details.\n"
 	       "\n"
 	       "In some cases it is needed to reboot the MSX before the "
@@ -314,29 +314,30 @@ string NowindCommand::help(const vector<string>& /*tokens*/) const
 	       "\n"
 	       "Examples:\n"
 	       "nowinda -a image.dsk -j     Image.dsk is inserted into drive A: and the romdisk\n"
-	       "                            will be drive B:. Other diskroms will be able to\n"
+	       "                            will be drive B:. Other disk roms will be able to\n"
 	       "                            install drives as well. For example when the MSX has\n"
-	       "                            an internal diskdrive, drive C: en D: will be\n"
+	       "                            an internal disk drive, drive C: en D: will be\n"
 	       "                            available as well.\n"
 	       "nowinda disk1.dsk disk2.dsk The two images will be inserted in A: and B:\n"
 	       "                            respectively.\n"
-	       "nowinda -m hdimage.dsk      Inserts a harddisk image. All available partitions\n"
+	       "nowinda -m hdimage.dsk      Inserts a hard disk image. All available partitions\n"
 	       "                            will be mounted as drives.\n"
-               "nowinda -m hdimage.dsk:1    Inserts the first partition only.\n"
+	       "nowinda -m hdimage.dsk:1    Inserts the first partition only.\n"
 	       "nowinda -m hdimage.dsk:2-4  Inserts the 2nd, 3th and 4th partition as drive A:\n"
 	       "                            B: and C:.\n";
 }
 
-void NowindCommand::tabCompletion(vector<string>& tokens) const
+void NowindCommand::tabCompletion(std::vector<string>& tokens) const
 {
-	static const char* const extra[] = {
-		"-c", "--ctrl",
-		"-C", "--no-ctrl",
-		"-a", "--allow",
-		"-A", "--no-allow",
-		"-j", "--romdisk",
-		"-i", "--image",
-		"-m", "--hdimage",
+	using namespace std::literals;
+	static constexpr std::array extra = {
+		"-c"sv, "--ctrl"sv,
+		"-C"sv, "--no-ctrl"sv,
+		"-a"sv, "--allow"sv,
+		"-A"sv, "--no-allow"sv,
+		"-j"sv, "--romdisk"sv,
+		"-i"sv, "--image"sv,
+		"-m"sv, "--hdimage"sv,
 	};
 	completeFileName(tokens, userFileContext(), extra);
 }

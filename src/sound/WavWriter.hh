@@ -2,8 +2,11 @@
 #define WAVWRITER_HH
 
 #include "File.hh"
+#include "Mixer.hh"
+#include "one_of.hh"
 #include <cassert>
 #include <cstdint>
+#include <span>
 
 namespace openmsx {
 
@@ -16,7 +19,11 @@ class WavWriter
 public:
 	/** Returns false if there has been data written to the wav image.
 	 */
-	bool isEmpty() const { return bytes == 0; }
+	[[nodiscard]] bool isEmpty() const { return bytes == 0; }
+
+	/** Returns the number of bytes (not samples) written so far.
+	 */
+	[[nodiscard]] uint32_t getBytes() const { return bytes; }
 
 	/** Flush data to file and update header. Try to make (possibly)
 	  * incomplete file already usable for external programs.
@@ -28,8 +35,9 @@ protected:
 	          unsigned channels, unsigned bits, unsigned frequency);
 	~WavWriter();
 
+protected:
 	File file;
-	unsigned bytes;
+	uint32_t bytes = 0;
 };
 
 /** Writes 8-bit WAV files.
@@ -40,13 +48,7 @@ public:
 	Wav8Writer(const Filename& filename, unsigned channels, unsigned frequency)
 		: WavWriter(filename, channels, 8, frequency) {}
 
-	void write(const uint8_t* buffer, unsigned stereo, unsigned samples) {
-		assert(stereo == 1 || stereo == 2);
-		write(buffer, stereo * samples);
-	}
-
-private:
-	void write(const uint8_t* buffer, unsigned samples);
+	void write(std::span<const uint8_t> buffer);
 };
 
 /** Writes 16-bit WAV files.
@@ -57,20 +59,11 @@ public:
 	Wav16Writer(const Filename& filename, unsigned channels, unsigned frequency)
 		: WavWriter(filename, channels, 16, frequency) {}
 
-	void write(const int16_t* buffer, unsigned stereo, unsigned samples) {
-		assert(stereo == 1 || stereo == 2);
-		write(buffer, stereo * samples);
-	}
-	void write(const int* buffer, unsigned stereo, unsigned samples,
-	           float ampLeft, float ampRight);
-	void writeSilence(unsigned stereo, unsigned samples) {
-		assert(stereo == 1 || stereo == 2);
-		writeSilence(stereo * samples);
-	}
+	void write(std::span<const int16_t> buffer);
+	void write(std::span<const float> buffer, float amp = 1.0f);
+	void write(std::span<const StereoFloat> buffer, float ampLeft = 1.0f, float ampRight = 1.0f);
 
-private:
-	void write(const int16_t* buffer, unsigned samples);
-	void writeSilence(unsigned samples);
+	void writeSilence(uint32_t samples);
 };
 
 } // namespace openmsx

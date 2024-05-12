@@ -8,26 +8,24 @@
 
 namespace openmsx {
 
-class InfoTopic;
-
 class InfoCommand final : public Command
 {
 public:
 	InfoCommand(CommandController& commandController, const std::string& name);
 	~InfoCommand();
 
-	void   registerTopic(InfoTopic& topic);
-	void unregisterTopic(InfoTopic& topic);
+	void   registerTopic(const InfoTopic& topic);
+	void unregisterTopic(const InfoTopic& topic);
 
 private:
 	// Command
-	void execute(array_ref<TclObject> tokens,
+	void execute(std::span<const TclObject> tokens,
 	             TclObject& result) override;
-	std::string help(const std::vector<std::string>& tokens) const override;
+	[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override;
 	void tabCompletion(std::vector<std::string>& tokens) const override;
 
 	struct NameFromInfoTopic {
-		const std::string& operator()(const InfoTopic* t) const {
+		[[nodiscard]] const std::string& operator()(const InfoTopic* t) const {
 			return t->getName();
 		}
 	};

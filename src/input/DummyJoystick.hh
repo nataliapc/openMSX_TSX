@@ -8,9 +8,9 @@ namespace openmsx {
 class DummyJoystick final : public JoystickDevice
 {
 public:
-	byte read(EmuTime::param time) override;
-	void write(byte value, EmuTime::param time) override;
-	string_view getDescription() const override;
+	[[nodiscard]] uint8_t read(EmuTime::param time) override;
+	void write(uint8_t value, EmuTime::param time) override;
+	[[nodiscard]] std::string_view getDescription() const override;
 	void plugHelper(Connector& connector, EmuTime::param time) override;
 	void unplugHelper(EmuTime::param time) override;
 };

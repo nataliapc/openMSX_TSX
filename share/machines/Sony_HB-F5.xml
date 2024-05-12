@@ -6,8 +6,9 @@
     <manufacturer>Sony</manufacturer>
     <code>HB-F5</code>
     <release_year>1985</release_year>
-    <description/>
+    <description>First MSX2 released by Sony, with built in Personal Databank software.</description>
     <type>MSX2</type>
+    <region>jp</region>
   </info>
 
   <CassettePort/>
@@ -39,8 +40,8 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <RTC id="Real time clock">
@@ -51,6 +52,7 @@
 
     <PrinterPort id="Printer Port">
       <io base="0x90" num="2"/>
+      <unused_bits>0x00</unused_bits> <!-- as measured on one Sony HB-F500P -->
     </PrinterPort>
 
     <primary slot="0">

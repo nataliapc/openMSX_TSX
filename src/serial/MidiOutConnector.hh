@@ -14,11 +14,11 @@ public:
 	MidiOutConnector(PluggingController& pluggingController,
 	                 std::string name);
 
-	MidiOutDevice& getPluggedMidiOutDev() const;
+	[[nodiscard]] MidiOutDevice& getPluggedMidiOutDev() const;
 
 	// Connector
-	const std::string getDescription() const final override;
-	string_view getClass() const final override;
+	[[nodiscard]] std::string_view getDescription() const override;
+	[[nodiscard]] std::string_view getClass() const override;
 
 	// SerialDataInterface
 	void setDataBits(DataBits bits) override;
@@ -28,6 +28,8 @@ public:
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
+private:
+	const std::string description;
 };
 
 } // namespace openmsx

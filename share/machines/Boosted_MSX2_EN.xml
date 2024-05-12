@@ -8,6 +8,7 @@
     <release_year>2004</release_year>
     <description>A super-charged Philips NMS 8250</description>
     <type>MSX2</type>
+    <region>eu</region>
   </info>
 
   <MapperReadBackBits>largest</MapperReadBackBits>
@@ -74,6 +75,7 @@
             <volume>13000</volume>
             <balance>-75</balance>
           </sound>
+          <ym2413-core>NukeYKT</ym2413-core>
           <rom>
             <sha1>fec451b9256570a0e4869355a40329c57f40705f</sha1> <!-- EPROM dump, same as 9d789, but then the memory mapped registers are 0xFF -->
             <sha1>9d789166e3caf28e4742fe933d962e99618c633d</sha1>
@@ -136,8 +138,15 @@
 
     <PSG id="PSG">
       <type>YM2149</type>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <sound>
+        <volume>21000</volume>
+      </sound>
+      <ignorePortDirections>true</ignorePortDirections> <!-- highest compatibility -->
+    </PSG>
+
+    <PSG id="PSG 2">
+      <io base="0x10" num="4" type="IO"/>
       <sound>
         <volume>21000</volume>
       </sound>

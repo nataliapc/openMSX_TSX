@@ -6,6 +6,7 @@
 #include "MemBuffer.hh"
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <vector>
 #ifdef DEBUG
 #include "sha1.hh"
@@ -21,7 +22,7 @@ public:
 #else
 	virtual ~DeltaBlock() = default;
 #endif
-	virtual void apply(uint8_t* dst, size_t size) const = 0;
+	virtual void apply(std::span<uint8_t> dst) const = 0;
 
 protected:
 	DeltaBlock() = default;
@@ -33,7 +34,7 @@ public:
 
 #if STATISTICS
 protected:
-	static size_t globalAllocSize;
+	static inline size_t globalAllocSize = 0;
 	size_t allocSize;
 #endif
 };
@@ -42,16 +43,16 @@ protected:
 class DeltaBlockCopy final : public DeltaBlock
 {
 public:
-	DeltaBlockCopy(const uint8_t* data, size_t size);
-	void apply(uint8_t* dst, size_t size) const override;
+	explicit DeltaBlockCopy(std::span<const uint8_t> data);
+	void apply(std::span<uint8_t> dst) const override;
 	void compress(size_t size);
-	const uint8_t* getData();
+	[[nodiscard]] const uint8_t* getData();
 
 private:
-	bool compressed() const { return compressedSize != 0; }
+	[[nodiscard]] bool compressed() const { return compressedSize != 0; }
 
 	MemBuffer<uint8_t> block;
-	size_t compressedSize;
+	size_t compressedSize = 0;
 };
 
 
@@ -59,9 +60,9 @@ class DeltaBlockDiff final : public DeltaBlock
 {
 public:
 	DeltaBlockDiff(std::shared_ptr<DeltaBlockCopy> prev_,
-	               const uint8_t* data, size_t size);
-	void apply(uint8_t* dst, size_t size) const override;
-	size_t getDeltaSize() const;
+	               std::span<const uint8_t> data);
+	void apply(std::span<uint8_t> dst) const override;
+	[[nodiscard]] size_t getDeltaSize() const;
 
 private:
 	const std::shared_ptr<DeltaBlockCopy> prev;
@@ -72,22 +73,22 @@ private:
 class LastDeltaBlocks
 {
 public:
-	std::shared_ptr<DeltaBlock> createNew(
-		const void* id, const uint8_t* data, size_t size);
-	std::shared_ptr<DeltaBlock> createNullDiff(
-		const void* id, const uint8_t* data, size_t size);
+	[[nodiscard]] std::shared_ptr<DeltaBlock> createNew(
+		const void* id, std::span<const uint8_t> data);
+	[[nodiscard]] std::shared_ptr<DeltaBlock> createNullDiff(
+		const void* id, std::span<const uint8_t> data);
 	void clear();
 
 private:
 	struct Info {
 		Info(const void* id_, size_t size_)
-			: id(id_), size(size_), accSize(0) {}
+			: id(id_), size(size_) {}
 
 		const void* id;
 		size_t size;
 		std::weak_ptr<DeltaBlockCopy> ref;
 		std::weak_ptr<DeltaBlock> last;
-		size_t accSize;
+		size_t accSize = 0;
 	};
 
 	std::vector<Info> infos;

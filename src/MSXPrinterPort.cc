@@ -1,12 +1,12 @@
 #include "MSXPrinterPort.hh"
 #include "DummyPrinterPortDevice.hh"
 #include "checked_cast.hh"
+#include "narrow.hh"
 #include "outer.hh"
 #include "serialize.hh"
 #include "unreachable.hh"
+#include <cstdint>
 #include <memory>
-
-using std::string;
 
 namespace openmsx {
 
@@ -15,9 +15,10 @@ MSXPrinterPort::MSXPrinterPort(const DeviceConfig& config)
 	, Connector(MSXDevice::getPluggingController(), "printerport",
 	            std::make_unique<DummyPrinterPortDevice>())
 	, debuggable(getMotherBoard(), MSXDevice::getName())
+        , writePortMask(config.getChildDataAsBool("bidirectional", false) ? 0x03 : 0x01)
+        , readPortMask(config.getChildDataAsBool("status_readable_on_all_ports", false) ? 0 : writePortMask)
+	, unusedBits(uint8_t(config.getChildDataAsInt("unused_bits", 0xFF))) // TODO: some machines use the port number as unused bits (e.g. lintweaker's Sanyo PHC-23)
 {
-	data = 255;     // != 0;
-	strobe = false; // != true;
 	reset(getCurrentTime());
 }
 
@@ -27,26 +28,33 @@ void MSXPrinterPort::reset(EmuTime::param time)
 	setStrobe(true, time); // TODO check this
 }
 
-byte MSXPrinterPort::readIO(word port, EmuTime::param time)
+uint8_t MSXPrinterPort::readIO(uint16_t port, EmuTime::param time)
 {
 	return peekIO(port, time);
 }
 
-byte MSXPrinterPort::peekIO(word /*port*/, EmuTime::param time) const
+uint8_t MSXPrinterPort::peekIO(uint16_t port, EmuTime::param time) const
 {
-	// bit 1 = status / other bits always 1
+	bool showStatus = (port & readPortMask) == 0;
+	if (!showStatus) return 0xFF;
+	// bit 1 = status / other bits depend on something unknown, specified
+	// in the XML file
 	return getPluggedPrintDev().getStatus(time)
-	       ? 0xFF : 0xFD;
+		       ? (unusedBits | 0b10) : (unusedBits & ~0b10);
 }
 
-void MSXPrinterPort::writeIO(word port, byte value, EmuTime::param time)
+void MSXPrinterPort::writeIO(uint16_t port, uint8_t value, EmuTime::param time)
 {
-	switch (port & 0x01) {
+	switch (port & writePortMask) {
 	case 0:
 		setStrobe(value & 1, time); // bit 0 = strobe
 		break;
 	case 1:
 		writeData(value, time);
+		break;
+	case 2: // nothing here
+		break;
+	case 3: // 0x93 PDIR (BiDi) is not implemented.
 		break;
 	default:
 		UNREACHABLE;
@@ -60,7 +68,7 @@ void MSXPrinterPort::setStrobe(bool newStrobe, EmuTime::param time)
 		getPluggedPrintDev().setStrobe(strobe, time);
 	}
 }
-void MSXPrinterPort::writeData(byte newData, EmuTime::param time)
+void MSXPrinterPort::writeData(uint8_t newData, EmuTime::param time)
 {
 	if (newData != data) {
 		data = newData;
@@ -68,12 +76,12 @@ void MSXPrinterPort::writeData(byte newData, EmuTime::param time)
 	}
 }
 
-const string MSXPrinterPort::getDescription() const
+std::string_view MSXPrinterPort::getDescription() const
 {
 	return "MSX Printer port";
 }
 
-string_view MSXPrinterPort::getClass() const
+std::string_view MSXPrinterPort::getClass() const
 {
 	return "Printer Port";
 }
@@ -96,16 +104,16 @@ MSXPrinterPort::Debuggable::Debuggable(MSXMotherBoard& motherBoard_, const std::
 {
 }
 
-byte MSXPrinterPort::Debuggable::read(unsigned address)
+uint8_t MSXPrinterPort::Debuggable::read(unsigned address)
 {
-	auto& pport = OUTER(MSXPrinterPort, debuggable);
-	return (address == 0) ? pport.strobe : pport.data;
+	auto& pPort = OUTER(MSXPrinterPort, debuggable);
+	return (address == 0) ? pPort.strobe : pPort.data;
 }
 
-void MSXPrinterPort::Debuggable::write(unsigned address, byte value)
+void MSXPrinterPort::Debuggable::write(unsigned address, uint8_t value)
 {
-	auto& pport = OUTER(MSXPrinterPort, debuggable);
-	pport.writeIO(address, value, pport.getCurrentTime());
+	auto& pPort = OUTER(MSXPrinterPort, debuggable);
+	pPort.writeIO(narrow<uint16_t>(address), value, pPort.getCurrentTime());
 }
 
 
@@ -114,8 +122,8 @@ void MSXPrinterPort::serialize(Archive& ar, unsigned /*version*/)
 {
 	ar.template serializeBase<MSXDevice>(*this);
 	ar.template serializeBase<Connector>(*this);
-	ar.serialize("strobe", strobe);
-	ar.serialize("data", data);
+	ar.serialize("strobe", strobe,
+	             "data",   data);
 	// TODO force writing data to port??
 }
 INSTANTIATE_SERIALIZE_METHODS(MSXPrinterPort);

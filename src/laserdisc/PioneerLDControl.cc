@@ -1,11 +1,9 @@
 #include "PioneerLDControl.hh"
 #include "CacheLine.hh"
 #include "serialize.hh"
-#include "LaserdiscPlayer.hh"
 #include "MSXPPI.hh"
 #include "MSXException.hh"
 #include "VDP.hh"
-#include <memory>
 
 namespace openmsx {
 
@@ -34,13 +32,11 @@ namespace openmsx {
 PioneerLDControl::PioneerLDControl(const DeviceConfig& config)
 	: MSXDevice(config)
 	, rom(getName() + " ROM", "rom", config)
-	, clock(EmuTime::zero)
+	, clock(EmuTime::zero())
 	, irq(getMotherBoard(), "PioneerLDControl.IRQdisplayoff")
-	, videoEnabled(false)
 {
 	if (config.getChildDataAsBool("laserdisc", true)) {
-		laserdisc = std::make_unique<LaserdiscPlayer>(
-			getHardwareConfig(), *this);
+		laserdisc.emplace(getHardwareConfig(), *this);
 	}
 	reset(getCurrentTime());
 }
@@ -67,19 +63,19 @@ PioneerLDControl::~PioneerLDControl() = default;
 
 void PioneerLDControl::reset(EmuTime::param time)
 {
-	mutel = muter = true;
+	muteL = muteR = true;
 	superimposing = false;
-	extint = false;
+	extInt = false;
 
 	irq.reset();
-	if (laserdisc) laserdisc->setMuting(mutel, muter, time);
+	if (laserdisc) laserdisc->setMuting(muteL, muteR, time);
 }
 
 byte PioneerLDControl::readMem(word address, EmuTime::param time)
 {
 	byte val = PioneerLDControl::peekMem(address, time);
 	if (address == 0x7fff) {
-		extint = false;
+		extInt = false;
 		irq.reset();
 	}
 	return val;
@@ -93,7 +89,7 @@ byte PioneerLDControl::peekMem(word address, EmuTime::param time) const
 		if (videoEnabled) {
 			val &= 0x7f;
 		}
-		if (!extint) {
+		if (!extInt) {
 			val &= 0xfe;
 		}
 	} else if (address == 0x7ffe) {
@@ -116,7 +112,7 @@ const byte* PioneerLDControl::getReadCacheLine(word address) const
 	} else if (0x4000 <= address && address < 0x6000) {
 		return &rom[address & 0x1fff];
 	} else {
-		return unmappedRead;
+		return unmappedRead.data();
 	}
 }
 
@@ -125,16 +121,16 @@ void PioneerLDControl::writeMem(word address, byte value, EmuTime::param time)
 	if (address == 0x7fff) {
 		// superimpose
 		superimposing = !(value & 1);
-		irq.set(superimposing && extint);
+		irq.set(superimposing && extInt);
 
 		updateVideoSource();
 
 		// Muting
-		if (!mutel && !(value & 0x80)) {
-			muter = !(ppi->peekIO(2, time) & 0x10);
+		if (!muteL && !(value & 0x80)) {
+			muteR = !(ppi->peekIO(2, time) & 0x10);
 		}
-		mutel = !(value & 0x80);
-		if (laserdisc) laserdisc->setMuting(mutel, muter, time);
+		muteL = !(value & 0x80);
+		if (laserdisc) laserdisc->setMuting(muteL, muteR, time);
 
 	} else if (address == 0x7ffe) {
 		if (laserdisc) laserdisc->extControl(value & 1, time);
@@ -146,7 +142,7 @@ byte* PioneerLDControl::getWriteCacheLine(word address) const
 	if ((address & CacheLine::HIGH) == (0x7FFE & CacheLine::HIGH)) {
 		return nullptr;
 	} else {
-		return unmappedWrite;
+		return unmappedWrite.data();
 	}
 }
 
@@ -154,7 +150,7 @@ void PioneerLDControl::videoIn(bool enabled)
 {
 	if (videoEnabled && !enabled) {
 		// raise an interrupt when external video goes off
-		extint = true;
+		extInt = true;
 		if (superimposing) irq.set();
 	}
 	videoEnabled = enabled;
@@ -163,32 +159,32 @@ void PioneerLDControl::videoIn(bool enabled)
 
 void PioneerLDControl::updateVideoSource()
 {
-	auto* videoSource = (videoEnabled && superimposing && laserdisc)
-	                  ? laserdisc->getRawFrame()
-	                  : nullptr;
+	const auto* videoSource = (videoEnabled && superimposing && laserdisc)
+	                        ? laserdisc->getRawFrame()
+	                        : nullptr;
 	vdp->setExternalVideoSource(videoSource);
 }
 
 template<typename Archive>
 void PioneerLDControl::serialize(Archive& ar, unsigned /*version*/)
 {
-	ar.serialize("clock", clock);
-	ar.serialize("mutel", mutel);
-	ar.serialize("muter", muter);
+	ar.serialize("clock", clock,
+	             "mutel", muteL,
+	             "muter", muteR);
 	// videoEnabled is restored from LaserdiscPlayer. Set to false
 	// for now so that the irq does not get changed during load
-	if (ar.isLoader()) {
+	if constexpr (Archive::IS_LOADER) {
 		videoEnabled = false;
 	}
-	ar.serialize("superimposing", superimposing);
-	ar.serialize("extint", extint);
-	ar.serialize("irq", irq);
+	ar.serialize("superimposing", superimposing,
+	             "extint",        extInt,
+	             "irq",           irq);
 	if (laserdisc) ar.serialize("laserdisc", *laserdisc);
 
-	if (ar.isLoader()) {
+	if constexpr (Archive::IS_LOADER) {
 		updateVideoSource();
 		if (laserdisc) {
-			laserdisc->setMuting(mutel, muter, getCurrentTime());
+			laserdisc->setMuting(muteL, muteR, getCurrentTime());
 		}
 	}
 }

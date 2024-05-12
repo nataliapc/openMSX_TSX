@@ -11,14 +11,18 @@ class IntegerSetting final : public Setting
 {
 public:
 	IntegerSetting(CommandController& commandController,
-	               string_view name, string_view description,
-	               int initialValue, int minValue, int maxValue);
+	               std::string_view name, static_string_view description,
+	               int initialValue, int minValue, int maxValue,
+	               SaveSetting save = SAVE);
 
-	string_view getTypeString() const override;
+	[[nodiscard]] std::string_view getTypeString() const override;
 	void additionalInfo(TclObject& result) const override;
 
-	int getInt() const { return getValue().getInt(getInterpreter()); }
+	[[nodiscard]] int getInt() const noexcept { return getValue().getInt(getInterpreter()); }
 	void setInt(int i);
+
+	[[nodiscard]] int getMinValue() const { return minValue; }
+	[[nodiscard]] int getMaxValue() const { return maxValue; }
 
 private:
 	const int minValue;

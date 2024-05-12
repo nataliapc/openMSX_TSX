@@ -1,42 +1,28 @@
-#include <vector>
-#include <map>
+#include "dmk-common.hh"
+
 #include <algorithm>
-#include <string>
-#include <cstdio>
+#include <array>
 #include <cassert>
-#include <cstring>
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
+#include <map>
+#include <string>
 #include <sys/stat.h>
+#include <vector>
 
-using namespace std;
-
-typedef unsigned char byte;
-typedef unsigned short word;
-
-
-struct DmkHeader
-{
-	byte writeProtected;
-	byte numTracks;
-	byte trackLen[2];
-	byte flags;
-	byte reserved[7];
-	byte format[4];
-};
-
-///////
 
 class Gaps
 {
 public:
-	Gaps(int totalSize);
+	explicit Gaps(int totalSize);
 	void addInterval(int start, int stop);
 	int getLargestGap();
 private:
 	void addUse2(int start, int stop);
 
-	const int totalSize;
-	vector<int> v;
+	int totalSize;
+	std::vector<int> v;
 };
 
 Gaps::Gaps(int totalSize_)
@@ -70,7 +56,7 @@ int Gaps::getLargestGap()
 	if (v.empty()) return totalSize / 2;
 
 	// sort begin and end point
-	sort(v.begin(), v.end());
+	std::sort(v.begin(), v.end());
 
 	// largest gap found so far (and its start and stop position)
 	int maxLen = 0;
@@ -82,9 +68,7 @@ int Gaps::getLargestGap()
 	if (start == totalSize) start = 0;
 
 	int count = 0;
-	for (vector<int>::const_iterator it = v.begin();
-	     it != v.end(); ++it) {
-		int i = *it;
+	for (int i : v) {
 		if (i & 1) {
 			// interval end point
 			--count;
@@ -117,17 +101,10 @@ int Gaps::getLargestGap()
 ///////
 
 
-static byte readCircular(const vector<byte>& buffer, int idx)
+static uint8_t readCircular(const std::vector<uint8_t>& buffer, int idx)
 {
-	int dmkTrackLen = buffer.size();
+	auto dmkTrackLen = int(buffer.size());
 	return buffer[128 + idx % (dmkTrackLen - 128)];
-}
-
-static void updateCrc(word& crc, byte val)
-{
-	for (int i = 8; i < 16; ++i) {
-		crc = (crc << 1) ^ ((((crc ^ (val << i)) & 0x8000) ? 0x1021 : 0));
-	}
 }
 
 static void verifyDMK(bool b, const char* message)
@@ -138,9 +115,9 @@ static void verifyDMK(bool b, const char* message)
 	}
 }
 
-static int analyzeTrack(vector<byte>& buffer)
+static int analyzeTrack(std::vector<uint8_t>& buffer)
 {
-	int dmkTrackLen = buffer.size();
+	auto dmkTrackLen = int(buffer.size());
 	int trackLen = dmkTrackLen - 128;
 
 	Gaps gaps(trackLen);
@@ -160,19 +137,19 @@ static int analyzeTrack(vector<byte>& buffer)
 
 		// read address mark
 		int addrIdx = dmkIdx - 3; // might be negative
-		byte d0 = readCircular(buffer, addrIdx + 0);
-		byte d1 = readCircular(buffer, addrIdx + 1);
-		byte d2 = readCircular(buffer, addrIdx + 2);
-		byte d3 = readCircular(buffer, addrIdx + 3);
-		byte c  = readCircular(buffer, addrIdx + 4);
-		byte h  = readCircular(buffer, addrIdx + 5);
-		byte r  = readCircular(buffer, addrIdx + 6);
-		byte n  = readCircular(buffer, addrIdx + 7);
-		byte ch = readCircular(buffer, addrIdx + 8);
-		byte cl = readCircular(buffer, addrIdx + 9);
+		uint8_t d0 = readCircular(buffer, addrIdx + 0);
+		uint8_t d1 = readCircular(buffer, addrIdx + 1);
+		uint8_t d2 = readCircular(buffer, addrIdx + 2);
+		uint8_t d3 = readCircular(buffer, addrIdx + 3);
+		uint8_t c  = readCircular(buffer, addrIdx + 4);
+		uint8_t h  = readCircular(buffer, addrIdx + 5);
+		uint8_t r  = readCircular(buffer, addrIdx + 6);
+		uint8_t n  = readCircular(buffer, addrIdx + 7);
+		uint8_t ch = readCircular(buffer, addrIdx + 8);
+		uint8_t cl = readCircular(buffer, addrIdx + 9);
 
 		// address mark CRC
-		word addrCrc = 0xFFFF;
+		uint16_t addrCrc = 0xFFFF;
 		updateCrc(addrCrc, d0);
 		updateCrc(addrCrc, d1);
 		updateCrc(addrCrc, d2);
@@ -181,9 +158,8 @@ static int analyzeTrack(vector<byte>& buffer)
 		updateCrc(addrCrc, h);
 		updateCrc(addrCrc, r);
 		updateCrc(addrCrc, n);
-		word onDiskAddrCrc = 256 * ch + cl;
-
-		if (onDiskAddrCrc != addrCrc) {
+		if (uint16_t onDiskAddrCrc = 256 * ch + cl;
+		    onDiskAddrCrc != addrCrc) {
 			// only mark address mark as in-use
 			gaps.addInterval(addrIdx, addrIdx + 10);
 			continue;
@@ -191,12 +167,12 @@ static int analyzeTrack(vector<byte>& buffer)
 
 		// locate data mark, should be within 43 bytes from end
 		// of address mark (according to WD2793 datasheet)
-		for (int i = 10; i < 53; ++i) {
-			int dataIdx = addrIdx + i;
-			byte a0 = readCircular(buffer, dataIdx + 0);
-			byte a1 = readCircular(buffer, dataIdx + 1);
-			byte a2 = readCircular(buffer, dataIdx + 2);
-			byte t  = readCircular(buffer, dataIdx + 3);
+		for (int j = 10; j < 53; ++j) {
+			int dataIdx = addrIdx + j;
+			uint8_t a0 = readCircular(buffer, dataIdx + 0);
+			uint8_t a1 = readCircular(buffer, dataIdx + 1);
+			uint8_t a2 = readCircular(buffer, dataIdx + 2);
+			uint8_t t  = readCircular(buffer, dataIdx + 3);
 			if ((a0 != 0xA1) || (a1 != 0xA1) || (a2 != 0xA1) ||
 			    ((t != 0xFB) && (t != 0xF8))) {
 				continue;
@@ -217,14 +193,14 @@ static int analyzeTrack(vector<byte>& buffer)
 
 int main()
 {
-	vector<vector<byte> > data; // buffer all .DAT files
+	std::vector<std::vector<uint8_t>> data; // buffer all .DAT files
 
-	string name = "DMK-tt-s.DAT";
+	std::string name = "DMK-tt-s.DAT";
 	for (int t = 0; t <= 99; ++t) {
 		for (int h = 0; h < 2; ++h) {
-			name[4] = (t / 10) + '0';
-			name[5] = (t % 10) + '0';
-			name[7] = h + '0';
+			name[4] = char((t / 10) + '0');
+			name[5] = char((t % 10) + '0');
+			name[7] = char(h + '0');
 
 			FILE* file = fopen(name.c_str(), "rb");
 			if (!file) {
@@ -246,32 +222,33 @@ int main()
 				exit(1);
 			}
 
-			vector<byte> dat(size);
+			std::vector<uint8_t> dat(size);
 			if (fread(dat.data(), size, 1, file) != 1) {
 				fprintf(stderr, "Error reading file %s.\n",
 				        name.c_str());
 				exit(1);
 			}
+			fclose(file);
 			data.push_back(dat);
 		}
 	}
 done_read:
 	assert((data.size() & 1) == 0);
-	int numTracks = data.size() / 2;
+	auto numTracks = int(data.size() / 2);
 
 	// Check that no .dat files with higher track number are found.
 	for (int t = numTracks; t <= 99; ++t) {
 		for (int h = 0; h < 2; ++h) {
-			name[4] = (t / 10) + '0';
-			name[5] = (t % 10) + '0';
-			name[7] = h + '0';
+			name[4] = char((t / 10) + '0');
+			name[5] = char((t % 10) + '0');
+			name[7] = char(h + '0');
 
 			FILE* file = fopen(name.c_str(), "rb");
 			if (!file) continue; // ok, we should have this file
 
-			string name2 = "DMK-tt-0.DAT";
-			name2[4] = (numTracks / 10) + '0';
-			name2[5] = (numTracks % 10) + '0';
+			std::string name2 = "DMK-tt-0.DAT";
+			name2[4] = char((numTracks / 10) + '0');
+			name2[5] = char((numTracks % 10) + '0');
 			fprintf(stderr,
 				"Found file %s, but file %s is missing.\n",
 				name.c_str(), name2.c_str());
@@ -281,23 +258,20 @@ done_read:
 
 	printf("Found .dat files for %d tracks (double sided).\n", numTracks);
 
-	// Create histogram of tracklengths.
-	map<unsigned, unsigned> sizes; // length, count
-	for (vector<vector<byte> >::iterator it = data.begin();
-	     it != data.end(); ++it) {
-		unsigned size = it->size();
-		++sizes[size];
+	// Create histogram of track lengths.
+	std::map<unsigned, unsigned> sizes; // length, count
+	for (const auto& d : data) {
+		++sizes[d.size()];
 	}
 
-	// Search the peak in this histogram (= the tracklength that occurs
+	// Search the peak in this histogram (= the track length that occurs
 	// most often).
 	unsigned maxCount = 0;
 	unsigned trackSize = 0;
-	for (map<unsigned, unsigned>::const_iterator it = sizes.begin();
-	     it != sizes.end(); ++it) {
-		if (it->second >= maxCount) {
-			maxCount = it->second;
-			trackSize = it->first;
+	for (const auto& [length, count] : sizes) {
+		if (count >= maxCount) {
+			maxCount = count;
+			trackSize = length;
 		}
 	}
 
@@ -320,10 +294,7 @@ done_read:
 	}
 
 	// Process each track.
-	for (vector<vector<byte> >::iterator it = data.begin();
-	     it != data.end(); ++it) {
-		vector<byte>& v = *it;
-
+	for (auto& v : data) {
 		// Adjust track size
 		while (v.size() != trackSize) {
 			// Locate (middle of) largest gap in this track.
@@ -336,7 +307,7 @@ done_read:
 
 			// We insert or delete one byte at a time. This may not
 			// be the most efficient approach (but still more than
-			// fast enough, we typically only nned to adjust a few
+			// fast enough, we typically only need to adjust a few
 			// bytes anyway). This has the advantage of being very
 			// simple: it can easily handle gaps that wrap around
 			// from the end to the beginning of the track and it
@@ -375,5 +346,4 @@ done_read:
 	}
 
 	printf("Successfully wrote out.dmk.\n");
-	exit(0);
 }

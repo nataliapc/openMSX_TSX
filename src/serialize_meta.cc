@@ -1,8 +1,8 @@
 #include "serialize_meta.hh"
 #include "serialize.hh"
 #include "MSXException.hh"
+#include "ranges.hh"
 #include "stl.hh"
-#include <algorithm>
 #include <cassert>
 #include <iostream>
 
@@ -17,11 +17,10 @@ PolymorphicSaverRegistry<Archive>& PolymorphicSaverRegistry<Archive>::instance()
 
 template<typename Archive>
 void PolymorphicSaverRegistry<Archive>::registerHelper(
-	const std::type_info& type,
-	std::unique_ptr<PolymorphicSaverBase<Archive>> saver)
+	const std::type_info& type, SaveFunction saver)
 {
 	assert(!initialized);
-	assert(none_of(begin(saverMap), end(saverMap), EqualTupleValue<0>(type)));
+	assert(!contains(saverMap, type, &Entry::index)); // not yet sorted
 	saverMap.emplace_back(type, std::move(saver));
 }
 
@@ -30,19 +29,17 @@ void PolymorphicSaverRegistry<Archive>::save(
 	Archive& ar, const void* t, const std::type_info& typeInfo)
 {
 	auto& reg = PolymorphicSaverRegistry<Archive>::instance();
-	if (unlikely(!reg.initialized)) {
+	if (!reg.initialized) [[unlikely]] {
 		reg.initialized = true;
-		sort(begin(reg.saverMap), end(reg.saverMap),
-		     LessTupleElement<0>());
+		ranges::sort(reg.saverMap, {}, &Entry::index);
 	}
-	auto it = lower_bound(begin(reg.saverMap), end(reg.saverMap), typeInfo,
-		LessTupleElement<0>());
-	if ((it == end(reg.saverMap)) || (it->first != typeInfo)) {
+	auto s = binary_find(reg.saverMap, std::type_index(typeInfo), {}, &Entry::index);
+	if (!s) {
 		std::cerr << "Trying to save an unregistered polymorphic type: "
-			  << typeInfo.name() << std::endl;
+			  << typeInfo.name() << '\n';
 		assert(false); return;
 	}
-	it->second->save(ar, t);
+	s->saver(ar, t);
 }
 template<typename Archive>
 void PolymorphicSaverRegistry<Archive>::save(
@@ -67,8 +64,7 @@ PolymorphicLoaderRegistry<Archive>& PolymorphicLoaderRegistry<Archive>::instance
 
 template<typename Archive>
 void PolymorphicLoaderRegistry<Archive>::registerHelper(
-	const char* name,
-	std::unique_ptr<PolymorphicLoaderBase<Archive>> loader)
+	const char* name, LoadFunction loader)
 {
 	assert(!loaderMap.contains(name));
 	loaderMap.emplace_noDuplicateCheck(name, std::move(loader));
@@ -81,9 +77,11 @@ void* PolymorphicLoaderRegistry<Archive>::load(
 	std::string type;
 	ar.attribute("type", type);
 	auto& reg = PolymorphicLoaderRegistry<Archive>::instance();
-	auto it = reg.loaderMap.find(type);
-	assert(it != end(reg.loaderMap));
-	return it->second->load(ar, id, args);
+	auto* v = lookup(reg.loaderMap, type);
+	if (!v) {
+		throw MSXException("Deserialize unknown polymorphic type: '", type, "'.");
+	}
+	return (*v)(ar, id, args);
 }
 
 template class PolymorphicLoaderRegistry<MemInputArchive>;
@@ -105,8 +103,7 @@ PolymorphicInitializerRegistry<Archive>& PolymorphicInitializerRegistry<Archive>
 
 template<typename Archive>
 void PolymorphicInitializerRegistry<Archive>::registerHelper(
-	const char* name,
-	std::unique_ptr<PolymorphicInitializerBase<Archive>> initializer)
+	const char* name, InitFunction initializer)
 {
 	assert(!initializerMap.contains(name));
 	initializerMap.emplace_noDuplicateCheck(name, std::move(initializer));
@@ -124,9 +121,11 @@ void PolymorphicInitializerRegistry<Archive>::init(
 	ar.attribute("type", type);
 
 	auto& reg = PolymorphicInitializerRegistry<Archive>::instance();
-	auto it = reg.initializerMap.find(type);
-	assert(it != end(reg.initializerMap));
-	it->second->init(ar, t, id);
+	auto v = lookup(reg.initializerMap, type);
+	if (!v) {
+		throw MSXException("Deserialize unknown polymorphic type: '", type, "'.");
+	}
+	(*v)(ar, t, id);
 
 	ar.endTag(tag);
 }

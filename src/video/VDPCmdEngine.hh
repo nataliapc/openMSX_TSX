@@ -3,12 +3,12 @@
 
 #include "VDP.hh"
 #include "VDPAccessSlots.hh"
+
 #include "BooleanSetting.hh"
+#include "Probe.hh"
 #include "TclCallback.hh"
-#include "serialize_meta.hh"
 #include "openmsx.hh"
-#include "likely.hh"
-#include <memory>
+#include "serialize_meta.hh"
 
 namespace openmsx {
 
@@ -25,12 +25,12 @@ class VDPCmdEngine
 public:
 	VDPCmdEngine(VDP& vdp, CommandController& commandController);
 
-	/** Reinitialise Renderer state.
+	/** Reinitialize Renderer state.
 	  * @param time The moment in time the reset occurs.
 	  */
 	void reset(EmuTime::param time);
 
-	/** Synchronises the command engine with the VDP.
+	/** Synchronizes the command engine with the VDP.
 	  * Ideally this would be a private method, but the current
 	  * design doesn't allow that.
 	  * @param time The moment in emulated time to sync to.
@@ -45,10 +45,11 @@ public:
 	 * @param time The moment in time the CPU read/write is performed.
 	 */
 	void stealAccessSlot(EmuTime::param time) {
-		if (!CMD) return;
-		engineTime = time;
-		nextAccessSlot(VDPAccessSlots::DELTA_1); // skip one slot
-		assert(engineTime > time);
+		if (CMD && engineTime <= time) {
+			// take the next available slot
+			engineTime = getNextAccessSlot(time, VDPAccessSlots::DELTA_1);
+			assert(engineTime > time);
+		}
 	}
 
 	/** Gets the command engine status (part of S#2).
@@ -57,7 +58,7 @@ public:
 	  * Bit 4 (BD) is set when the boundary color is detected.
 	  * Bit 0 (CE) is set when a command is in progress.
 	  */
-	inline byte getStatus(EmuTime::param time) {
+	[[nodiscard]] inline byte getStatus(EmuTime::param time) {
 		if (time >= statusChangeTime) {
 			sync(time);
 		}
@@ -69,7 +70,7 @@ public:
 	  * @param time The moment in emulated time this read occurs.
 	  * @return Color value of the pixel.
 	  */
-	inline byte readColor(EmuTime::param time) {
+	[[nodiscard]] inline byte readColor(EmuTime::param time) {
 		sync(time);
 		return COL;
 	}
@@ -88,7 +89,7 @@ public:
           * recently
 	  * @param time The moment in emulated time this get occurs.
 	  */
-	inline unsigned getBorderX(EmuTime::param time) {
+	[[nodiscard]] inline unsigned getBorderX(EmuTime::param time) {
 		sync(time);
 		return ASX;
 	}
@@ -106,7 +107,7 @@ public:
 	  * time (IOW this method does not sync the complete CmdEngine)
 	  * @param index The register [0..14] to read from.
 	  */
-	byte peekCmdReg(byte index);
+	[[nodiscard]] byte peekCmdReg(byte index) const;
 
 	/** Informs the command engine of a VDP display mode change.
 	  * @param mode The new display mode.
@@ -123,6 +124,7 @@ public:
 private:
 	void executeCommand(EmuTime::param time);
 
+	void setStatusChangeTime(EmuTime::param t);
 	void calcFinishTime(unsigned NX, unsigned NY, unsigned ticksPerPixel);
 
 	                        void startAbrt(EmuTime::param time);
@@ -153,28 +155,34 @@ private:
 	template<typename Mode>                 void executeHmmc(EmuTime::param limit);
 
 	// Advance to the next access slot at or past the given time.
+	inline EmuTime getNextAccessSlot(EmuTime::param time) const {
+		return vdp.getAccessSlot(time, VDPAccessSlots::DELTA_0);
+	}
 	inline void nextAccessSlot(EmuTime::param time) {
-		engineTime = vdp.getAccessSlot(time, VDPAccessSlots::DELTA_0);
+		engineTime = getNextAccessSlot(time);
 	}
 	// Advance to the next access slot that is at least 'delta' cycles past
 	// the current one.
+	inline EmuTime getNextAccessSlot(EmuTime::param time, VDPAccessSlots::Delta delta) const {
+		return vdp.getAccessSlot(time, delta);
+	}
 	inline void nextAccessSlot(VDPAccessSlots::Delta delta) {
-		engineTime = vdp.getAccessSlot(engineTime, delta);
+		engineTime = getNextAccessSlot(engineTime, delta);
 	}
 	inline VDPAccessSlots::Calculator getSlotCalculator(
 			EmuTime::param limit) const {
 		return vdp.getAccessSlotCalculator(engineTime, limit);
 	}
 
-	/** Finshed executing graphical operation.
+	/** Finished executing graphical operation.
 	  */
 	void commandDone(EmuTime::param time);
 
 	/** Report the VDP command specified in the registers.
 	  */
-	void reportVdpCommand();
+	void reportVdpCommand() const;
 
-
+private:
 	/** The VDP this command engine is part of.
 	  */
 	VDP& vdp;
@@ -185,41 +193,43 @@ private:
 	BooleanSetting cmdTraceSetting;
 	TclCallback cmdInProgressCallback;
 
+	Probe<bool> executingProbe;
+
 	/** Time at which the next vram access slot is available.
 	  * Only valid when a command is executing.
 	  */
-	EmuTime engineTime;
+	EmuTime engineTime{EmuTime::zero()};
 
 	/** Lower bound for the time when the status register will change, IOW
 	  * the status register will not change before this time.
 	  * Can also be EmuTime::zero -> status can change any moment
 	  * or EmuTime::infinity -> this command doesn't change the status
 	  */
-	EmuTime statusChangeTime;
+	EmuTime statusChangeTime{EmuTime::infinity()};
 
 	/** Some commands execute multiple VRAM accesses per pixel
 	  * (e.g. LMMM does two reads and a write). This variable keeps
 	  * track of where in the (sub)command we are. */
-	int phase;
+	int phase{0};
 
 	/** Current screen mode.
 	  * 0 -> SCREEN5, 1 -> SCREEN6, 2 -> SCREEN7, 3 -> SCREEN8,
 	  * 4 -> Non-BitMap mode (like SCREEN8 but non-planar addressing)
 	  * -1 -> other.
 	  */
-	int scrMode;
+	int scrMode{-1};
 
 	/** VDP command registers.
 	  */
-	unsigned SX, SY, DX, DY, NX, NY; // registers that can be set by CPU
-	unsigned ASX, ADX, ANX; // Temporary registers used in the VDP commands
-                                // Register ASX can be read (via status register 8/9)
-	byte COL, ARG, CMD;
+	unsigned SX{0}, SY{0}, DX{0}, DY{0}, NX{0}, NY{0}; // registers that can be set by CPU
+	unsigned ASX{0}, ADX{0}, ANX{0}; // Temporary registers used in the VDP commands
+	                                 // Register ASX can be read (via status register 8/9)
+	byte COL{0}, ARG{0}, CMD{0};
 
 	/** When a command needs multiple VRAM accesses per pixel, the result
 	 * of intermediate reads is stored in these variables. */
-	byte tmpSrc;
-	byte tmpDst;
+	byte tmpSrc{0};
+	byte tmpDst{0};
 
 	/** The command engine status (part of S#2).
 	  * Bit 7 (TR) is set when the command engine is ready for
@@ -227,12 +237,12 @@ private:
 	  * Bit 4 (BD) is set when the boundary color is detected.
 	  * Bit 0 (CE) is set when a command is in progress.
 	  */
-	byte status;
+	byte status{0};
 
 	/** Used in LMCM LMMC HMMC cmds, true when CPU has read or written
 	  * next byte.
 	  */
-	bool transfer;
+	bool transfer{false};
 
 	/** Flag that indicated whether extended VRAM is available
 	 */

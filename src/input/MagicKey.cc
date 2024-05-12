@@ -5,13 +5,12 @@
 namespace openmsx {
 
 // Pluggable
-const std::string& MagicKey::getName() const
+std::string_view MagicKey::getName() const
 {
-	static const std::string NAME = "magic-key";
-	return NAME;
+	return "magic-key";
 }
 
-string_view MagicKey::getDescription() const
+std::string_view MagicKey::getDescription() const
 {
 	return "Dongle used by some Japanese games to enable cheat mode";
 }
@@ -26,12 +25,12 @@ void MagicKey::unplugHelper(EmuTime::param /*time*/)
 
 
 // JoystickDevice
-byte MagicKey::read(EmuTime::param /*time*/)
+uint8_t MagicKey::read(EmuTime::param /*time*/)
 {
 	return JOY_BUTTONB | JOY_BUTTONA | JOY_RIGHT | JOY_LEFT;
 }
 
-void MagicKey::write(byte /*value*/, EmuTime::param /*time*/)
+void MagicKey::write(uint8_t /*value*/, EmuTime::param /*time*/)
 {
 }
 

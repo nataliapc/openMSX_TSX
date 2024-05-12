@@ -1,36 +1,47 @@
-#ifndef POSTPROCESSOR_HH
-#define POSTPROCESSOR_HH
+#ifndef GLPOSTPROCESSOR_HH
+#define GLPOSTPROCESSOR_HH
 
-#include "FrameSource.hh"
+#include "GLUtil.hh"
+#include "RenderSettings.hh"
 #include "VideoLayer.hh"
-#include "Schedulable.hh"
+
 #include "EmuTime.hh"
+#include "Schedulable.hh"
+
+#include <array>
 #include <memory>
 #include <vector>
 
 namespace openmsx {
 
-class Display;
-class RenderSettings;
-class RawFrame;
-class DeinterlacedFrame;
-class DoubledFrame;
-class Deflicker;
-class SuperImposedFrame;
 class AviRecorder;
 class CliComm;
+class Deflicker;
+class DeinterlacedFrame;
+class Display;
+class DoubledFrame;
 class EventDistributor;
+class FrameSource;
+class GLScaler;
+class MSXMotherBoard;
+class RawFrame;
+class RenderSettings;
+class SuperImposedFrame;
 
-/** Abstract base class for post processors.
-  * A post processor builds the frame that is displayed from the MSX frame,
+/** A post processor builds the frame that is displayed from the MSX frame,
   * while applying effects such as scalers, noise etc.
-  * TODO: With some refactoring, it would be possible to move much or even all
-  *       of the post processing code here instead of in the subclasses.
   */
-class PostProcessor : public VideoLayer, private Schedulable
+class PostProcessor final : public VideoLayer, private Schedulable
 {
 public:
-	virtual ~PostProcessor();
+	PostProcessor(
+		MSXMotherBoard& motherBoard, Display& display,
+		OutputSurface& screen, const std::string& videoSource,
+		unsigned maxWidth, unsigned height, bool canDoInterlace);
+	~PostProcessor() override;
+
+	// Layer interface:
+	void paint(OutputSurface& output) override;
 
 	/** Sets up the "abcdFrame" variables for a new frame.
 	  * TODO: The point of passing the finished frame in and the new workFrame
@@ -42,7 +53,7 @@ public:
 	  *             PAL/NTSC, frameskip).
 	  * @return RawFrame object that can be used for building the next frame.
 	  */
-	virtual std::unique_ptr<RawFrame> rotateFrames(
+	[[nodiscard]] std::unique_ptr<RawFrame> rotateFrames(
 		std::unique_ptr<RawFrame> finishedFrame, EmuTime::param time);
 
 	/** Set the Video frame on which to superimpose the 'normal' output of
@@ -74,43 +85,53 @@ public:
 	/** Is recording active.
 	  * ATM used to keep frameskip constant during recording.
 	  */
-	bool isRecording() const { return recorder != nullptr; }
-
-	/** Get the number of bits per pixel for the pixels in these frames.
-	  * @return Possible values are 15, 16 or 32
-	  */
-	unsigned getBpp() const;
+	[[nodiscard]] bool isRecording() const { return recorder != nullptr; }
 
 	/** Get the frame that would be displayed. E.g. so that it can be
 	  * superimposed over the output of another PostProcessor, see
 	  * setSuperimposeVdpFrame().
 	  */
-	FrameSource* getPaintFrame() const { return paintFrame; }
+	[[nodiscard]] FrameSource* getPaintFrame() const { return paintFrame; }
 
 	// VideoLayer
 	void takeRawScreenShot(unsigned height, const std::string& filename) override;
 
+	[[nodiscard]] CliComm& getCliComm();
 
-	CliComm& getCliComm();
+private:
+	// Observer<Setting> interface:
+	void update(const Setting& setting) noexcept override;
 
-protected:
+	// Schedulable
+	void executeUntil(EmuTime::param time) override;
+
 	/** Returns the maximum width for lines [y..y+step).
 	  */
-	static unsigned getLineWidth(FrameSource* frame, unsigned y, unsigned step);
+	[[nodiscard]] static unsigned getLineWidth(FrameSource* frame, unsigned y, unsigned step);
 
-	PostProcessor(
-		MSXMotherBoard& motherBoard, Display& display,
-		OutputSurface& screen, const std::string& videoSource,
-		unsigned maxWidth, unsigned height, bool canDoInterlace);
+	void initBuffers();
+	void createRegions();
+	void uploadFrame();
+	void uploadBlock(unsigned srcStartY, unsigned srcEndY,
+	                 unsigned lineWidth);
 
-	/** Render settings */
+	void preCalcNoise(float factor);
+	void drawNoise() const;
+	void drawGlow(int glow);
+
+	void preCalcMonitor3D(float width);
+	void drawMonitor3D() const;
+
+private:
+	Display& display;
 	RenderSettings& renderSettings;
+	EventDistributor& eventDistributor;
 
 	/** The surface which is visible to the user. */
 	OutputSurface& screen;
 
 	/** The last 4 fully rendered (unscaled) MSX frames. */
-	std::unique_ptr<RawFrame> lastFrames[4];
+	std::array<std::unique_ptr<RawFrame>, 4> lastFrames;
 
 	/** Combined the last two frames in a deinterlaced frame. */
 	std::unique_ptr<DeinterlacedFrame> deinterlacedFrame;
@@ -128,26 +149,20 @@ protected:
 	  * This can be simply a RawFrame or two RawFrames combined in a
 	  * DeinterlacedFrame or DoubledFrame.
 	  */
-	FrameSource* paintFrame;
+	FrameSource* paintFrame = nullptr;
 
 	/** Video recorder, nullptr when not recording. */
-	AviRecorder* recorder;
+	AviRecorder* recorder = nullptr;
 
 	/** Video frame on which to superimpose the (VDP) output.
 	  * nullptr when not superimposing. */
-	const RawFrame* superImposeVideoFrame;
-	const FrameSource* superImposeVdpFrame;
+	const RawFrame* superImposeVideoFrame = nullptr;
+	const FrameSource* superImposeVdpFrame = nullptr;
 
-	int interleaveCount; // for interleave-black-frame
-	int lastFramesCount; // How many items in lastFrames[] are up-to-date
-	int maxWidth; // we lazily create RawFrame objects in lastFrames[]
-	int height;   // these two vars remember how big those should be
-
-private:
-	// Schedulable
-	void executeUntil(EmuTime::param time) override;
-
-	Display& display;
+	int interleaveCount = 0; // for interleave-black-frame
+	int lastFramesCount = 0; // How many items in lastFrames[] are up-to-date
+	unsigned maxWidth; // we lazily create RawFrame objects in lastFrames[]
+	unsigned height;   // these two vars remember how big those should be
 
 	/** Laserdisc cannot do interlace (better: the current implementation
 	  * is not interlaced). In that case some internal stuff can be done
@@ -156,9 +171,63 @@ private:
 	const bool canDoInterlace;
 
 	EmuTime lastRotate;
-	EventDistributor& eventDistributor;
+	/** The currently active scaler.
+	  */
+	std::unique_ptr<GLScaler> currScaler;
+
+	struct StoredFrame {
+		gl::ivec2 size; // (re)allocate when window size changes
+		gl::Texture tex;
+		gl::FrameBufferObject fbo;
+	};
+	std::array<StoredFrame, 2> renderedFrames;
+
+	// Noise effect:
+	gl::Texture noiseTextureA{true, true}; // interpolate + wrap
+	gl::Texture noiseTextureB{true, true};
+	float noiseX = 0.0f, noiseY = 0.0f;
+
+	struct TextureData {
+		gl::ColorTexture tex;
+		gl::PixelBuffer<unsigned> pbo;
+		[[nodiscard]] unsigned width() const { return tex.getWidth(); }
+	};
+	std::vector<TextureData> textures;
+
+	gl::ColorTexture superImposeTex;
+
+	struct Region {
+		Region(unsigned srcStartY_, unsigned srcEndY_,
+		       unsigned dstStartY_, unsigned dstEndY_,
+		       unsigned lineWidth_)
+			: srcStartY(srcStartY_)
+			, srcEndY(srcEndY_)
+			, dstStartY(dstStartY_)
+			, dstEndY(dstEndY_)
+			, lineWidth(lineWidth_) {}
+		unsigned srcStartY;
+		unsigned srcEndY;
+		unsigned dstStartY;
+		unsigned dstEndY;
+		unsigned lineWidth;
+	};
+	std::vector<Region> regions;
+
+	unsigned frameCounter = 0;
+
+	/** Currently active scale algorithm, used to detect scaler changes.
+	  */
+	RenderSettings::ScaleAlgorithm scaleAlgorithm = RenderSettings::NO_SCALER;
+
+	gl::ShaderProgram monitor3DProg;
+	gl::BufferObject arrayBuffer;
+	gl::BufferObject elementBuffer;
+	gl::BufferObject vbo;
+	gl::BufferObject stretchVBO;
+
+	bool storedFrame = false;
 };
 
 } // namespace openmsx
 
-#endif // POSTPROCESSOR_HH
+#endif // GLPOSTPROCESSOR_HH

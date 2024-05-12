@@ -8,6 +8,7 @@
     <release_year>1982</release_year>
     <description>Game console with hardware similar to MSX, with built in Super Game Module</description>
     <type>Coleco</type>
+    <region>us</region>
   </info>
 
   <slotmap>
@@ -47,6 +48,7 @@
            Main RAM! -->
       <SuperGameModule id="Super Game Module">
         <mem base="0x0000" size="0x8000"/>
+        <initialContent encoding="hex">00</initialContent>
         <sound>
           <volume>21000</volume>
         </sound>

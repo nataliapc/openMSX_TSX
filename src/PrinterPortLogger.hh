@@ -15,13 +15,13 @@ public:
 	explicit PrinterPortLogger(CommandController& commandController);
 
 	// PrinterPortDevice
-	bool getStatus(EmuTime::param time) override;
+	[[nodiscard]] bool getStatus(EmuTime::param time) override;
 	void setStrobe(bool strobe, EmuTime::param time) override;
-	void writeData(byte data, EmuTime::param time) override;
+	void writeData(uint8_t data, EmuTime::param time) override;
 
 	// Pluggable
-	const std::string& getName() const override;
-	string_view getDescription() const override;
+	[[nodiscard]] std::string_view getName() const override;
+	[[nodiscard]] std::string_view getDescription() const override;
 	void plugHelper(Connector& connector, EmuTime::param time) override;
 	void unplugHelper(EmuTime::param time) override;
 
@@ -31,8 +31,13 @@ public:
 private:
 	FilenameSetting logFilenameSetting;
 	File file;
-	byte toPrint;
-	bool prevStrobe;
+	uint8_t toPrint = 0; // Initialize to avoid a static analysis (cppcheck) warning.
+	                     // For correctness it's not strictly needed to initialize
+	                     // this variable. But understanding why exactly it's not
+	                     // needed depends on the implementation details of a few
+	                     // other classes, so let's simplify stuff and just
+	                     // initialize.
+	bool prevStrobe = true;
 };
 
 } // namespace openmsx

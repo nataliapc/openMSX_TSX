@@ -6,8 +6,9 @@
     <manufacturer>Canon</manufacturer>
     <code>V-20 (JP)</code>
     <release_year>1984?</release_year>
-    <description/>
+    <description>Canon's main stream 64kB MSX1.</description>
     <type>MSX</type>
+    <region>jp</region>
   </info>
 
 <!--
@@ -75,12 +76,12 @@ PSG pin 6/7 quirk: C (YES)
 
     <PSG id="PSG">
       <type>YM2149</type>
-      <keyboardlayout>jis</keyboardlayout>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <keyboardlayout>JIS</keyboardlayout>
+      <io base="0xA0" num="4" type="IO"/>
       <sound>
         <volume>21000</volume>
       </sound>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <PrinterPort id="Printer Port">

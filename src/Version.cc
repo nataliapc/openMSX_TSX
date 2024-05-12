@@ -10,7 +10,7 @@ std::string Version::full()
 	std::string result = strCat("openMSX ", VERSION);
 	if (!RELEASE) strAppend(result, '-', REVISION);
 	strAppend(result, " / TSX rev3");
-        return result;
+  return result;
 }
 
 } // namespace openmsx

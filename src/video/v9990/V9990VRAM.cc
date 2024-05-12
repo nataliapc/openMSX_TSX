@@ -1,12 +1,13 @@
 #include "V9990.hh"
+
 #include "V9990VRAM.hh"
+
 #include "serialize.hh"
-#include <cstring>
 
 namespace openmsx {
 
 V9990VRAM::V9990VRAM(V9990& vdp_, EmuTime::param /*time*/)
-	: vdp(vdp_), cmdEngine(nullptr)
+	: vdp(vdp_)
 	, data(vdp.getDeviceConfig2(), vdp.getName() + " VRAM",
 	       "V9990 Video RAM", VRAM_SIZE)
 {
@@ -15,17 +16,16 @@ V9990VRAM::V9990VRAM(V9990& vdp_, EmuTime::param /*time*/)
 void V9990VRAM::clear()
 {
 	// Initialize memory. Alternate 0x00/0xff every 512 bytes.
-	auto size = data.getSize();
-	assert((size % 1024) == 0);
-	auto* d = data.getWriteBackdoor();
-	auto* e = d + size;
-	while (d != e) {
-		memset(d, 0x00, 512); d += 512;
-		memset(d, 0xff, 512); d += 512;
+	std::span s = data.getWriteBackdoor();
+	assert((s.size() % 1024) == 0);
+	while (!s.empty()) {
+		ranges::fill(s.subspan(  0, 512), 0x00);
+		ranges::fill(s.subspan(512, 512), 0xff);
+		s = s.subspan(1024);
 	}
 }
 
-unsigned V9990VRAM::mapAddress(unsigned address)
+unsigned V9990VRAM::mapAddress(unsigned address) const
 {
 	address &= 0x7FFFF; // change to assert?
 	switch (vdp.getDisplayMode()) {

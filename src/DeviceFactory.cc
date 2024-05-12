@@ -2,6 +2,7 @@
 #include "XMLElement.hh"
 #include "DeviceConfig.hh"
 #include "ChakkariCopy.hh"
+#include "CanonWordProcessor.hh"
 #include "FraelSwitchableROM.hh"
 #include "MSXRam.hh"
 #include "MSXPPI.hh"
@@ -17,6 +18,9 @@
 #include "MSXS1990.hh"
 #include "ColecoJoystickIO.hh"
 #include "ColecoSuperGameModule.hh"
+#include "SG1000JoystickIO.hh"
+#include "SG1000Pause.hh"
+#include "SC3000PPI.hh"
 #include "MSXPSG.hh"
 #include "SVIPSG.hh"
 #include "SNPSG.hh"
@@ -26,10 +30,12 @@
 #include "MSXMoonSound.hh"
 #include "MSXOPL3Cartridge.hh"
 #include "MSXYamahaSFG.hh"
-#include "MC6850.hh"
+#include "MusicModuleMIDI.hh"
+#include "JVCMSXMIDI.hh"
 #include "MSXKanji.hh"
 #include "MSXBunsetsu.hh"
 #include "MSXMemoryMapper.hh"
+#include "MSXToshibaTcx200x.hh"
 #include "MegaFlashRomSCCPlusSD.hh"
 #include "MusicalMemoryMapper.hh"
 #include "Carnivore2.hh"
@@ -46,9 +52,13 @@
 #include "NationalFDC.hh"
 #include "VictorFDC.hh"
 #include "SanyoFDC.hh"
+#include "ToshibaFDC.hh"
+#include "CanonFDC.hh"
 #include "SpectravideoFDC.hh"
+#include "TalentTDC600.hh"
 #include "TurboRFDC.hh"
 #include "SVIFDC.hh"
+#include "YamahaFDC.hh"
 #include "SunriseIDE.hh"
 #include "BeerIDE.hh"
 #include "GoudaSCSI.hh"
@@ -75,9 +85,11 @@
 #include "MSXMapperIO.hh"
 #include "VDPIODelay.hh"
 #include "SensorKid.hh"
-#include "CliComm.hh"
+#include "YamahaSKW01.hh"
+#include "MSXCliComm.hh"
 #include "MSXException.hh"
 #include "components.hh"
+#include "one_of.hh"
 #include <memory>
 
 #if COMPONENT_LASERDISC
@@ -85,13 +97,12 @@
 #endif
 
 using std::make_unique;
-using std::unique_ptr;
 
 namespace openmsx {
 
-static unique_ptr<MSXDevice> createWD2793BasedFDC(const DeviceConfig& conf)
+[[nodiscard]] static std::unique_ptr<MSXDevice> createWD2793BasedFDC(const DeviceConfig& conf)
 {
-	const XMLElement* styleEl = conf.findChild("connectionstyle");
+	const auto* styleEl = conf.findChild("connectionstyle");
 	std::string type;
 	if (!styleEl) {
 		conf.getCliComm().printWarning(
@@ -102,7 +113,7 @@ static unique_ptr<MSXDevice> createWD2793BasedFDC(const DeviceConfig& conf)
 	} else {
 		type = styleEl->getData();
 	}
-	if ((type == "Philips") || (type == "Sony")) {
+	if (type == one_of("Philips", "Sony")) {
 		return make_unique<PhilipsFDC>(conf);
 	} else if (type == "Microsol") {
 		return make_unique<MicrosolFDC>(conf);
@@ -112,18 +123,24 @@ static unique_ptr<MSXDevice> createWD2793BasedFDC(const DeviceConfig& conf)
 		return make_unique<NationalFDC>(conf);
 	} else if (type == "Sanyo") {
 		return make_unique<SanyoFDC>(conf);
+	} else if (type == "Toshiba") {
+		return make_unique<ToshibaFDC>(conf);
+	} else if (type == "Canon") {
+		return make_unique<CanonFDC>(conf);
 	} else if (type == "Spectravideo") {
 		return make_unique<SpectravideoFDC>(conf);
 	} else if (type == "Victor") {
 		return make_unique<VictorFDC>(conf);
+	} else if (type == "Yamaha") {
+		return make_unique<YamahaFDC>(conf);
 	}
 	throw MSXException("Unknown WD2793 FDC connection style ", type);
 }
 
-unique_ptr<MSXDevice> DeviceFactory::create(const DeviceConfig& conf)
+std::unique_ptr<MSXDevice> DeviceFactory::create(const DeviceConfig& conf)
 {
-	unique_ptr<MSXDevice> result;
-	const std::string& type = conf.getXML()->getName();
+	std::unique_ptr<MSXDevice> result;
+	const auto& type = conf.getXML()->getName();
 	if (type == "PPI") {
 		result = make_unique<MSXPPI>(conf);
 	} else if (type == "SVIPPI") {
@@ -136,7 +153,7 @@ unique_ptr<MSXDevice> DeviceFactory::create(const DeviceConfig& conf)
 		result = make_unique<MSXE6Timer>(conf);
 	} else if (type == "HiResTimer") {
 		result = make_unique<MSXHiResTimer>(conf);
-	} else if (type == "ResetStatusRegister" || type == "F4Device") {
+	} else if (type == one_of("ResetStatusRegister", "F4Device")) {
 		result = make_unique<MSXResetStatusRegister>(conf);
 	} else if (type == "TurboRPause") {
 		result = make_unique<MSXTurboRPause>(conf);
@@ -150,6 +167,12 @@ unique_ptr<MSXDevice> DeviceFactory::create(const DeviceConfig& conf)
 		result = make_unique<ColecoJoystickIO>(conf);
 	} else if (type == "SuperGameModule") {
 		result = make_unique<ColecoSuperGameModule>(conf);
+	} else if (type == "SG1000Joystick") {
+		result = make_unique<SG1000JoystickIO>(conf);
+	} else if (type == "SG1000Pause") {
+		result = make_unique<SG1000Pause>(conf);
+	} else if (type == "SC3000PPI") {
+		result = make_unique<SC3000PPI>(conf);
 	} else if (type == "PSG") {
 		result = make_unique<MSXPSG>(conf);
 	} else if (type == "SVIPSG") {
@@ -165,7 +188,9 @@ unique_ptr<MSXDevice> DeviceFactory::create(const DeviceConfig& conf)
 	} else if (type == "MSX-AUDIO") {
 		result = make_unique<MSXAudio>(conf);
 	} else if (type == "MusicModuleMIDI") {
-		result = make_unique<MC6850>(conf);
+		result = make_unique<MusicModuleMIDI>(conf);
+	} else if (type == "JVCMSXMIDI") {
+		result = make_unique<JVCMSXMIDI>(conf);
 	} else if (type == "FACMIDIInterface") {
 		result = make_unique<MSXFacMidiInterface>(conf);
 	} else if (type == "YamahaSFG") {
@@ -194,7 +219,7 @@ unique_ptr<MSXDevice> DeviceFactory::create(const DeviceConfig& conf)
 		result = make_unique<SVIPrinterPort>(conf);
 	} else if (type == "SCCplus") { // Note: it's actually called SCC-I
 		result = make_unique<MSXSCCPlusCart>(conf);
-	} else if ((type == "WD2793") || (type == "WD1770")) {
+	} else if (type == one_of("WD2793", "WD1770")) {
 		result = createWD2793BasedFDC(conf);
 	} else if (type == "Microsol") {
 		conf.getCliComm().printWarning(
@@ -209,6 +234,10 @@ unique_ptr<MSXDevice> DeviceFactory::create(const DeviceConfig& conf)
 		result = make_unique<NationalFDC>(conf);
 	} else if (type == "TC8566AF") {
 		result = make_unique<TurboRFDC>(conf);
+	} else if (type == "TDC600") {
+		result = make_unique<TalentTDC600>(conf);
+	} else if (type == "ToshibaTCX-200x") {
+		result = make_unique<MSXToshibaTcx200x>(conf);
 	} else if (type == "SVIFDC") {
 		result = make_unique<SVIFDC>(conf);
 	} else if (type == "BeerIDE") {
@@ -267,13 +296,17 @@ unique_ptr<MSXDevice> DeviceFactory::create(const DeviceConfig& conf)
 		result = make_unique<FraelSwitchableROM>(conf);
 	} else if (type == "ChakkariCopy") {
 		result = make_unique<ChakkariCopy>(conf);
+	} else if (type == "CanonWordProcessor") {
+		result = make_unique<CanonWordProcessor>(conf);
 	} else if (type == "MegaFlashRomSCCPlusSD") {
 		result = make_unique<MegaFlashRomSCCPlusSD>(conf);
 	} else if (type == "MusicalMemoryMapper") {
 		result = make_unique<MusicalMemoryMapper>(conf);
 	} else if (type == "Carnivore2") {
 		result = make_unique<Carnivore2>(conf);
-	} else if (type == "T9769") {
+	} else if (type == "YamahaSKW01") {
+		result = make_unique<YamahaSKW01>(conf);
+	} else if (type == one_of("T7775", "T7937", "T9763", "T9769")) {
 		// Ignore for now. We might want to create a real device for it later.
 	} else {
 		throw MSXException("Unknown device \"", type,
@@ -283,38 +316,39 @@ unique_ptr<MSXDevice> DeviceFactory::create(const DeviceConfig& conf)
 	return result;
 }
 
-static XMLElement createConfig(string_view name, string_view id)
+[[nodiscard]] static XMLElement& createConfig(const char* name, const char* id)
 {
-	XMLElement config(name);
-	config.addAttribute("id", id);
-	return config;
+	auto& doc = XMLDocument::getStaticDocument();
+	auto* config = doc.allocateElement(name);
+	config->setFirstAttribute(doc.allocateAttribute("id", id));
+	return *config;
 }
 
-unique_ptr<DummyDevice> DeviceFactory::createDummyDevice(
+std::unique_ptr<DummyDevice> DeviceFactory::createDummyDevice(
 		const HardwareConfig& hwConf)
 {
-	static XMLElement xml(createConfig("Dummy", {}));
+	static const XMLElement& xml(createConfig("Dummy", ""));
 	return make_unique<DummyDevice>(DeviceConfig(hwConf, xml));
 }
 
-unique_ptr<MSXDeviceSwitch> DeviceFactory::createDeviceSwitch(
+std::unique_ptr<MSXDeviceSwitch> DeviceFactory::createDeviceSwitch(
 		const HardwareConfig& hwConf)
 {
-	static XMLElement xml(createConfig("DeviceSwitch", "DeviceSwitch"));
+	static const XMLElement& xml(createConfig("DeviceSwitch", "DeviceSwitch"));
 	return make_unique<MSXDeviceSwitch>(DeviceConfig(hwConf, xml));
 }
 
-unique_ptr<MSXMapperIO> DeviceFactory::createMapperIO(
+std::unique_ptr<MSXMapperIO> DeviceFactory::createMapperIO(
 		const HardwareConfig& hwConf)
 {
-	static XMLElement xml(createConfig("MapperIO", "MapperIO"));
+	static const XMLElement& xml(createConfig("MapperIO", "MapperIO"));
 	return make_unique<MSXMapperIO>(DeviceConfig(hwConf, xml));
 }
 
-unique_ptr<VDPIODelay> DeviceFactory::createVDPIODelay(
+std::unique_ptr<VDPIODelay> DeviceFactory::createVDPIODelay(
 		const HardwareConfig& hwConf, MSXCPUInterface& cpuInterface)
 {
-	static XMLElement xml(createConfig("VDPIODelay", "VDPIODelay"));
+	static const XMLElement& xml(createConfig("VDPIODelay", "VDPIODelay"));
 	return make_unique<VDPIODelay>(DeviceConfig(hwConf, xml), cpuInterface);
 }
 

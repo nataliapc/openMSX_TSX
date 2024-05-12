@@ -2,11 +2,14 @@
 #define DRIVEMULTIPLEXER_HH
 
 #include "DiskDrive.hh"
+#include <array>
+#include <memory>
+#include <span>
 
 namespace openmsx {
 
 /**
- * This class connects to a FDC as a normal DiskDrive and deligates all
+ * This class connects to a FDC as a normal DiskDrive and delegates all
  * requests to one of four other DiskDrives.
  */
 class DriveMultiplexer final : public DiskDrive
@@ -21,39 +24,47 @@ public:
 	};
 
 	// Multiplexer interface
-	explicit DriveMultiplexer(DiskDrive* drv[4]);
+	explicit DriveMultiplexer(std::span<std::unique_ptr<DiskDrive>, 4> drv);
+
 	void selectDrive(DriveNum num, EmuTime::param time);
+	[[nodiscard]] DriveNum getSelectedDrive() const { return selected; }
 
 	// DiskDrive interface
-	bool isDiskInserted() const override;
-	bool isWriteProtected() const override;
-	bool isDoubleSided() const override;
-	bool isTrack00() const override;
+	[[nodiscard]] bool isDiskInserted() const override;
+	[[nodiscard]] bool isWriteProtected() const override;
+	[[nodiscard]] bool isDoubleSided() override;
+	[[nodiscard]] bool isTrack00() const override;
 	void setSide(bool side) override;
+	[[nodiscard]] bool getSide() const override;
 	void step(bool direction, EmuTime::param time) override;
 	void setMotor(bool status, EmuTime::param time) override;
-	bool indexPulse(EmuTime::param time) override;
-	EmuTime getTimeTillIndexPulse(EmuTime::param time, int count) override;
-	unsigned getTrackLength() override;
-	void writeTrackByte(int idx, byte val, bool addIdam) override;
-	byte  readTrackByte(int idx) override;
+	[[nodiscard]] bool getMotor() const override;
+	[[nodiscard]] bool indexPulse(EmuTime::param time) override;
+	[[nodiscard]] EmuTime getTimeTillIndexPulse(EmuTime::param time, int count) override;
+	[[nodiscard]] unsigned getTrackLength() override;
+	void writeTrackByte(int idx, uint8_t val, bool addIdam) override;
+	[[nodiscard]] uint8_t readTrackByte(int idx) override;
 	EmuTime getNextSector(EmuTime::param time, RawTrack::Sector& sector) override;
 	void flushTrack() override;
 	bool diskChanged() override;
-	bool peekDiskChanged() const override;
-	bool isDummyDrive() const override;
+	[[nodiscard]] bool peekDiskChanged() const override;
+	[[nodiscard]] bool isDummyDrive() const override;
 	void applyWd2793ReadTrackQuirk() override;
 	void invalidateWd2793ReadTrackQuirk() override;
+
+	[[nodiscard]] bool isDiskInserted(DriveNum num) const;
+	bool diskChanged(DriveNum num);
+	[[nodiscard]] bool peekDiskChanged(DriveNum num) const;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 private:
 	DummyDrive dummyDrive;
-	DiskDrive* drive[5];
-	DriveNum selected;
-	bool motor;
-	bool side;
+	std::array<DiskDrive*, 5> drive;
+	DriveNum selected = NO_DRIVE;
+	bool motor = false;
+	bool side = false;
 };
 
 } // namespace openmsx

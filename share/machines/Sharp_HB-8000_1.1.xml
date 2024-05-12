@@ -6,8 +6,9 @@
     <manufacturer>Sharp</manufacturer>
     <code>HB-8000 v1.1</code>
     <release_year>1985</release_year>
-    <description>Original white/gray model of the Hotbit.</description>
+    <description>Original white/gray model of the Hotbit, a 64kB Brazillian MSX1.</description>
     <type>MSX</type>
+    <region>br</region>
   </info>
 
   <CassettePort/>
@@ -19,7 +20,7 @@
         <volume>16000</volume>
       </sound>
       <io base="0xA8" num="4"/>
-      <keyboard_type>br_hotbit</keyboard_type>
+      <keyboard_type>br_hotbit_1_1</keyboard_type>
       <has_keypad>false</has_keypad>
       <key_ghosting_sgc_protected>true</key_ghosting_sgc_protected>
       <code_kana_locks>false</code_kana_locks>
@@ -36,8 +37,8 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <PrinterPort id="Printer Port">
@@ -60,6 +61,7 @@
 
     <primary slot="3">
       <RAM id="Main RAM">
+        <initialContent encoding="gz-base64">eJz7z/B/QOEAW/8fAASAf4E=</initialContent> <!-- line1 = (chr(0) + chr(255))*8; line2 = (chr(255) + chr(0))*8; line1 + line2; at least, as seen on Fábio Santos' machine -->
         <mem base="0x0000" size="0x10000"/>
       </RAM>
     </primary>

@@ -2,7 +2,8 @@
 #define ZLIBINFLATE_HH
 
 #include "MemBuffer.hh"
-#include "openmsx.hh"
+#include <cstdint>
+#include <span>
 #include <string>
 #include <zlib.h>
 
@@ -11,17 +12,21 @@ namespace openmsx {
 class ZlibInflate
 {
 public:
-	ZlibInflate(const byte* input, size_t inputLen);
+	explicit ZlibInflate(std::span<const uint8_t> input);
+	ZlibInflate(const ZlibInflate&) = delete;
+	ZlibInflate(ZlibInflate&&) = delete;
+	ZlibInflate& operator=(const ZlibInflate&) = delete;
+	ZlibInflate& operator=(ZlibInflate&&) = delete;
 	~ZlibInflate();
 
 	void skip(size_t num);
-	byte getByte();
-	unsigned get16LE();
-	unsigned get32LE();
-	std::string getString(size_t len);
-	std::string getCString();
+	[[nodiscard]] uint8_t getByte();
+	[[nodiscard]] unsigned get16LE();
+	[[nodiscard]] unsigned get32LE();
+	[[nodiscard]] std::string getString(size_t len);
+	[[nodiscard]] std::string getCString();
 
-	size_t inflate(MemBuffer<byte>& output, size_t sizeHint = 65536);
+	[[nodiscard]] size_t inflate(MemBuffer<uint8_t>& output, size_t sizeHint = 65536);
 
 private:
 	z_stream s;

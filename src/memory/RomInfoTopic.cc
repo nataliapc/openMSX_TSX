@@ -3,9 +3,6 @@
 #include "TclObject.hh"
 #include "CommandException.hh"
 
-using std::vector;
-using std::string;
-
 namespace openmsx {
 
 RomInfoTopic::RomInfoTopic(InfoCommand& openMSXInfoCommand)
@@ -13,7 +10,7 @@ RomInfoTopic::RomInfoTopic(InfoCommand& openMSXInfoCommand)
 {
 }
 
-void RomInfoTopic::execute(array_ref<TclObject> tokens, TclObject& result) const
+void RomInfoTopic::execute(std::span<const TclObject> tokens, TclObject& result) const
 {
 	switch (tokens.size()) {
 	case 2: {
@@ -25,10 +22,8 @@ void RomInfoTopic::execute(array_ref<TclObject> tokens, TclObject& result) const
 		if (type == ROM_UNKNOWN) {
 			throw CommandException("Unknown rom type");
 		}
-		result.addListElement("description");
-		result.addListElement(RomInfo::getDescription(type));
-		result.addListElement("blocksize");
-		result.addListElement(int(RomInfo::getBlockSize(type)));
+		result.addDictKeyValues("description", RomInfo::getDescription(type),
+		                        "blocksize", int(RomInfo::getBlockSize(type)));
 		break;
 	}
 	default:
@@ -36,13 +31,13 @@ void RomInfoTopic::execute(array_ref<TclObject> tokens, TclObject& result) const
 	}
 }
 
-string RomInfoTopic::help(const vector<string>& /*tokens*/) const
+std::string RomInfoTopic::help(std::span<const TclObject> /*tokens*/) const
 {
 	return "Shows a list of supported rom types. "
 	       "Or show info on a specific rom type.";
 }
 
-void RomInfoTopic::tabCompletion(vector<string>& tokens) const
+void RomInfoTopic::tabCompletion(std::vector<std::string>& tokens) const
 {
 	if (tokens.size() == 3) {
 		completeString(tokens, RomInfo::getAllRomTypes(), false);

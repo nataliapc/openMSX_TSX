@@ -8,13 +8,12 @@
     <release_year>2014</release_year>
     <description>Acid1Test v0.7, aka "Usual hardware in unusual slot layout".
 
-  This machine was carefully dedigned to stress-test slot accesses routines.
-Incorrect assumptions about memory/resources layout will fail to run. Software
-must also correctly handle extended slots to run properly.
+This machine was carefully dedigned to stress-test slot accesses routines. Incorrect assumptions about memory/resources layout will fail to run. Software must also correctly handle extended slots to run properly.
 
 For more info, see http://frs.badcoffee.info/MSXAcidTests.html
 </description>
     <type>MSX2+</type>
+    <region>jp</region>
   </info>
 
 <!--
@@ -71,8 +70,7 @@ For more info, see http://frs.badcoffee.info/MSXAcidTests.html
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
     </PSG>
 
     <RTC id="Real time clock">
@@ -176,6 +174,7 @@ For more info, see http://frs.badcoffee.info/MSXAcidTests.html
             <volume>9000</volume>
             <balance>-75</balance>
           </sound>
+          <ym2413-core>NukeYKT</ym2413-core>
           <io base="0x7C" num="2" type="O"/>
           <mem base="0x4000" size="0x4000"/>
         </MSX-MUSIC>

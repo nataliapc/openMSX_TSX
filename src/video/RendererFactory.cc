@@ -2,7 +2,6 @@
 #include "RenderSettings.hh"
 #include "Reactor.hh"
 #include "Display.hh"
-#include "Version.hh"
 #include "unreachable.hh"
 #include <memory>
 
@@ -22,74 +21,57 @@
 #include "LDPixelRenderer.hh"
 #endif
 
-using std::unique_ptr;
+namespace openmsx::RendererFactory {
 
-namespace openmsx {
-namespace RendererFactory {
-
-unique_ptr<VideoSystem> createVideoSystem(Reactor& reactor)
+std::unique_ptr<VideoSystem> createVideoSystem(Reactor& reactor)
 {
 	Display& display = reactor.getDisplay();
 	switch (display.getRenderSettings().getRenderer()) {
 		case RenderSettings::DUMMY:
 			return std::make_unique<DummyVideoSystem>();
-		case RenderSettings::SDL:
 		case RenderSettings::SDLGL_PP:
-		case RenderSettings::SDLGL_FB16:
-		case RenderSettings::SDLGL_FB32:
-			return std::make_unique<SDLVideoSystem>(
-				reactor, display.getCommandConsole());
+			return std::make_unique<SDLVideoSystem>(reactor);
 		default:
-			UNREACHABLE; return nullptr;
+			UNREACHABLE;
 	}
 }
 
-unique_ptr<Renderer> createRenderer(VDP& vdp, Display& display)
+std::unique_ptr<Renderer> createRenderer(VDP& vdp, Display& display)
 {
 	switch (display.getRenderSettings().getRenderer()) {
 		case RenderSettings::DUMMY:
 			return std::make_unique<DummyRenderer>();
-		case RenderSettings::SDL:
 		case RenderSettings::SDLGL_PP:
-		case RenderSettings::SDLGL_FB16:
-		case RenderSettings::SDLGL_FB32:
 			return std::make_unique<PixelRenderer>(vdp, display);
 		default:
-			UNREACHABLE; return nullptr;
+			UNREACHABLE;
 	}
 }
 
-unique_ptr<V9990Renderer> createV9990Renderer(V9990& vdp, Display& display)
+std::unique_ptr<V9990Renderer> createV9990Renderer(V9990& vdp, Display& display)
 {
 	switch (display.getRenderSettings().getRenderer()) {
 		case RenderSettings::DUMMY:
 			return std::make_unique<V9990DummyRenderer>();
-		case RenderSettings::SDL:
 		case RenderSettings::SDLGL_PP:
-		case RenderSettings::SDLGL_FB16:
-		case RenderSettings::SDLGL_FB32:
 			return std::make_unique<V9990PixelRenderer>(vdp);
 		default:
-			UNREACHABLE; return nullptr;
+			UNREACHABLE;
 	}
 }
 
 #if COMPONENT_LASERDISC
-unique_ptr<LDRenderer> createLDRenderer(LaserdiscPlayer& ld, Display& display)
+std::unique_ptr<LDRenderer> createLDRenderer(LaserdiscPlayer& ld, Display& display)
 {
 	switch (display.getRenderSettings().getRenderer()) {
 		case RenderSettings::DUMMY:
 			return std::make_unique<LDDummyRenderer>();
-		case RenderSettings::SDL:
 		case RenderSettings::SDLGL_PP:
-		case RenderSettings::SDLGL_FB16:
-		case RenderSettings::SDLGL_FB32:
 			return std::make_unique<LDPixelRenderer>(ld, display);
 		default:
-			UNREACHABLE; return nullptr;
+			UNREACHABLE;
 	}
 }
 #endif
 
-} // namespace RendererFactory
-} // namespace openmsx
+} // namespace openmsx::RendererFactory

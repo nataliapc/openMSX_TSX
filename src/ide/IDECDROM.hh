@@ -2,36 +2,62 @@
 #define IDECDROM_HH
 
 #include "AbstractIDEDevice.hh"
+#include "MSXMotherBoard.hh"
 #include "File.hh"
+#include "RecordedCommand.hh"
 #include <bitset>
 #include <memory>
+#include <optional>
 
 namespace openmsx {
 
 class DeviceConfig;
-class CDXCommand;
+class IDECDROM;
 
-class IDECDROM final : public AbstractIDEDevice
+class CDXCommand final : public RecordedCommand
 {
 public:
-	IDECDROM(const IDECDROM&) = delete;
-	IDECDROM& operator=(const IDECDROM&) = delete;
+	CDXCommand(CommandController& commandController,
+	           StateChangeDistributor& stateChangeDistributor,
+	           Scheduler& scheduler, IDECDROM& cd);
+	void execute(std::span<const TclObject> tokens,
+		TclObject& result, EmuTime::param time) override;
+	[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override;
+	void tabCompletion(std::vector<std::string>& tokens) const override;
+private:
+	IDECDROM& cd;
+};
 
+class IDECDROM final : public AbstractIDEDevice, public MediaInfoProvider
+{
+public:
+	static constexpr unsigned MAX_CD = 26;
+	using CDInUse = std::bitset<MAX_CD>;
+	static std::shared_ptr<CDInUse> getDrivesInUse(MSXMotherBoard& motherBoard);
+
+public:
 	explicit IDECDROM(const DeviceConfig& config);
-	~IDECDROM();
+	IDECDROM(const IDECDROM&) = delete;
+	IDECDROM(IDECDROM&&) = delete;
+	IDECDROM& operator=(const IDECDROM&) = delete;
+	IDECDROM& operator=(IDECDROM&&) = delete;
+	~IDECDROM() override;
 
 	void eject();
 	void insert(const std::string& filename);
+
+	// MediaInfoProvider
+	void getMediaInfo(TclObject& result) override;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 protected:
 	// AbstractIDEDevice:
-	bool isPacketDevice() override;
-	const std::string& getDeviceName() override;
+	[[nodiscard]] bool isPacketDevice() override;
+	[[nodiscard]] std::string_view getDeviceName() override;
 	void fillIdentifyBlock (AlignedBuffer& buffer) override;
-	unsigned readBlockStart(AlignedBuffer& buffer, unsigned count) override;
+	[[nodiscard]] unsigned readBlockStart(AlignedBuffer& buffer, unsigned count) override;
 	void readEnd() override;
 	void writeBlockComplete(AlignedBuffer& buffer, unsigned count) override;
 	void executeCommand(byte cmd) override;
@@ -39,11 +65,11 @@ protected:
 private:
 	// Flags for the interrupt reason register:
 	/** Bus release: 0 = normal, 1 = bus release */
-	static const byte REL = 0x04;
+	static constexpr byte REL = 0x04;
 	/** I/O direction: 0 = host->device, 1 = device->host */
-	static const byte I_O = 0x02;
+	static constexpr byte I_O = 0x02;
 	/** Command/data: 0 = data, 1 = command */
-	static const byte C_D = 0x01;
+	static constexpr byte C_D = 0x01;
 
 	/** Indicates the start of a read data transfer performed in packets.
 	  * @param count Total number of bytes to transfer.
@@ -53,7 +79,7 @@ private:
 	void executePacketCommand(AlignedBuffer& packet);
 
 	std::string name;
-	std::unique_ptr<CDXCommand> cdxCommand;
+	std::optional<CDXCommand> cdxCommand; // delayed init
 	File file;
 	unsigned byteCountLimit;
 	unsigned transferOffset;
@@ -66,8 +92,6 @@ private:
 	bool remMedStatNotifEnabled;
 	bool mediaChanged;
 
-	static const unsigned MAX_CD = 26;
-	using CDInUse = std::bitset<MAX_CD>;
 	std::shared_ptr<CDInUse> cdInUse;
 
 	friend class CDXCommand;

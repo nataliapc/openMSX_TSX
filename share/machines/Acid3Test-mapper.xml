@@ -8,14 +8,14 @@
     <release_year>2014</release_year>
     <description>Acid3Test v0.1, aka "unusual memory-mapper configuration"
 
-  This machine was carefully dedigned to stress-test memory-mapper handling
-  routines. Any of the following bad practices will fail to run:
-  - Reading the Memory Mapper registers
-  - Assuming that the primary mapper is the biggest one
+This machine was carefully dedigned to stress-test memory-mapper handling routines. Any of the following bad practices will fail to run:
+- Reading the Memory Mapper registers
+- Assuming that the primary mapper is the biggest one
 
 For more info, see http://frs.badcoffee.info/MSXAcidTests.html
     </description>
     <type>MSXturboR</type>
+    <region>jp</region>
   </info>
 
 
@@ -87,8 +87,7 @@ For more info, see http://frs.badcoffee.info/MSXAcidTests.html
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
     </PSG>
 
     <RTC id="Real time clock">
@@ -143,6 +142,7 @@ For more info, see http://frs.badcoffee.info/MSXAcidTests.html
           <sound>
             <volume>9000</volume>
           </sound>
+          <ym2413-core>NukeYKT</ym2413-core>
           <io base="0x7C" num="2" type="O"/>
           <mem base="0x4000" size="0x4000"/>
         </MSX-MUSIC>

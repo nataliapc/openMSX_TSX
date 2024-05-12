@@ -2,10 +2,11 @@
 #include "MSXMotherBoard.hh"
 #include "LedStatus.hh"
 #include "Version.hh"
+#include "narrow.hh"
 #include "serialize.hh"
 #include "unreachable.hh"
+#include "xrange.hh"
 #include <cassert>
-#include <cstring>
 #include <cstdio>
 
 namespace openmsx {
@@ -13,17 +14,10 @@ namespace openmsx {
 AbstractIDEDevice::AbstractIDEDevice(MSXMotherBoard& motherBoard_)
 	: motherBoard(motherBoard_)
 {
-	transferRead = false;
-	transferWrite = false;
-	transferIdx = 0;
-
-	// avoid UMR on serialize
-	memset(buffer, 0, sizeof(buffer));
-	bufferLeft = 0;
-	transferCount = 0;
+	ranges::fill(buffer, 0);
 }
 
-byte AbstractIDEDevice::diagnostic()
+byte AbstractIDEDevice::diagnostic() const
 {
 	// The Execute Device Diagnostic command is executed by both devices in
 	// parallel. Fortunately, returning 0x01 is valid in all cases:
@@ -76,10 +70,10 @@ byte AbstractIDEDevice::readReg(nibble reg, EmuTime::param /*time*/)
 	case 3: // sector number register / LBA low
 		return sectorNumReg;
 
-	case 4: // cyclinder low register / LBA mid
+	case 4: // cylinder low register / LBA mid
 		return cylinderLowReg;
 
-	case 5: // cyclinder high register / LBA high
+	case 5: // cylinder high register / LBA high
 		return cylinderHighReg;
 
 	case 6: // device/head register
@@ -102,7 +96,7 @@ byte AbstractIDEDevice::readReg(nibble reg, EmuTime::param /*time*/)
 	case 14:// alternate status reg, converted to read from normal
 		// status register by IDE interface
 	default:
-		UNREACHABLE; return 0x7F; // avoid warning
+		UNREACHABLE;
 	}
 }
 
@@ -123,11 +117,11 @@ void AbstractIDEDevice::writeReg(
 		sectorNumReg = value;
 		break;
 
-	case 4: // cyclinder low register / LBA mid
+	case 4: // cylinder low register / LBA mid
 		cylinderLowReg = value;
 		break;
 
-	case 5: // cyclinder high register / LBA high
+	case 5: // cylinder high register / LBA high
 		cylinderHighReg = value;
 		break;
 
@@ -156,7 +150,7 @@ void AbstractIDEDevice::writeReg(
 
 	case 0: // data register, converted to readData by IDE interface
 	default:
-		UNREACHABLE; break;
+		UNREACHABLE;
 	}
 }
 
@@ -167,8 +161,8 @@ word AbstractIDEDevice::readData(EmuTime::param /*time*/)
 		return 0x7F7F;
 	}
 	assert((transferIdx + 1) < sizeof(buffer));
-	word result = (buffer[transferIdx + 0] << 0) +
-	              (buffer[transferIdx + 1] << 8);
+	auto result = word((buffer[transferIdx + 0] << 0) +
+	                   (buffer[transferIdx + 1] << 8));
 	transferIdx += 2;
 	bufferLeft -= 2;
 	if (bufferLeft == 0) {
@@ -201,8 +195,8 @@ void AbstractIDEDevice::writeData(word value, EmuTime::param /*time*/)
 		return;
 	}
 	assert((transferIdx + 1) < sizeof(buffer));
-	buffer[transferIdx + 0] = value & 0xFF;
-	buffer[transferIdx + 1] = value >> 8;
+	buffer[transferIdx + 0] = narrow_cast<byte>(value & 0xFF);
+	buffer[transferIdx + 1] = narrow_cast<byte>(value >> 8);
 	transferIdx += 2;
 	bufferLeft -= 2;
 	if (bufferLeft == 0) {
@@ -257,15 +251,15 @@ void AbstractIDEDevice::setInterruptReason(byte value)
 	sectorCountReg = value;
 }
 
-unsigned AbstractIDEDevice::getByteCount()
+unsigned AbstractIDEDevice::getByteCount() const
 {
 	return cylinderLowReg | (cylinderHighReg << 8);
 }
 
 void AbstractIDEDevice::setByteCount(unsigned count)
 {
-	cylinderLowReg = count & 0xFF;
-	cylinderHighReg = count >> 8;
+	cylinderLowReg  = narrow_cast<byte>(count & 0xFF);
+	cylinderHighReg = narrow_cast<byte>(count >> 8);
 }
 
 void AbstractIDEDevice::setSectorNumber(unsigned lba)
@@ -347,7 +341,7 @@ AlignedBuffer& AbstractIDEDevice::startShortReadTransfer(unsigned count)
 	transferCount = 0;
 	bufferLeft = count;
 	transferIdx = 0;
-	memset(buffer, 0x00, count);
+	ranges::fill(std::span{buffer.data(), count}, 0);
 	return buffer;
 }
 
@@ -409,19 +403,19 @@ void AbstractIDEDevice::setTransferWrite(bool status)
 
 /** Writes a string to a location in the identify block.
   * Helper method for createIdentifyBlock.
-  * @param p Pointer to write the characters to.
-  * @param len Number of words to write.
+  * @param dst Buffer to write the characters to.
   * @param s ASCII string to write.
-  *   If the string is longer  than len*2 characters, it is truncated.
-  *   If the string is shorter than len*2 characters, it is padded with spaces.
+  *   If the string is longer  than the buffer, it is truncated.
+  *   If the string is shorter than the buffer, it is padded with spaces.
   */
-static void writeIdentifyString(byte* p, unsigned len, std::string s)
+static void writeIdentifyString(std::span<byte> dst, std::string s)
 {
-	s.resize(2 * len, ' ');
-	for (unsigned i = 0; i < len; ++i) {
+	assert((dst.size() % 2) == 0);
+	s.resize(dst.size(), ' ');
+	for (size_t i = 0; i < dst.size(); i += 2) {
 		// copy and swap
-		p[2 * i + 0] = s[2 * i + 1];
-		p[2 * i + 1] = s[2 * i + 0];
+		dst[i + 0] = s[i + 1];
+		dst[i + 1] = s[i + 0];
 	}
 }
 
@@ -429,13 +423,13 @@ void AbstractIDEDevice::createIdentifyBlock(AlignedBuffer& buf)
 {
 	// According to the spec, the combination of model and serial should be
 	// unique. But I don't know any MSX software that cares about this.
-	writeIdentifyString(&buf[10 * 2], 10, "s00000001"); // serial
-	writeIdentifyString(&buf[23 * 2], 4,
+	writeIdentifyString(std::span{&buf[10 * 2], 2 * 10}, "s00000001"); // serial
+	writeIdentifyString(std::span{&buf[23 * 2], 2 * 4},
 		// Use openMSX version as firmware revision, because most of our
 		// IDE emulation code is in fact emulating the firmware.
 		Version::RELEASE ? strCat('v', Version::VERSION)
-                                 : strCat('d', Version::REVISION));
-	writeIdentifyString(&buf[27 * 2], 20, getDeviceName()); // model
+		                 : strCat('d', Version::REVISION));
+	writeIdentifyString(std::span{&buf[27 * 2], 2 * 20}, std::string(getDeviceName())); // model
 
 	fillIdentifyBlock(buf);
 }
@@ -445,23 +439,23 @@ template<typename Archive>
 void AbstractIDEDevice::serialize(Archive& ar, unsigned /*version*/)
 {
 	// no need to serialize IDEDevice base class
-	ar.serialize_blob("buffer", buffer, sizeof(buffer));
-	ar.serialize("transferIdx", transferIdx);
-	ar.serialize("bufferLeft", bufferLeft);
-	ar.serialize("transferCount", transferCount);
-	ar.serialize("errorReg", errorReg);
-	ar.serialize("sectorCountReg", sectorCountReg);
-	ar.serialize("sectorNumReg", sectorNumReg);
-	ar.serialize("cylinderLowReg", cylinderLowReg);
-	ar.serialize("cylinderHighReg", cylinderHighReg);
-	ar.serialize("devHeadReg", devHeadReg);
-	ar.serialize("statusReg", statusReg);
-	ar.serialize("featureReg", featureReg);
+	ar.serialize_blob("buffer", buffer);
+	ar.serialize("transferIdx",     transferIdx,
+	             "bufferLeft",      bufferLeft,
+	             "transferCount",   transferCount,
+	             "errorReg",        errorReg,
+	             "sectorCountReg",  sectorCountReg,
+	             "sectorNumReg",    sectorNumReg,
+	             "cylinderLowReg",  cylinderLowReg,
+	             "cylinderHighReg", cylinderHighReg,
+	             "devHeadReg",      devHeadReg,
+	             "statusReg",       statusReg,
+	             "featureReg",      featureReg);
 	bool transferIdentifyBlock = false; // remove on next version increment
 	                                    // no need to break bw-compat now
-	ar.serialize("transferIdentifyBlock", transferIdentifyBlock);
-	ar.serialize("transferRead", transferRead);
-	ar.serialize("transferWrite", transferWrite);
+	ar.serialize("transferIdentifyBlock", transferIdentifyBlock,
+	             "transferRead",          transferRead,
+	             "transferWrite",         transferWrite);
 }
 INSTANTIATE_SERIALIZE_METHODS(AbstractIDEDevice);
 

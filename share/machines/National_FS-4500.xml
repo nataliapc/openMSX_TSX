@@ -6,8 +6,9 @@
     <manufacturer>National</manufacturer>
     <code>FS-4500</code>
     <release_year>1986</release_year>
-    <description/>
+    <description>Japanese MSX2 with built in printer, targeted for word processing, supported by built in software.</description>
     <type>MSX2</type>
+    <region>jp</region>
   </info>
 
   <CassettePort/>
@@ -27,7 +28,7 @@
       <io base="0xD9" num="1" type="I"/>
     </Kanji>
 
-    <S1985 id="S1985">
+    <S1985 id="S1985"> <!-- includes 5 bits mapper-read-back -->
       <sramname>fs-4500_s1985.sram</sramname>
     </S1985>
 
@@ -35,7 +36,7 @@
       <sound>
         <volume>16000</volume>
       </sound>
-      <io base="0xA8" num="4"/>
+      <io base="0xA8" num="8"/> <!-- S-1985 mirrors -->
       <keyboard_type>jp_jis</keyboard_type>
       <has_keypad>true</has_keypad>
       <key_ghosting_sgc_protected>false</key_ghosting_sgc_protected>
@@ -57,18 +58,19 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="8" type="IO"/> <!-- S-1985 mirrors -->
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <RTC id="Real time clock">
       <sramname>fs-4500.cmos</sramname>
-      <io base="0xB4" num="2" type="O"/>
-      <io base="0xB5" num="1" type="I"/>
+      <io base="0xB4" num="4" type="IO"/> <!-- S-1985 mirrors -->
     </RTC>
 
     <PrinterPort id="Printer Port">
-      <io base="0x90" num="2"/>
+      <io base="0x90" num="8" type="IO"/> <!-- S-1985 mirrors -->
+      <bidirectional>true</bidirectional> <!-- S-1985 feature (but not used, nor implemented) -->
+      <unused_bits>0x00</unused_bits>
     </PrinterPort>
 
     <primary slot="0">

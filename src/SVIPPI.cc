@@ -3,7 +3,7 @@
 #include "Reactor.hh"
 #include "CassettePort.hh"
 #include "JoystickPort.hh"
-#include "XMLElement.hh"
+#include "GlobalSettings.hh"
 #include "serialize.hh"
 
 // Keyboard Matrix
@@ -69,7 +69,7 @@ namespace openmsx {
 SVIPPI::SVIPPI(const DeviceConfig& config)
 	: MSXDevice(config)
 	, cassettePort(getMotherBoard().getCassettePort())
-	, i8255(*this, getCurrentTime(), getCliComm())
+	, i8255(*this, getCurrentTime(), config.getGlobalSettings().getInvalidPpiModeSetting())
 	, click(config)
 	, keyboard(
 		config.getMotherBoard(),
@@ -79,8 +79,6 @@ SVIPPI::SVIPPI(const DeviceConfig& config)
 		config.getMotherBoard().getMSXEventDistributor(),
 		config.getMotherBoard().getStateChangeDistributor(),
 		Keyboard::MATRIX_SVI, config)
-	, prevBits(15)
-	, selectedRow(0)
 {
 	ports[0] = &getMotherBoard().getJoystickPort(0);
 	ports[1] = &getMotherBoard().getJoystickPort(1);
@@ -142,8 +140,7 @@ byte SVIPPI::readB(EmuTime::param time)
 }
 byte SVIPPI::peekB(EmuTime::param /*time*/) const
 {
-	auto& keyb = const_cast<Keyboard&>(keyboard);
-	return keyb.getKeys()[selectedRow];
+	return keyboard.getKeys()[selectedRow];
 }
 void SVIPPI::writeB(byte /*value*/, EmuTime::param /*time*/)
 {
@@ -174,7 +171,7 @@ void SVIPPI::writeC1(nibble value, EmuTime::param time)
 		cassettePort.cassetteOut((value & 2) != 0, time);
 	}
 	//if ((prevBits ^ value) & 4) {
-	//	cassetteDevice.Mute(); // CASAUD, mute case speker (1=enable, 0=disable)
+	//	cassetteDevice.Mute(); // CASAUD, mute case speaker (1=enable, 0=disable)
 	//}
 	if ((prevBits ^ value) & 8) {
 		click.setClick((value & 8) != 0, time);
@@ -193,9 +190,9 @@ void SVIPPI::serialize(Archive& ar, unsigned /*version*/)
 	ar.serialize("i8255", i8255);
 
 	// merge prevBits and selectedRow into one byte
-	byte portC = (prevBits << 4) | (selectedRow << 0);
+	auto portC = byte((prevBits << 4) | (selectedRow << 0));
 	ar.serialize("portC", portC);
-	if (ar.isLoader()) {
+	if constexpr (Archive::IS_LOADER) {
 		selectedRow = (portC >> 0) & 0xF;
 		nibble bits = (portC >> 4) & 0xF;
 		writeC1(bits, getCurrentTime());

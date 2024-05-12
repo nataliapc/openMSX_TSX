@@ -11,8 +11,9 @@
 #define PRINTER_HH
 
 #include "PrinterPortDevice.hh"
-#include "openmsx.hh"
+#include <array>
 #include <memory>
+#include <utility>
 
 namespace openmsx {
 
@@ -26,9 +27,9 @@ class PrinterCore : public PrinterPortDevice
 {
 public:
 	// PrinterPortDevice
-	bool getStatus(EmuTime::param time) override;
+	[[nodiscard]] bool getStatus(EmuTime::param time) override;
 	void setStrobe(bool strobe, EmuTime::param time) override;
-	void writeData(byte data, EmuTime::param time) override;
+	void writeData(uint8_t data, EmuTime::param time) override;
 
 	// Pluggable
 	void plugHelper(Connector& connector, EmuTime::param time) override;
@@ -36,60 +37,43 @@ public:
 
 protected:
 	PrinterCore() = default;
-	~PrinterCore() = default;
-	virtual void write(byte data) = 0;
+	~PrinterCore() override = default;
+	virtual void write(uint8_t data) = 0;
 	virtual void forceFormFeed() = 0;
 
 private:
-	byte toPrint = 0;
+	uint8_t toPrint = 0;
 	bool prevStrobe = true;
 };
 
-/*
-// sends data to host printer
-class RawPrinter : public PrinterCore
-{
-public:
-	RawPrinter();
-	~RawPrinter();
-
-	void write(byte data);
-	void forceFormFeed();
-	// Pluggable
-	const std::string& getName() const override;
-	const std::string getDescription() const override;
-
-private:
-	HANDLE hFile;
-};
-*/
 
 // Abstract image printer
 class ImagePrinter : public PrinterCore
 {
 public:
-	void write(byte data) override;
+	void write(uint8_t data) override;
 	void forceFormFeed() override;
 
 protected:
 	ImagePrinter(MSXMotherBoard& motherBoard, bool graphicsHiLo);
-	~ImagePrinter();
+	~ImagePrinter() override;
 
 	void resetEmulatedPrinter();
-	void printGraphicByte(byte data);
+	void printGraphicByte(uint8_t data);
 	void seekPrinterHeadRelative(double offset);
 	void ensurePrintPage();
 	void flushEmulatedPrinter();
-	void printVisibleCharacter(byte data);
+	void printVisibleCharacter(uint8_t data);
 	void plot9Dots(double x, double y, unsigned pattern);
 
-	virtual void getNumberOfDots(unsigned& dotsX, unsigned& dotsY) = 0;
+	[[nodiscard]] virtual std::pair<unsigned, unsigned> getNumberOfDots() = 0;
 	virtual void resetSettings() = 0;
-	virtual unsigned calcEscSequenceLength(byte character) = 0;
+	[[nodiscard]] virtual unsigned calcEscSequenceLength(uint8_t character) = 0;
 	virtual void processEscSequence() = 0;
-	virtual void processCharacter(byte data) = 0;
+	virtual void processCharacter(uint8_t data) = 0;
 
-	static const unsigned PIXEL_WIDTH = 8;
+protected:
+	static constexpr unsigned PIXEL_WIDTH = 8;
 
 	double graphDensity;
 	double fontDensity;
@@ -98,20 +82,20 @@ protected:
 	double pageTop;
 	double lineFeed;
 	double pageHeight;
-	double printAreaTop;
-	double printAreaBottom;
+	double printAreaTop = -1.0;
+	double printAreaBottom = 0.0;
 	double pixelSizeX;
 	double pixelSizeY;
-	int  eightBit;
-	unsigned perforationSkip;
+	int  eightBit = 0;
+	unsigned perforationSkip = 0;
 	unsigned leftBorder;
 	unsigned rightBorder;
 	unsigned fontWidth;
-	unsigned remainingCommandBytes;
-	unsigned sizeEscPos;
-	unsigned sizeRemainingDataBytes;
-	unsigned ramLoadOffset;
-	unsigned ramLoadEnd;
+	unsigned remainingCommandBytes = 0;
+	unsigned sizeEscPos = 0;
+	unsigned sizeRemainingDataBytes = 0;
+	unsigned ramLoadOffset = 0;
+	unsigned ramLoadEnd = 0;
 	unsigned lines;
 	enum CountryCode {
 		CC_USA              = 0,
@@ -124,39 +108,39 @@ protected:
 		CC_SPAIN            = 7,
 		CC_JAPAN            = 8
 	};
-	CountryCode countryCode;
+	CountryCode countryCode = CC_USA;
 
-	static const int MAX_ESC_CMDSIZE = 8;
-	byte abEscSeq[MAX_ESC_CMDSIZE];
+	static constexpr int MAX_ESC_CMDSIZE = 8;
+	std::array<uint8_t, MAX_ESC_CMDSIZE> abEscSeq;
 
-	static const int MAX_FONT_WIDTH = 12;
+	static constexpr int MAX_FONT_WIDTH = 12;
 	struct FontInfo {
-		byte rom[256 * MAX_FONT_WIDTH];
-		byte ram[256 * MAX_FONT_WIDTH];
+		std::array<uint8_t, 256 * MAX_FONT_WIDTH> rom;
+		std::array<uint8_t, 256 * MAX_FONT_WIDTH> ram;
 		double pixelDelta;
 		unsigned charWidth;
 		bool useRam;
 	} fontInfo;
 
-	bool letterQuality;
-	bool bold;
-	bool proportional;
-	bool italic;
-	bool superscript;
-	bool subscript;
-	bool doubleWidth;
-	bool underline;
-	bool doubleStrike;
-	bool escSequence;
-	bool alternateChar;
-	bool detectPaperOut;
-	bool japanese;
-	bool normalAfterLine;
-	bool ninePinGraphics;
-	bool leftToRight;
-	bool elite;
-	bool compressed;
-	bool noHighEscapeCodes;
+	bool letterQuality = false;
+	bool bold = false;
+	bool proportional = false;
+	bool italic = false;
+	bool superscript = false;
+	bool subscript = false;
+	bool doubleWidth = false;
+	bool underline = false;
+	bool doubleStrike = false;
+	bool escSequence = false;
+	bool alternateChar = false;
+	bool detectPaperOut = false;
+	bool japanese = false;
+	bool normalAfterLine = false;
+	bool ninePinGraphics = false;
+	bool leftToRight = false;
+	bool elite = false;
+	bool compressed = false;
+	bool noHighEscapeCodes = false;
 
 private:
 	MSXMotherBoard& motherBoard;
@@ -174,21 +158,20 @@ public:
 	explicit ImagePrinterMSX(MSXMotherBoard& motherBoard);
 
 	// Pluggable
-	const std::string& getName() const override;
-	string_view getDescription() const override;
+	[[nodiscard]] std::string_view getName() const override;
+	[[nodiscard]] std::string_view getDescription() const override;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 private:
-	void msxPrnSetFont(const byte* msxBits);
-	unsigned parseNumber(unsigned sizeStart, unsigned sizeChars);
+	[[nodiscard]] unsigned parseNumber(unsigned sizeStart, unsigned sizeChars);
 
-	void getNumberOfDots(unsigned& dotsX, unsigned& dotsY) override;
+	[[nodiscard]] std::pair<unsigned, unsigned> getNumberOfDots() override;
 	void resetSettings() override;
-	unsigned calcEscSequenceLength(byte character) override;
+	[[nodiscard]] unsigned calcEscSequenceLength(uint8_t character) override;
 	void processEscSequence() override;
-	void processCharacter(byte data) override;
+	void processCharacter(uint8_t data) override;
 };
 
 // emulated Epson printer
@@ -198,20 +181,20 @@ public:
 	explicit ImagePrinterEpson(MSXMotherBoard& motherBoard);
 
 	// Pluggable
-	const std::string& getName() const override;
-	string_view getDescription() const override;
+	[[nodiscard]] std::string_view getName() const override;
+	[[nodiscard]] std::string_view getDescription() const override;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 private:
-	unsigned parseNumber(unsigned sizeStart, unsigned sizeChars);
+	[[nodiscard]] unsigned parseNumber(unsigned sizeStart, unsigned sizeChars);
 
-	void getNumberOfDots(unsigned& dotsX, unsigned& dotsY) override;
+	[[nodiscard]] std::pair<unsigned, unsigned> getNumberOfDots() override;
 	void resetSettings() override;
-	unsigned calcEscSequenceLength(byte character) override;
+	[[nodiscard]] unsigned calcEscSequenceLength(uint8_t character) override;
 	void processEscSequence() override;
-	void processCharacter(byte data) override;
+	void processCharacter(uint8_t data) override;
 };
 
 } // namespace openmsx

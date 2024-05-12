@@ -94,24 +94,28 @@ inline uint16_t tstates2bytes(uint32_t tstates)
 	return 	( tstates * OUTPUT_FREQ / TZX_Z80_FREQ );
 }
 
-TsxImage::TsxImage(const Filename& filename, FilePool& filePool, CliComm& cliComm)
+
+// CasImage::CasImage(const Filename& filename, FilePool& filePool, CliComm& cliComm)
+//	: data(init(filename, filePool, cliComm))
+
+TsxImage::TsxImage(const Filename& filename, FilePool& filePool, CliComm& cliComm) //: data(init(filename, filePool, cliComm))
 {
 	setFirstFileType(CassetteImage::UNKNOWN);
 	convert(filename, filePool, cliComm);
 }
 
-int16_t TsxImage::getSampleAt(EmuTime::param time)
+int16_t TsxImage::getSampleAt(EmuTime::param time) const
 {
-	static const Clock<OUTPUT_FREQ> zero(EmuTime::zero);
-	unsigned pos = zero.getTicksTill(time);
+    EmuDuration d = time - EmuTime::zero();
+    unsigned pos = d.getTicksAt(getFrequency());
 	return pos < output.size() ? output[pos] * 256 : 0;
 }
 
 EmuTime TsxImage::getEndTime() const
 {
-	Clock<OUTPUT_FREQ> clk(EmuTime::zero);
-	clk += unsigned(output.size());
-	return clk.getTime();
+	EmuDuration d = EmuDuration::hz(getFrequency()) * output.size();
+	return EmuTime::zero() + d;
+
 }
 
 unsigned TsxImage::getFrequency() const
@@ -119,7 +123,7 @@ unsigned TsxImage::getFrequency() const
 	return OUTPUT_FREQ;
 }
 
-void TsxImage::fillBuffer(unsigned pos, int** bufs, unsigned num) const
+void TsxImage::fillBuffer(unsigned pos, std::span<float*, 1> bufs, unsigned num) const
 {
 	size_t nbSamples = output.size();
 	if (pos < nbSamples) {
@@ -389,8 +393,8 @@ size_t TsxImage::writeBlock4B(Block4B *b) //MSX KCS Block
 void TsxImage::convert(const Filename& filename, FilePool& filePool, CliComm& cliComm)
 {
 	File file(filename);
-	size_t size;
-	const byte* buf = file.mmap(size);
+	size_t size = file.getSize();;
+	auto buf = file.mmap();
 
 	// search for a header in the .tsx file
 	bool issueWarning = false;
@@ -563,6 +567,11 @@ void TsxImage::convert(const Filename& filename, FilePool& filePool, CliComm& cl
 
 	// conversion successful, now calc sha1sum
 	setSha1Sum(filePool.getSha1Sum(file));
+}
+
+float TsxImage::getAmplificationFactorImpl() const
+{
+	return 1.0f / 128.0f;
 }
 
 } // namespace openmsx

@@ -1,8 +1,14 @@
 #ifdef _WIN32
 
 #include "SspiUtils.hh"
+
 #include "MSXException.hh"
+
+#include "xrange.hh"
+
 #include <sddl.h>
+
+#include <bit>
 #include <cassert>
 #include <iostream>
 
@@ -10,8 +16,7 @@
 // NOTE: This file MUST be kept in sync between the openmsx and openmsx-debugger projects
 //
 
-namespace openmsx {
-namespace sspiutils {
+namespace openmsx::sspiutils {
 
 SspiPackageBase::SspiPackageBase(StreamWrapper& userStream, const SEC_WCHAR* securityPackage)
 	: stream(userStream)
@@ -44,7 +49,7 @@ void InitTokenContextBuffer(PSecBufferDesc pSecBufferDesc, PSecBuffer pSecBuffer
 
 void ClearContextBuffers(PSecBufferDesc pSecBufferDesc)
 {
-	for (ULONG i = 0; i < pSecBufferDesc->cBuffers; i ++) {
+	for (auto i : xrange(pSecBufferDesc->cBuffers)) {
 		FreeContextBuffer(pSecBufferDesc->pBuffers[i].pvBuffer);
 		pSecBufferDesc->pBuffers[i].cbBuffer = 0;
 		pSecBufferDesc->pBuffers[i].pvBuffer = nullptr;
@@ -58,25 +63,25 @@ void DebugPrintSecurityStatus(const char* context, SECURITY_STATUS ss)
 #if 0
 	switch (ss) {
 	case SEC_E_OK:
-		std::cerr << context << ": SEC_E_OK" << std::endl;
+		std::cerr << context << ": SEC_E_OK\n";
 		break;
 	case SEC_I_CONTINUE_NEEDED:
-		std::cerr << context << ": SEC_I_CONTINUE_NEEDED" << std::endl;
+		std::cerr << context << ": SEC_I_CONTINUE_NEEDED\n";
 		break;
 	case SEC_E_INVALID_TOKEN:
-		std::cerr << context << ": SEC_E_INVALID_TOKEN" << std::endl;
+		std::cerr << context << ": SEC_E_INVALID_TOKEN\n";
 		break;
 	case SEC_E_BUFFER_TOO_SMALL:
-		std::cerr << context << ": SEC_E_BUFFER_TOO_SMALL" << std::endl;
+		std::cerr << context << ": SEC_E_BUFFER_TOO_SMALL\n";
 		break;
 	case SEC_E_INVALID_HANDLE:
-		std::cerr << context << ": SEC_E_INVALID_HANDLE" << std::endl;
+		std::cerr << context << ": SEC_E_INVALID_HANDLE\n";
 		break;
 	case SEC_E_WRONG_PRINCIPAL:
-		std::cerr << context << ": SEC_E_WRONG_PRINCIPAL" << std::endl;
+		std::cerr << context << ": SEC_E_WRONG_PRINCIPAL\n";
 		break;
 	default:
-		std::cerr << context << ": " << ss << std::endl;
+		std::cerr << context << ": " << ss << '\n';
 		break;
 	}
 #endif
@@ -88,9 +93,9 @@ void DebugPrintSecurityBool(const char* context, BOOL ret)
 	(void)&ret;
 #if 0
 	if (ret) {
-		std::cerr << context << ": true" << std::endl;
+		std::cerr << context << ": true\n";
 	} else {
-		std::cerr << context << ": false - " << GetLastError() << std::endl;
+		std::cerr << context << ": false - " << GetLastError() << '\n';
 	}
 #endif
 }
@@ -102,7 +107,7 @@ void DebugPrintSecurityPackageName(PCtxtHandle phContext)
 	SecPkgContext_PackageInfoA package;
 	SECURITY_STATUS ss = QueryContextAttributesA(phContext, SECPKG_ATTR_PACKAGE_INFO, &package);
 	if (ss == SEC_E_OK) {
-		std::cerr << "Using " << package.PackageInfo->Name << " package" << std::endl;
+		std::cerr << "Using " << package.PackageInfo->Name << " package\n";
 	}
 #endif
 }
@@ -114,7 +119,7 @@ void DebugPrintSecurityPrincipalName(PCtxtHandle phContext)
 	SecPkgContext_NamesA name;
 	SECURITY_STATUS ss = QueryContextAttributesA(phContext, SECPKG_ATTR_NAMES, &name);
 	if (ss == SEC_E_OK) {
-		std::cerr << "Client principal " << name.sUserName << std::endl;
+		std::cerr << "Client principal " << name.sUserName << '\n';
 	}
 #endif
 }
@@ -132,7 +137,7 @@ void DebugPrintSecurityDescriptor(PSECURITY_DESCRIPTOR psd)
 		&sddl,
 		nullptr);
 	if (ret) {
-		std::cerr << "SecurityDescriptor: " << sddl << std::endl;
+		std::cerr << "SecurityDescriptor: " << sddl << '\n';
 		LocalFree(sddl);
 	}
 #endif
@@ -189,7 +194,7 @@ PSECURITY_DESCRIPTOR CreateCurrentUserSecurityDescriptor()
 			    AddAccessAllowedAce(pacl, ACL_REVISION, ACCESS_ALL, pUserSid) &&
 			    SetSecurityDescriptorDacl(psd, TRUE, pacl, FALSE) &&
 			    // Need to set the Group and Owner on the SD in order to use it with AccessCheck()
-			    GetAce(pacl, 0, reinterpret_cast<void**>(&pUserAce)) &&
+			    GetAce(pacl, 0, std::bit_cast<void**>(&pUserAce)) &&
 			    SetSecurityDescriptorGroup(psd, &pUserAce->SidStart, FALSE) &&
 			    SetSecurityDescriptorOwner(psd, &pUserAce->SidStart, FALSE)) {
 				buffer = nullptr;
@@ -274,7 +279,6 @@ bool RecvChunk(StreamWrapper& stream, std::vector<char>& buffer, uint32_t cbMaxS
 	return true;
 }
 
-} // namespace sspiutils
-} // namespace openmsx
+} // namespace openmsx::sspiutils
 
 #endif

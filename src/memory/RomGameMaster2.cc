@@ -39,6 +39,7 @@
 #include "RomGameMaster2.hh"
 #include "SRAM.hh"
 #include "serialize.hh"
+#include "xrange.hh"
 #include <memory>
 
 namespace openmsx {
@@ -52,13 +53,13 @@ RomGameMaster2::RomGameMaster2(const DeviceConfig& config, Rom&& rom_)
 
 void RomGameMaster2::reset(EmuTime::param /*time*/)
 {
-	for (int i = 0; i < 4; i++) {
+	for (auto i : xrange(4)) {
 		setUnmapped(i);
 	}
-	for (int i = 4; i < 12; i++) {
+	for (auto i : xrange(4, 12)) {
 		setRom(i, i - 4);
 	}
-	for (int i = 12; i < 16; i++) {
+	for (auto i : xrange(12, 16)) {
 		setUnmapped(i);
 	}
 	sramOffset = 0;
@@ -69,9 +70,10 @@ void RomGameMaster2::writeMem(word address, byte value, EmuTime::param /*time*/)
 {
 	if ((0x6000 <= address) && (address < 0xB000)) {
 		if (!(address & 0x1000)) {
-			byte region = address >> 12; // 0x6, 0x8 or 0xA
+			auto region = address >> 12; // 0x6, 0x8 or 0xA
 			if (region == 0x0A) {
 				sramEnabled = (value & 0x10) != 0;
+				invalidateDeviceWCache(0xB000, 0x1000); // 'R' is handled below
 			}
 			if (value & 0x10) {
 				// switch SRAM
@@ -98,13 +100,13 @@ byte* RomGameMaster2::getWriteCacheLine(word address) const
 		if (!(address & 0x1000)) {
 			return nullptr;
 		} else {
-			return unmappedWrite;
+			return unmappedWrite.data();
 		}
 	} else if ((0xB000 <= address) && (address < 0xC000) && sramEnabled) {
 		// write SRAM
 		return nullptr;
 	} else {
-		return unmappedWrite;
+		return unmappedWrite.data();
 	}
 }
 
@@ -112,8 +114,8 @@ template<typename Archive>
 void RomGameMaster2::serialize(Archive& ar, unsigned /*version*/)
 {
 	ar.template serializeBase<Rom4kBBlocks>(*this);
-	ar.serialize("sramOffset", sramOffset);
-	ar.serialize("sramEnabled", sramEnabled);
+	ar.serialize("sramOffset",  sramOffset,
+	             "sramEnabled", sramEnabled);
 }
 INSTANTIATE_SERIALIZE_METHODS(RomGameMaster2);
 REGISTER_MSXDEVICE(RomGameMaster2, "RomGameMaster2");

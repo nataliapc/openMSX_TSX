@@ -1,30 +1,32 @@
 #include "HexDump.hh"
-#include "likely.hh"
+#include "narrow.hh"
 #include "strCat.hh"
+#include "xrange.hh"
 #include <algorithm>
 #include <cassert>
 
 namespace HexDump {
 
-using std::string;
 using openmsx::MemBuffer;
 
-static char encode2(uint8_t x)
+[[nodiscard]] static constexpr char encode2(uint8_t x)
 {
-	return (x < 10) ? (x + '0') : (x - 10 + 'A');
+	return (x < 10) ? char(x + '0') : char(x - 10 + 'A');
 }
-static string encode(uint8_t x)
+[[nodiscard]] static auto encode(uint8_t x)
 {
-	return strCat(encode2(x >> 4), encode2(x & 15));
+	return tmpStrCat(encode2(x >> 4), encode2(x & 15));
 }
-string encode(const uint8_t* input, size_t len, bool newlines)
+std::string encode(std::span<const uint8_t> input, bool newlines)
 {
-	string ret;
+	std::string ret;
+	size_t in = 0;
+	auto len = input.size();
 	while (len) {
 		if (newlines && !ret.empty()) ret += '\n';
-		int t = int(std::min<size_t>(16, len));
-		for (int i = 0; i < t; ++i) {
-			ret += encode(*input++);
+		auto t = int(std::min<size_t>(16, len));
+		for (auto i : xrange(t)) {
+			ret += encode(input[in++]);
 			if (i != (t - 1)) ret += ' ';
 		}
 		len -= t;
@@ -32,7 +34,7 @@ string encode(const uint8_t* input, size_t len, bool newlines)
 	return ret;
 }
 
-static int decode(char x)
+[[nodiscard]] static constexpr int decode(char x)
 {
 	if (('0' <= x) && (x <= '9')) {
 		return x - '0';
@@ -44,7 +46,7 @@ static int decode(char x)
 		return -1;
 	}
 }
-std::pair<MemBuffer<uint8_t>, size_t> decode(string_view input)
+std::pair<MemBuffer<uint8_t>, size_t> decode(std::string_view input)
 {
 	auto inSize = input.size();
 	auto outSize = inSize / 2; // overestimation
@@ -56,32 +58,37 @@ std::pair<MemBuffer<uint8_t>, size_t> decode(string_view input)
 	for (char c : input) {
 		int d = decode(c);
 		if (d == -1) continue;
+		assert(d >= 0);
+		assert(d <= 15);
 		if (flip) {
-			tmp = d;
+			tmp = narrow<uint8_t>(d);
 		} else {
-			ret[out++] = (tmp << 4) | d;
+			ret[out++] = narrow<uint8_t>((tmp << 4) | d);
 		}
 		flip = !flip;
 	}
 
 	assert(outSize >= out);
 	ret.resize(out); // shrink to correct size
-	return std::make_pair(std::move(ret), out);
+	return {std::move(ret), out};
 }
 
-bool decode_inplace(string_view input, uint8_t* output, size_t outSize)
+bool decode_inplace(std::string_view input, std::span<uint8_t> output)
 {
 	size_t out = 0;
+	auto outSize = output.size();
 	bool flip = true;
 	uint8_t tmp = 0;
 	for (char c : input) {
 		int d = decode(c);
 		if (d == -1) continue;
+		assert(d >= 0);
+		assert(d <= 15);
 		if (flip) {
-			tmp = d;
+			tmp = narrow<uint8_t>(d);
 		} else {
-			if (unlikely(out == outSize)) return false;
-			output[out++] = (tmp << 4) | d;
+			if (out == outSize) [[unlikely]] return false;
+			output[out++] = narrow<uint8_t>((tmp << 4) | d);
 		}
 		flip = !flip;
 	}

@@ -1,5 +1,6 @@
 #include "PrinterPortLogger.hh"
 #include "PlugException.hh"
+#include "FileContext.hh"
 #include "FileException.hh"
 #include "serialize.hh"
 
@@ -10,13 +11,6 @@ PrinterPortLogger::PrinterPortLogger(CommandController& commandController)
 		commandController, "printerlogfilename",
 		"filename of the file where the printer output is logged to",
 		"printer.log")
-	, toPrint(0) // Initialize to avoid a static analysis (cppcheck) warning.
-		     // For correctness it's not strictly needed to initialize
-		     // this variable. But understanding why exactly it's not
-		     // needed depends on the implementation details of a few
-		     // other classes, so let's simplify stuff and just
-		     // initialize.
-	, prevStrobe(true)
 {
 }
 
@@ -29,14 +23,14 @@ void PrinterPortLogger::setStrobe(bool strobe, EmuTime::param /*time*/)
 {
 	if (file.is_open() && !strobe && prevStrobe) {
 		// falling edge
-		file.write(&toPrint, 1);
+		file.write(std::span{&toPrint, 1});
 		file.flush(); // optimize when it turns out flushing
 		               // every time is too slow
 	}
 	prevStrobe = strobe;
 }
 
-void PrinterPortLogger::writeData(byte data, EmuTime::param /*time*/)
+void PrinterPortLogger::writeData(uint8_t data, EmuTime::param /*time*/)
 {
 	toPrint = data;
 }
@@ -45,7 +39,7 @@ void PrinterPortLogger::plugHelper(
 		Connector& /*connector*/, EmuTime::param /*time*/)
 {
 	try {
-		file = File(logFilenameSetting.getString(),
+		file = File(userFileContext().resolve(logFilenameSetting.getString()),
 		            File::TRUNCATE);
 	} catch (FileException& e) {
 		throw PlugException("Couldn't plug printer logger: ",
@@ -58,17 +52,16 @@ void PrinterPortLogger::unplugHelper(EmuTime::param /*time*/)
 	file.close();
 }
 
-const std::string& PrinterPortLogger::getName() const
+std::string_view PrinterPortLogger::getName() const
 {
-	static const std::string name("logger");
-	return name;
+	return "logger";
 }
 
-string_view PrinterPortLogger::getDescription() const
+std::string_view PrinterPortLogger::getDescription() const
 {
-	return	"Log everything that is sent to the printer port to a "
-		"file. The filename can be set with the "
-		"'printerlogfilename' setting.";
+	return "Log everything that is sent to the printer port to a "
+	       "file. The filename can be set with the "
+	       "'printerlogfilename' setting.";
 }
 
 template<typename Archive>

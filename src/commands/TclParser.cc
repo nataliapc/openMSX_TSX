@@ -1,19 +1,20 @@
 #include "TclParser.hh"
 #include "ScopedAssign.hh"
+#include "narrow.hh"
+#include "one_of.hh"
+#include "ranges.hh"
 #include "strCat.hh"
 #include <algorithm>
 #include <iostream>
 #include <cassert>
 
-using std::string;
-
 #if DEBUG_TCLPARSER
-void TclParser::DEBUG_PRINT(const string& s)
+void TclParser::DEBUG_PRINT(const std::string& s)
 {
-	std::cout << string(2 * level, ' ') << s << std::endl;
+	std::cout << std::string(2 * level, ' ') << s << '\n';
 }
 
-static string_view type2string(int type)
+static constexpr std::string_view type2string(int type)
 {
 	switch (type) {
 	case TCL_TOKEN_WORD:
@@ -41,57 +42,49 @@ static string_view type2string(int type)
 }
 #endif
 
-static bool inRange(char c, char low, char high)
+static constexpr bool inRange(char c, char low, char high)
 {
 	unsigned t = c - low;
 	return t <= unsigned(high - low);
 }
 
-static bool isNumber(string_view str)
+static bool isNumber(std::string_view str)
 {
 	if (str.starts_with('-') || str.starts_with('+')) {
-		str.pop_front();
+		str.remove_prefix(1);
 	}
 	if (str.starts_with("0x") || str.starts_with("0X")) {
 		str.remove_prefix(2);
-		for (auto c : str) {
-			if (!inRange(c, '0', '9') &&
-			    !inRange(c, 'a', 'f') &&
-			    !inRange(c, 'A', 'F')) {
-				return false;
-			}
-		}
+		return ranges::all_of(str, [](char c) {
+			return inRange(c, '0', '9') ||
+			       inRange(c, 'a', 'f') ||
+			       inRange(c, 'A', 'F');
+		});
 	} else {
-		for (auto c : str) {
-			if (!inRange(c, '0', '9')) return false;
-		}
+		return ranges::all_of(str,
+		                      [](char c) { return inRange(c, '0', '9'); });
 	}
-	return true;
 }
 
 
-TclParser::TclParser(Tcl_Interp* interp_, string_view input)
+TclParser::TclParser(Tcl_Interp* interp_, std::string_view input)
 	: interp(interp_)
 	, colors(input.size(), '.')
-	, parseStr(input.str())
-	, offset(0)
-#if DEBUG_TCLPARSER
-	, level(0)
-#endif
+	, parseStr(input)
 {
-	parse(parseStr.data(), int(parseStr.size()), COMMAND);
+	parse(parseStr.data(), narrow<int>(parseStr.size()), COMMAND);
 }
 
 void TclParser::parse(const char* p, int size, ParseType type)
 {
-	ScopedAssign<int>    sa1(offset, offset + (p - parseStr.data()));
-	ScopedAssign<string> sa2(parseStr, string(p, size));
+	ScopedAssign sa1(offset, offset + narrow<int>(p - parseStr.data()));
+	ScopedAssign sa2(parseStr, std::string(p, size));
 	last.push_back(offset);
 
 	// The functions Tcl_ParseCommand() and Tcl_ParseExpr() are meant to
 	// operate on a complete command. For interactive syntax highlighting
 	// we also want to pass incomplete commands (e.g. with an opening, but
-	// not yet a closing brace). This loop tries to parse and depening on
+	// not yet a closing brace). This loop tries to parse and depending on
 	// the parse error retries with a completed command.
 	Tcl_Parse parseInfo;
 	int retryCount = 0;
@@ -108,13 +101,13 @@ void TclParser::parse(const char* p, int size, ParseType type)
 		Tcl_Obj* resObj = Tcl_GetObjResult(interp);
 		int resLen;
 		const char* resStr = Tcl_GetStringFromObj(resObj, &resLen);
-		string_view error(resStr, resLen);
+		std::string_view error(resStr, resLen);
 
 		if (allowComplete && error.starts_with("missing close-brace")) {
 			parseStr += '}';
 		} else if (allowComplete && error.starts_with("missing close-bracket")) {
 			parseStr += ']';
-		} else if (allowComplete && error.starts_with( "missing \"")) {
+		} else if (allowComplete && error.starts_with("missing \"")) {
 			parseStr += '"';
 		} else if (allowComplete && error.starts_with("unbalanced open paren")) {
 			parseStr += ')';
@@ -123,7 +116,7 @@ void TclParser::parse(const char* p, int size, ParseType type)
 			//    'if { / 3'
 			// and that can't be solved by adding something at the
 			// end. Without the retryCount stuff we would get in an
-			// infinte loop here.
+			// infinite loop here.
 			parseStr += '0';
 		} else if (allowComplete && error.starts_with("missing )")) {
 			parseStr += ')';
@@ -139,12 +132,12 @@ void TclParser::parse(const char* p, int size, ParseType type)
 		DEBUG_PRINT("EXPRESSION: " + parseStr);
 	} else {
 		if (parseInfo.commentSize) {
-			DEBUG_PRINT("COMMENT: " + string_view(parseInfo.commentStart, parseInfo.commentSize));
+			DEBUG_PRINT("COMMENT: " + std::string_view(parseInfo.commentStart, parseInfo.commentSize));
 			setColors(parseInfo.commentStart, parseInfo.commentSize, 'c');
 		}
-		DEBUG_PRINT("COMMAND: " + string_view(parseInfo.commandStart, parseInfo.commandSize));
+		DEBUG_PRINT("COMMAND: " + std::string_view(parseInfo.commandStart, parseInfo.commandSize));
 	}
-	printTokens(parseInfo.tokenPtr, parseInfo.numTokens);
+	printTokens({parseInfo.tokenPtr, size_t(parseInfo.numTokens)});
 
 	// If the current sub-command stops before the end of the original
 	// full command, then it's not the last sub-command. Note that
@@ -156,21 +149,21 @@ void TclParser::parse(const char* p, int size, ParseType type)
 
 	if (type == COMMAND) {
 		// next command
-		int nextSize = int((parseStr.data() + parseStr.size()) - nextStart);
+		auto nextSize = int((parseStr.data() + parseStr.size()) - nextStart);
 		if (nextSize > 0) {
 			parse(nextStart, nextSize, type);
 		}
 	}
 }
 
-void TclParser::printTokens(Tcl_Token* tokens, int numTokens)
+void TclParser::printTokens(std::span<const Tcl_Token> tokens)
 {
 #if DEBUG_TCLPARSER
-	ScopedAssign<int> sa(level, level + 1);
+	ScopedAssign sa(level, level + 1);
 #endif
-	for (int i = 0; i < numTokens; /**/) {
-		Tcl_Token& token = tokens[i];
-		string_view tokenStr(token.start, token.size);
+	for (size_t i = 0; i < tokens.size(); /**/) {
+		const Tcl_Token& token = tokens[i];
+		std::string_view tokenStr(token.start, token.size);
 		DEBUG_PRINT(type2string(token.type) + " -> " + tokenStr);
 		switch (token.type) {
 		case TCL_TOKEN_VARIABLE:
@@ -208,19 +201,17 @@ void TclParser::printTokens(Tcl_Token* tokens, int numTokens)
 				parse(tokens[i + 1].start, tokens[i + 1].size, subType);
 			}
 		}
-		printTokens(&tokens[++i], token.numComponents);
+		printTokens(tokens.subspan(++i, token.numComponents));
 		i += token.numComponents;
 	}
 }
 
-TclParser::ParseType TclParser::guessSubType(Tcl_Token* tokens, int i)
+TclParser::ParseType TclParser::guessSubType(std::span<const Tcl_Token> tokens, size_t i)
 {
 	// heuristic: if previous token is 'if' then assume this is an expression
 	if ((i >= 1) && (tokens[i - 1].type == TCL_TOKEN_TEXT)) {
-		string_view prevText(tokens[i - 1].start, tokens[i - 1].size);
-		if ((prevText == "if") ||
-		    (prevText == "elseif") ||
-		    (prevText == "expr")) {
+		std::string_view prevText(tokens[i - 1].start, tokens[i - 1].size);
+		if (prevText == one_of("if", "elseif", "expr")) {
 			return EXPRESSION;
 		}
 	}
@@ -234,9 +225,9 @@ TclParser::ParseType TclParser::guessSubType(Tcl_Token* tokens, int i)
 	return OTHER;
 }
 
-bool TclParser::isProc(Tcl_Interp* interp, string_view str)
+bool TclParser::isProc(Tcl_Interp* interp, std::string_view str)
 {
-	string command = strCat("openmsx::is_command_name {", str, '}');
+	auto command = tmpStrCat("openmsx::is_command_name {", str, '}');
 	if (Tcl_Eval(interp, command.c_str()) != TCL_OK) return false;
 	int result;
 	if (Tcl_GetBooleanFromObj(interp, Tcl_GetObjResult(interp), &result)
@@ -246,9 +237,9 @@ bool TclParser::isProc(Tcl_Interp* interp, string_view str)
 
 void TclParser::setColors(const char* p, int size, char c)
 {
-	int start = (p - parseStr.data()) + offset;
+	int start = narrow<int>(p - parseStr.data()) + offset;
 	int stop = std::min(start + size, int(colors.size()));
-	for (int i = start; i < stop; ++i) {
+	for (auto i : xrange(start, stop)) {
 		colors[i] = c;
 	}
 }

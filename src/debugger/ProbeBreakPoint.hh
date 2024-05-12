@@ -17,22 +17,24 @@ public:
 	                TclObject condition,
 	                Debugger& debugger,
 	                ProbeBase& probe,
+	                bool once,
 	                unsigned newId = -1);
 	~ProbeBreakPoint();
 
-	unsigned getId() const { return id; }
-	const ProbeBase& getProbe() const { return probe; }
+	[[nodiscard]] unsigned getId() const { return id; }
+	[[nodiscard]] const ProbeBase& getProbe() const { return probe; }
 
 private:
 	// Observer<ProbeBase>
-	void update(const ProbeBase& subject) override;
+	void update(const ProbeBase& subject) noexcept override;
 	void subjectDeleted(const ProbeBase& subject) override;
 
+private:
 	Debugger& debugger;
 	ProbeBase& probe;
 	const unsigned id;
 
-	static unsigned lastId;
+	static inline unsigned lastId = 0;
 };
 
 } // namespace openmsx

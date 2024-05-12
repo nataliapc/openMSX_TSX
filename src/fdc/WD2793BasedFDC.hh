@@ -18,8 +18,9 @@ public:
 
 protected:
 	explicit WD2793BasedFDC(const DeviceConfig& config, const std::string& romId = {},
-	                        bool needROM = true);
-	~WD2793BasedFDC() {}
+	                        bool needROM = true,
+	                        DiskDrive::TrackMode mode = DiskDrive::TrackMode::NORMAL);
+	~WD2793BasedFDC() override = default;
 
 	DriveMultiplexer multiplexer;
 	WD2793 controller;

@@ -1,6 +1,7 @@
 #ifndef WD2793_HH
 #define WD2793_HH
 
+#include "EmuTime.hh"
 #include "RawTrack.hh"
 #include "DynamicClock.hh"
 #include "Schedulable.hh"
@@ -11,36 +12,36 @@ namespace openmsx {
 
 class Scheduler;
 class DiskDrive;
-class CliComm;
+class MSXCliComm;
 
 class WD2793 final : public Schedulable
 {
 public:
-	WD2793(Scheduler& scheduler, DiskDrive& drive, CliComm& cliComm,
+	WD2793(Scheduler& scheduler, DiskDrive& drive, MSXCliComm& cliComm,
 	       EmuTime::param time, bool isWD1770);
 
 	void reset(EmuTime::param time);
 
-	byte getStatusReg(EmuTime::param time);
-	byte getTrackReg (EmuTime::param time);
-	byte getSectorReg(EmuTime::param time);
-	byte getDataReg  (EmuTime::param time);
+	[[nodiscard]] uint8_t getStatusReg(EmuTime::param time);
+	[[nodiscard]] uint8_t getTrackReg (EmuTime::param time) const;
+	[[nodiscard]] uint8_t getSectorReg(EmuTime::param time) const;
+	[[nodiscard]] uint8_t getDataReg  (EmuTime::param time);
 
-	byte peekStatusReg(EmuTime::param time) const;
-	byte peekTrackReg (EmuTime::param time) const;
-	byte peekSectorReg(EmuTime::param time) const;
-	byte peekDataReg  (EmuTime::param time) const;
+	[[nodiscard]] uint8_t peekStatusReg(EmuTime::param time) const;
+	[[nodiscard]] uint8_t peekTrackReg (EmuTime::param time) const;
+	[[nodiscard]] uint8_t peekSectorReg(EmuTime::param time) const;
+	[[nodiscard]] uint8_t peekDataReg  (EmuTime::param time) const;
 
-	void setCommandReg(byte value, EmuTime::param time);
-	void setTrackReg  (byte value, EmuTime::param time);
-	void setSectorReg (byte value, EmuTime::param time);
-	void setDataReg   (byte value, EmuTime::param time);
+	void setCommandReg(uint8_t value, EmuTime::param time);
+	void setTrackReg  (uint8_t value, EmuTime::param time);
+	void setSectorReg (uint8_t value, EmuTime::param time);
+	void setDataReg   (uint8_t value, EmuTime::param time);
 
-	bool getIRQ (EmuTime::param time);
-	bool getDTRQ(EmuTime::param time);
+	[[nodiscard]] bool getIRQ (EmuTime::param time) const;
+	[[nodiscard]] bool getDTRQ(EmuTime::param time) const;
 
-	bool peekIRQ (EmuTime::param time) const;
-	bool peekDTRQ(EmuTime::param time) const;
+	[[nodiscard]] bool peekIRQ (EmuTime::param time) const;
+	[[nodiscard]] bool peekDTRQ(EmuTime::param time) const;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
@@ -98,23 +99,23 @@ private:
 	void endCmd(EmuTime::param time);
 
 	void setDrqRate(unsigned trackLength);
-	bool isReady() const;
+	[[nodiscard]] bool isReady() const;
 
 	void schedule(FSMState state, EmuTime::param time);
 
 private:
 	DiskDrive& drive;
-	CliComm& cliComm;
+	MSXCliComm& cliComm;
 
 	// DRQ is high iff current time is past this time.
 	//  This clock ticks at the 'byte-rate' of the current track,
 	//  typically '6250 bytes/rotation * 5 rotations/second'.
-	DynamicClock drqTime;
+	DynamicClock drqTime{EmuTime::infinity()};
 
 	// INTRQ is high iff current time is past this time.
-	EmuTime irqTime;
+	EmuTime irqTime = EmuTime::infinity();
 
-	EmuTime pulse5; // time at which the 5th index pulse will be received
+	EmuTime pulse5 = EmuTime::infinity(); // time at which the 5th index pulse will be received
 
 	// HLD/HLT timing
 	// 1) now < hldTime   (typically: hldTime == EmuTime::infinity)
@@ -132,28 +133,27 @@ private:
 	// requests to load the disk head, the drive responds with "ok, done".
 	// So 'LOAD' is zero, and phase 2) doesn't exist. Therefor the current
 	// implementation mostly ignores 'LOAD'.
-	static const EmuDuration IDLE;
-	EmuTime hldTime;
+	EmuTime hldTime = EmuTime::infinity(); // HLD=false
 
 	RawTrack::Sector sectorInfo;
-	int dataCurrent;   // which byte in track is next to be read/write
-	int dataAvailable; // how many bytes left to read/write
+	int dataCurrent   = 0; // which byte in track is next to be read/write
+	int dataAvailable = 0; // how many bytes left to read/write
 
 	CRC16 crc;
 
 	FSMState fsmState;
-	byte statusReg;
-	byte commandReg;
-	byte sectorReg;
-	byte trackReg;
-	byte dataReg;
-	byte dataOutReg;
+	uint8_t statusReg;
+	uint8_t commandReg = 0;
+	uint8_t sectorReg;
+	uint8_t trackReg;
+	uint8_t dataReg;
+	uint8_t dataOutReg = 0;
 
 	bool directionIn;
 	bool immediateIRQ;
-	bool lastWasA1;
-	bool dataRegWritten;
-	bool lastWasCRC;
+	bool lastWasA1 = false;
+	bool dataRegWritten = false;
+	bool lastWasCRC = false;
 
 	const bool isWD1770;
 };

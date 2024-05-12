@@ -1,11 +1,11 @@
 #ifndef Y8950ADPCM_HH
 #define Y8950ADPCM_HH
 
-#include "TrackedRam.hh"
-#include "Schedulable.hh"
 #include "Clock.hh"
-#include "serialize_meta.hh"
+#include "Schedulable.hh"
+#include "TrackedRam.hh"
 #include "openmsx.hh"
+#include "serialize_meta.hh"
 
 namespace openmsx {
 
@@ -20,11 +20,11 @@ public:
 
 	void clearRam();
 	void reset(EmuTime::param time);
-	bool isMuted() const;
+	[[nodiscard]] bool isMuted() const;
 	void writeReg(byte rg, byte data, EmuTime::param time);
-	byte readReg(byte rg, EmuTime::param time);
-	byte peekReg(byte rg, EmuTime::param time) const;
-	int calcSample();
+	[[nodiscard]] byte readReg(byte rg, EmuTime::param time);
+	[[nodiscard]] byte peekReg(byte rg, EmuTime::param time) const;
+	[[nodiscard]] int calcSample();
 	void sync(EmuTime::param time);
 	void resetStatus();
 
@@ -34,7 +34,7 @@ public:
 private:
 	// This data is updated while playing
 	struct PlayData {
-		unsigned memPntr;
+		unsigned memPtr;
 		unsigned nowStep;
 		int out;
 		int output;
@@ -48,23 +48,24 @@ private:
 	void executeUntil(EmuTime::param time) override;
 
 	void schedule();
-	void restart(PlayData& pd);
+	void restart(PlayData& pd) const;
 
-	bool isPlaying() const;
+	[[nodiscard]] bool isPlaying() const;
 	void writeData(byte data);
-	byte peekReg(byte rg) const;
-	byte readData();
-	byte peekData() const;
-	void writeMemory(unsigned memPntr, byte value);
-	byte readMemory(unsigned memPntr) const;
-	int calcSample(bool doEmu);
+	[[nodiscard]] byte peekReg(byte rg) const;
+	[[nodiscard]] byte readData();
+	[[nodiscard]] byte peekData() const;
+	void writeMemory(unsigned memPtr, byte value);
+	[[nodiscard]] byte readMemory(unsigned memPtr) const;
+	[[nodiscard]] int calcSample(bool doEmu);
 
+private:
 	Y8950& y8950;
 	TrackedRam ram;
 
 	// copy/pasted from Y8950.hh
-	static const int CLOCK_FREQ     = 3579545;
-	static const int CLOCK_FREQ_DIV = 72;
+	static constexpr int CLOCK_FREQ     = 3579545;
+	static constexpr int CLOCK_FREQ_DIV = 72;
 	Clock<CLOCK_FREQ, CLOCK_FREQ_DIV> clock;
 
 	PlayData emu; // used for emulator behaviour (read back of sample data)
@@ -73,7 +74,7 @@ private:
 	unsigned startAddr;
 	unsigned stopAddr;
 	unsigned addrMask;
-	int volume;
+	int volume = 0;
 	int volumeWStep;
 	int readDelay;
 	int delta;

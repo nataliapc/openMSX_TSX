@@ -2,10 +2,12 @@
 #define AMDFLASH_HH
 
 #include "MemBuffer.hh"
-#include "openmsx.hh"
 #include "serialize_meta.hh"
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
-#include <vector>
+#include <span>
 
 namespace openmsx {
 
@@ -18,30 +20,38 @@ class AmdFlash
 {
 public:
 	struct SectorInfo {
-		unsigned size;
+		size_t size;
 		bool writeProtected;
 	};
+	enum class Addressing {
+		BITS_11,
+		BITS_12,
+	};
+	enum class Load {
+		NORMAL,
+		DONT, // don't load nor save modified flash content
+	};
+
 	/** Create AmdFlash with given configuration.
 	 * @param rom The initial content for this flash
 	 * @param sectorInfo
-	 *   A vector containing the size and write protected status of each
+	 *   A span containing the size and write protected status of each
 	 *   sector in the flash. This implicitly also communicates the number
 	 *   of sectors (a sector is a region in the flash that can be erased
 	 *   individually). There exist flash roms were the different sectors
 	 *   are not all equally large, that's why it's required to enumerate
 	 *   the size of each sector (instead of simply specifying the size and
 	 *   the number of sectors).
-	 * @param ID
-	 *   Contains manufacturer and device ID for this flash.
-	 * @param use12bitAddressing set to true for 12-bit command addresses, false for 11-bit command addresses
+	 * @param ID Contains manufacturer and device ID for this flash.
+	 * @param addressing Specify addressing mode (11-bit or 12-bit)
 	 * @param config The motherboard this flash belongs to
 	 * @param load Load initial content (hack for 'Matra INK')
 	 */
-	AmdFlash(const Rom& rom, std::vector<SectorInfo> sectorInfo,
-	         word ID, bool use12bitAddressing,
-	         const DeviceConfig& config, bool load = true);
-	AmdFlash(const std::string& name, std::vector<SectorInfo> sectorInfo,
-	         word ID, bool use12bitAddressing,
+	AmdFlash(const Rom& rom, std::span<const SectorInfo> sectorInfo,
+	         uint16_t ID, Addressing addressing,
+	         const DeviceConfig& config, Load load = Load::NORMAL);
+	AmdFlash(const std::string& name, std::span<const SectorInfo> sectorInfo,
+	         uint16_t ID, Addressing addressing,
 		 const DeviceConfig& config);
 	~AmdFlash();
 
@@ -54,19 +64,19 @@ public:
 	 */
 	void setVppWpPinLow(bool value) { vppWpPinLow = value; }
 
-	unsigned getSize() const { return size; }
-	byte read(unsigned address);
-	byte peek(unsigned address) const;
-	void write(unsigned address, byte value);
-	const byte* getReadCacheLine(unsigned address) const;
+	[[nodiscard]] size_t size() const { return sz; }
+	[[nodiscard]] uint8_t read(size_t address) const;
+	[[nodiscard]] uint8_t peek(size_t address) const;
+	void write(size_t address, uint8_t value);
+	[[nodiscard]] const uint8_t* getReadCacheLine(size_t address) const;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 //private:
 	struct AmdCmd {
-		unsigned addr;
-		byte value;
+		size_t addr;
+		uint8_t value;
 
 		template<typename Archive>
 		void serialize(Archive& ar, unsigned version);
@@ -75,34 +85,35 @@ public:
 	enum State { ST_IDLE, ST_IDENT };
 
 private:
-	void init(const std::string& name, const DeviceConfig& config, bool load, const Rom* rom);
-	void getSectorInfo(unsigned address, unsigned& sector,
-                           unsigned& sectorSize, unsigned& offset) const;
+	void init(const std::string& name, const DeviceConfig& config, Load load, const Rom* rom);
+	struct GetSectorInfoResult { size_t sector, sectorSize, offset; };
+	[[nodiscard]] GetSectorInfoResult getSectorInfo(size_t address) const;
 
 	void setState(State newState);
-	bool checkCommandReset();
-	bool checkCommandEraseSector();
-	bool checkCommandEraseChip();
-	bool checkCommandProgramHelper(unsigned, const byte*, size_t cmdLen);
-	bool checkCommandProgram();
-	bool checkCommandDoubleByteProgram();
-	bool checkCommandQuadrupleByteProgram();
-	bool checkCommandManifacturer();
-	bool partialMatch(size_t len, const byte* dataSeq) const;
+	[[nodiscard]] bool checkCommandReset();
+	[[nodiscard]] bool checkCommandEraseSector();
+	[[nodiscard]] bool checkCommandEraseChip();
+	[[nodiscard]] bool checkCommandProgramHelper(size_t numBytes, std::span<const uint8_t> cmdSeq);
+	[[nodiscard]] bool checkCommandProgram();
+	[[nodiscard]] bool checkCommandDoubleByteProgram();
+	[[nodiscard]] bool checkCommandQuadrupleByteProgram();
+	[[nodiscard]] bool checkCommandManufacturer();
+	[[nodiscard]] bool partialMatch(std::span<const uint8_t> dataSeq) const;
 
-	bool isSectorWritable(unsigned sector) const;
+	[[nodiscard]] bool isSectorWritable(size_t sector) const;
 
+private:
 	MSXMotherBoard& motherBoard;
 	std::unique_ptr<SRAM> ram;
-	MemBuffer<int> writeAddress;
-	MemBuffer<const byte*> readAddress;
-	const std::vector<SectorInfo> sectorInfo;
-	const unsigned size;
-	const word ID;
-	const bool use12bitAddressing;
+	MemBuffer<ptrdiff_t> writeAddress;
+	MemBuffer<const uint8_t*> readAddress;
+	const std::span<const SectorInfo> sectorInfo;
+	const size_t sz;
+	const uint16_t ID;
+	const Addressing addressing;
 
-	static const unsigned MAX_CMD_SIZE = 8;
-	AmdCmd cmd[MAX_CMD_SIZE];
+	static constexpr unsigned MAX_CMD_SIZE = 8;
+	std::array<AmdCmd, MAX_CMD_SIZE> cmd;
 	unsigned cmdIdx;
 	State state = ST_IDLE;
 	bool vppWpPinLow = false; // true = protection on

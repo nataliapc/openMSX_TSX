@@ -6,8 +6,9 @@
     <manufacturer>Eurohard/Radofin</manufacturer>
     <code>Dragon MSX</code>
     <release_year>1985</release_year>
-    <description>Rare MSX that was never really mass produced as Eurohard had to close due to financial problems.</description>
+    <description>Rare MSX that was never mass produced as Eurohard had to close due to financial problems.</description>
     <type>MSX</type>
+    <region>uk</region>
   </info>
 
 <!-- information based on serial number 000037, see http://archive.worldofdragon.org/index.php?title=Dragon_MSX
@@ -76,11 +77,11 @@ VDP: TI TMS9129NL (DW8441)
     <PSG id="PSG">
       <keyboardlayout>JIS</keyboardlayout>
       <type>AY8910</type>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
       <sound>
         <volume>21000</volume>
       </sound>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <PrinterPort id="Printer Port">

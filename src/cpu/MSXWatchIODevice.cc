@@ -1,9 +1,14 @@
 #include "MSXWatchIODevice.hh"
+
+#include "Interpreter.hh"
+#include "MSXCPUInterface.hh"
 #include "MSXMotherBoard.hh"
 #include "Reactor.hh"
-#include "MSXCPUInterface.hh"
+#include "StateChangeDistributor.hh"
 #include "TclObject.hh"
-#include "Interpreter.hh"
+
+#include "narrow.hh"
+
 #include <cassert>
 #include <memory>
 
@@ -15,11 +20,11 @@ WatchIO::WatchIO(MSXMotherBoard& motherboard_,
                  WatchPoint::Type type_,
                  unsigned beginAddr_, unsigned endAddr_,
                  TclObject command_, TclObject condition_,
-                 unsigned newId /*= -1*/)
-	: WatchPoint(command_, condition_, type_, beginAddr_, endAddr_, newId)
+                 bool once_, unsigned newId /*= -1*/)
+	: WatchPoint(std::move(command_), std::move(condition_), type_, beginAddr_, endAddr_, once_, newId)
 	, motherboard(motherboard_)
 {
-	for (unsigned i = byte(beginAddr_); i <= byte(endAddr_); ++i) {
+	for (unsigned i = narrow_cast<byte>(beginAddr_); i <= narrow_cast<byte>(endAddr_); ++i) {
 		ios.push_back(std::make_unique<MSXWatchIODevice>(
 			*motherboard.getMachineConfig(), *this));
 	}
@@ -27,7 +32,7 @@ WatchIO::WatchIO(MSXMotherBoard& motherboard_,
 
 MSXWatchIODevice& WatchIO::getDevice(byte port)
 {
-	byte begin = getBeginAddress();
+	auto begin = narrow_cast<byte>(getBeginAddress());
 	return *ios[port - begin];
 }
 
@@ -43,7 +48,10 @@ void WatchIO::doReadCallback(unsigned port)
 	// keep this object alive by holding a shared_ptr to it, for the case
 	// this watchpoint deletes itself in checkAndExecute()
 	auto keepAlive = shared_from_this();
-	checkAndExecute(cliComm, interp);
+	auto scopedBlock = motherboard.getStateChangeDistributor().tempBlockNewEventsDuringReplay();
+	if (bool remove = checkAndExecute(cliComm, interp); remove) {
+		cpuInterface.removeWatchPoint(keepAlive);
+	}
 
 	interp.unsetVariable("wp_last_address");
 }
@@ -60,7 +68,10 @@ void WatchIO::doWriteCallback(unsigned port, unsigned value)
 
 	// see comment in doReadCallback() above
 	auto keepAlive = shared_from_this();
-	checkAndExecute(cliComm, interp);
+	auto scopedBlock = motherboard.getStateChangeDistributor().tempBlockNewEventsDuringReplay();
+	if (bool remove = checkAndExecute(cliComm, interp); remove) {
+		cpuInterface.removeWatchPoint(keepAlive);
+	}
 
 	interp.unsetVariable("wp_last_address");
 	interp.unsetVariable("wp_last_value");
@@ -73,11 +84,10 @@ MSXWatchIODevice::MSXWatchIODevice(
 		const HardwareConfig& hwConf, WatchIO& watchIO_)
 	: MSXMultiDevice(hwConf)
 	, watchIO(watchIO_)
-	, device(nullptr)
 {
 }
 
-std::string MSXWatchIODevice::getName() const
+const std::string& MSXWatchIODevice::getName() const
 {
 	assert(device);
 	return device->getName();

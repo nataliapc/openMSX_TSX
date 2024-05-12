@@ -1,69 +1,83 @@
-// Based on libsamplerate-0.1.2 (aka Secret Rabit Code)
+// Based on libsamplerate-0.1.2 (aka Secret Rabbit Code)
 //
 //  simplified code in several ways:
 //   - resample algorithm is no longer switchable, we took this variant:
 //        Band limited sinc interpolation, fastest, 97dB SNR, 80% BW
 //   - don't allow to change sample rate on-the-fly
-//   - assume input (and thus also output) signals have infinte length, so
+//   - assume input (and thus also output) signals have infinite length, so
 //     there is no special code to handle the ending of the signal
 //   - changed/simplified API to better match openmsx use model
 //     (e.g. remove all error checking)
 
 #include "ResampleHQ.hh"
+
 #include "ResampledSoundDevice.hh"
+
 #include "FixedPoint.hh"
 #include "MemBuffer.hh"
-#include "countof.hh"
-#include "likely.hh"
+#include "aligned.hh"
+#include "narrow.hh"
+#include "ranges.hh"
 #include "stl.hh"
 #include "vla.hh"
-#include "build-info.hh"
-#include <algorithm>
-#include <vector>
+#include "xrange.hh"
+
+#include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
-#include <cstring>
 #include <cassert>
+#include <iterator>
+#include <vector>
 #ifdef __SSE2__
 #include <emmintrin.h>
 #endif
 
 namespace openmsx {
 
-// Note: without appending 'f' to the values in ResampleCoeffs.ii,
-// this will generate thousands of C4305 warnings in VC++
-// E.g. warning C4305: 'initializing' : truncation from 'double' to 'const float'
-static const float coeffs[] = {
+// Letting the compiler deduce the (type and) size of the std::array works fine
+// with gcc, msvc and clang-11 but is broken from clang-12 onwards. More
+// specifically it only works for sizes upto 256. For more details see:
+//   https://www.mail-archive.com/llvm-bugs@lists.llvm.org/msg50598.html
+//   https://reviews.llvm.org/D86936
+// As a workaround we do hardcode the (type and) size here:
+//static constexpr std::array coeffs = {
+static constexpr std::array<float, 2464> coeffs = {
 	#include "ResampleCoeffs.ii"
 };
 
 using FilterIndex = FixedPoint<16>;
 
-static const int INDEX_INC = 128;
-static const int COEFF_LEN = countof(coeffs);
-static const int COEFF_HALF_LEN = COEFF_LEN - 1;
-static const unsigned TAB_LEN = 4096;
-static const unsigned HALF_TAB_LEN = TAB_LEN / 2;
+static constexpr int INDEX_INC = 128;
+static constexpr int COEFF_LEN = int(std::size(coeffs));
+static constexpr int COEFF_HALF_LEN = COEFF_LEN - 1;
+static constexpr size_t TAB_LEN      = ResampleHQ<1>::TAB_LEN;
+static constexpr size_t HALF_TAB_LEN = ResampleHQ<1>::HALF_TAB_LEN;
 
 class ResampleCoeffs
 {
 public:
+	ResampleCoeffs(const ResampleCoeffs&) = delete;
+	ResampleCoeffs(ResampleCoeffs&&) = delete;
+	ResampleCoeffs& operator=(const ResampleCoeffs&) = delete;
+	ResampleCoeffs& operator=(ResampleCoeffs&&) = delete;
+
 	static ResampleCoeffs& instance();
-	void getCoeffs(double ratio, int16_t*& permute, float*& table, unsigned& filterLen);
+	void getCoeffs(double ratio, std::span<const int16_t, HALF_TAB_LEN>& permute, float*& table, unsigned& filterLen);
 	void releaseCoeffs(double ratio);
 
 private:
-	using Table = MemBuffer<float, SSE2_ALIGNMENT>;
-	using PermuteTable = MemBuffer<int16_t>;
+	using Table = MemBuffer<float, SSE_ALIGNMENT>;
+	using PermuteTable = MemBuffer<int16_t>; // array<int16_t, HALF_TAB_LEN>
 
 	ResampleCoeffs() = default;
 	~ResampleCoeffs();
 
-	Table calcTable(double ratio, int16_t* permute, unsigned& filterLen);
+	static Table calcTable(double ratio, std::span<int16_t, HALF_TAB_LEN> permute, unsigned& filterLen);
 
 	struct Element {
 		double ratio;
-		PermuteTable permute;
+		PermuteTable permute; // need stable address (can't directly use std::array)
 		Table table;
 		unsigned filterLen;
 		unsigned count;
@@ -83,12 +97,11 @@ ResampleCoeffs& ResampleCoeffs::instance()
 }
 
 void ResampleCoeffs::getCoeffs(
-	double ratio, int16_t*& permute, float*& table, unsigned& filterLen)
+	double ratio, std::span<const int16_t, HALF_TAB_LEN>& permute, float*& table, unsigned& filterLen)
 {
-	auto it = find_if(begin(cache), end(cache),
-		[=](const Element& e) { return e.ratio == ratio; });
-	if (it != end(cache)) {
-		permute   = it->permute.data();
+	if (auto it = ranges::find(cache, ratio, &Element::ratio);
+	    it != end(cache)) {
+		permute   = std::span<int16_t, HALF_TAB_LEN>{it->permute.data(), HALF_TAB_LEN};
 		table     = it->table.data();
 		filterLen = it->filterLen;
 		it->count++;
@@ -98,8 +111,9 @@ void ResampleCoeffs::getCoeffs(
 	elem.ratio = ratio;
 	elem.count = 1;
 	elem.permute = PermuteTable(HALF_TAB_LEN);
-	elem.table = calcTable(ratio, elem.permute.data(), elem.filterLen);
-	permute   = elem.permute.data();
+	auto perm = std::span<int16_t, HALF_TAB_LEN>{elem.permute.data(), HALF_TAB_LEN};
+	elem.table = calcTable(ratio, perm, elem.filterLen);
+	permute   = perm;
 	table     = elem.table.data();
 	filterLen = elem.filterLen;
 	cache.push_back(std::move(elem));
@@ -107,8 +121,7 @@ void ResampleCoeffs::getCoeffs(
 
 void ResampleCoeffs::releaseCoeffs(double ratio)
 {
-	auto it = rfind_if_unguarded(cache,
-		[=](const Element& e) { return e.ratio == ratio; });
+	auto it = rfind_unguarded(cache, ratio, &Element::ratio);
 	it->count--;
 	if (it->count == 0) {
 		move_pop_back(cache, it);
@@ -189,11 +202,11 @@ void ResampleCoeffs::releaseCoeffs(double ratio)
 // mathematically proven this, but at least I've verified it for N=16 and
 // N=4096 for all possible step-sizes.
 //
-// To linearise a chain in memory there are only 2 (good) possibilities: start
+// To linearize a chain in memory there are only 2 (good) possibilities: start
 // at either end-point. But to store a cycle any point is as good as any other.
 // Also the order in which to store the cycles themselves can still be chosen.
 //
-// Let's come back to the example with step-size 4.3. If we linearise this as
+// Let's come back to the example with step-size 4.3. If we linearize this as
 //   | 0, 4, 7, 3 | 1, 5, 6, 2 |
 // then most of the more likely transitions are sequential. The exceptions are
 //     0 <-> 3   and   1 <-> 2
@@ -211,7 +224,7 @@ void ResampleCoeffs::releaseCoeffs(double ratio)
 //   | 7, 4, 0, 3 | 6, 5, 1, 2 |
 //
 // I've again not (fully) mathematically proven it, but it seems we can
-// optimally(?) linearise cycles by:
+// optimally(?) linearize cycles by:
 // * if likely step < unlikely step:
 //    pick unassigned rows from 0 to N/2-1, and complete each cycle
 // * if likely step > unlikely step:
@@ -222,53 +235,51 @@ void ResampleCoeffs::releaseCoeffs(double ratio)
 // table tells where in memory the i-th logical row of the original (half)
 // resample coefficient table is physically stored.
 
-static const unsigned N = TAB_LEN;
-static const unsigned N1 = N - 1;
-static const unsigned N2 = N / 2;
+static constexpr unsigned N = TAB_LEN;
+static constexpr unsigned N1 = N - 1;
+static constexpr unsigned N2 = N / 2;
 
-static unsigned mapIdx(unsigned x)
+static constexpr unsigned mapIdx(unsigned x)
 {
 	unsigned t = x & N1; // first wrap
 	return (t < N2) ? t : N1 - t; // then fold
 }
 
-static std::pair<unsigned, unsigned> next(unsigned x, unsigned step)
+static constexpr std::pair<unsigned, unsigned> next(unsigned x, unsigned step)
 {
 	return {mapIdx(x + step), mapIdx(N1 - x + step)};
 }
 
-static void calcPermute(double ratio, int16_t* permute)
+static void calcPermute(double ratio, std::span<int16_t, HALF_TAB_LEN> permute)
 {
 	double r2 = ratio * N;
 	double fract = r2 - floor(r2);
-	unsigned step = floor(r2);
-	bool incr;
-	if (fract > 0.5) {
-		// mostly (> 50%) take steps of 'floor(r2) + 1'
-		step += 1;
-		incr = false; // assign from high to low
-	} else {
-		// mostly take steps of 'floor(r2)'
-		incr = true; // assign from low to high
-	}
+	auto step = narrow_cast<unsigned>(floor(r2));
+	bool incr = [&] {
+		if (fract > 0.5) {
+			// mostly (> 50%) take steps of 'floor(r2) + 1'
+			step += 1;
+			return false; // assign from high to low
+		} else {
+			// mostly take steps of 'floor(r2)'
+			return true; // assign from low to high
+		}
+	}();
 
 	// initially set all as unassigned
-	for (unsigned i = 0; i < N2; ++i) {
-		permute[i] = -1;
-	}
+	ranges::fill(permute, -1);
 
-	unsigned nxt1, nxt2;
 	unsigned restart = incr ? 0 : N2 - 1;
 	unsigned curr = restart;
 	// check for chain (instead of cycles)
 	if (incr) {
-		for (unsigned i = 0; i < N2; ++i) {
-			std::tie(nxt1, nxt2) = next(i, step);
+		for (auto i : xrange(N2)) {
+			auto [nxt1, nxt2] = next(i, step);
 			if ((nxt1 == i) || (nxt2 == i)) { curr = i; break; }
 		}
 	} else {
 		for (unsigned i = N2 - 1; int(i) >= 0; --i) {
-			std::tie(nxt1, nxt2) = next(i, step);
+			auto [nxt1, nxt2] = next(i, step);
 			if ((nxt1 == i) || (nxt2 == i)) { curr = i; break; }
 		}
 	}
@@ -278,9 +289,9 @@ static void calcPermute(double ratio, int16_t* permute)
 	while (true) {
 		assert(permute[curr] == -1);
 		assert(cnt < N2);
-		permute[curr] = cnt++;
+		permute[curr] = narrow<int16_t>(cnt++);
 
-		std::tie(nxt1, nxt2) = next(curr, step);
+		auto [nxt1, nxt2] = next(curr, step);
 		if (permute[nxt1] == -1) {
 			curr = nxt1;
 			continue;
@@ -306,13 +317,13 @@ static void calcPermute(double ratio, int16_t* permute)
 	}
 
 #ifdef DEBUG
-	int16_t testPerm[N2];
-	for (unsigned i = 0; i < N2; ++i) testPerm[i] = i;
-	assert(std::is_permutation(permute, permute + N2, testPerm));
+	std::array<int16_t, N2> testPerm;
+	ranges::iota(testPerm, int16_t(0));
+	assert(std::is_permutation(permute.begin(), permute.end(), testPerm.begin()));
 #endif
 }
 
-static double getCoeff(FilterIndex index)
+static constexpr double getCoeff(FilterIndex index)
 {
 	double fraction = index.fractionAsDouble();
 	int indx = index.toInt();
@@ -321,24 +332,24 @@ static double getCoeff(FilterIndex index)
 }
 
 ResampleCoeffs::Table ResampleCoeffs::calcTable(
-	double ratio, int16_t* permute, unsigned& filterLen)
+	double ratio, std::span<int16_t, HALF_TAB_LEN> permute, unsigned& filterLen)
 {
 	calcPermute(ratio, permute);
 
 	double floatIncr = (ratio > 1.0) ? INDEX_INC / ratio : INDEX_INC;
 	double normFactor = floatIncr / INDEX_INC;
-	FilterIndex increment = FilterIndex(floatIncr);
+	auto increment = FilterIndex(floatIncr);
 	FilterIndex maxFilterIndex(COEFF_HALF_LEN);
 
 	int min_idx = -maxFilterIndex.divAsInt(increment);
 	int max_idx = 1 + (maxFilterIndex - (increment - FilterIndex(floatIncr))).divAsInt(increment);
 	int idx_cnt = max_idx - min_idx + 1;
 	filterLen = (idx_cnt + 3) & ~3; // round up to multiple of 4
-	min_idx -= (filterLen - idx_cnt) / 2;
+	min_idx -= (narrow<int>(filterLen) - idx_cnt) / 2;
 	Table table(HALF_TAB_LEN * filterLen);
-	memset(table.data(), 0, HALF_TAB_LEN * filterLen * sizeof(float));
+	ranges::fill(std::span{table.data(), HALF_TAB_LEN * filterLen}, 0);
 
-	for (unsigned t = 0; t < HALF_TAB_LEN; ++t) {
+	for (auto t : xrange(HALF_TAB_LEN)) {
 		float* tab = &table[permute[t] * filterLen];
 		double lastPos = (double(t) + 0.5) / TAB_LEN;
 		FilterIndex startFilterIndex(lastPos * floatIncr);
@@ -368,58 +379,57 @@ ResampleCoeffs::Table ResampleCoeffs::calcTable(
 	return table;
 }
 
+static const std::array<int16_t, HALF_TAB_LEN> dummyPermute = {};
 
-template <unsigned CHANNELS>
+template<unsigned CHANNELS>
 ResampleHQ<CHANNELS>::ResampleHQ(
-		ResampledSoundDevice& input_,
-		const DynamicClock& hostClock_, unsigned emuSampleRate)
-	: input(input_)
+		ResampledSoundDevice& input_, const DynamicClock& hostClock_)
+	: ResampleAlgo(input_)
 	, hostClock(hostClock_)
-	, emuClock(hostClock.getTime(), emuSampleRate)
-	, ratio(float(emuSampleRate) / hostClock.getFreq())
+	, ratio(float(hostClock.getPeriod().toDouble() / getEmuClock().getPeriod().toDouble()))
+	, permute(dummyPermute) // Any better way to do this? (that also works with debug-STL)
 {
-	ResampleCoeffs::instance().getCoeffs(ratio, permute, table, filterLen);
+	ResampleCoeffs::instance().getCoeffs(double(ratio), permute, table, filterLen);
 
 	// fill buffer with 'enough' zero's
-	unsigned extra = int(filterLen + 1 + ratio + 1);
+	unsigned extra = filterLen + 1 + narrow_cast<int>(ratio) + 1;
 	bufStart = 0;
 	bufEnd   = extra;
-	nonzeroSamples = 0;
-	unsigned initialSize = 4000; // buffer grows dynamically if this is too small
+	size_t initialSize = 4000; // buffer grows dynamically if this is too small
 	buffer.resize((initialSize + extra) * CHANNELS); // zero-initialized
 }
 
-template <unsigned CHANNELS>
+template<unsigned CHANNELS>
 ResampleHQ<CHANNELS>::~ResampleHQ()
 {
-	ResampleCoeffs::instance().releaseCoeffs(ratio);
+	ResampleCoeffs::instance().releaseCoeffs(double(ratio));
 }
 
 #ifdef __SSE2__
 template<bool REVERSE>
-static inline void calcSseMono(const float* buf_, const float* tab_, size_t len, int* out)
+static inline void calcSseMono(const float* buf_, const float* tab_, size_t len, float* out)
 {
 	assert((len % 4) == 0);
 	assert((uintptr_t(tab_) % 16) == 0);
 
-	ptrdiff_t x = (len & ~7) * sizeof(float);
+	auto x = narrow<ptrdiff_t>((len & ~7) * sizeof(float));
 	assert((x % 32) == 0);
-	const char* buf = reinterpret_cast<const char*>(buf_) + x;
-	const char* tab = reinterpret_cast<const char*>(tab_) + (REVERSE ? -x : x);
+	const char* buf = std::bit_cast<const char*>(buf_) + x;
+	const char* tab = std::bit_cast<const char*>(tab_) + (REVERSE ? -x : x);
 	x = -x;
 
 	__m128 a0 = _mm_setzero_ps();
 	__m128 a1 = _mm_setzero_ps();
 	do {
-		__m128 b0 = _mm_loadu_ps(reinterpret_cast<const float*>(buf + x +  0));
-		__m128 b1 = _mm_loadu_ps(reinterpret_cast<const float*>(buf + x + 16));
+		__m128 b0 = _mm_loadu_ps(std::bit_cast<const float*>(buf + x +  0));
+		__m128 b1 = _mm_loadu_ps(std::bit_cast<const float*>(buf + x + 16));
 		__m128 t0, t1;
-		if (REVERSE) {
-			t0 = _mm_loadr_ps(reinterpret_cast<const float*>(tab - x - 16));
-			t1 = _mm_loadr_ps(reinterpret_cast<const float*>(tab - x - 32));
+		if constexpr (REVERSE) {
+			t0 = _mm_loadr_ps(std::bit_cast<const float*>(tab - x - 16));
+			t1 = _mm_loadr_ps(std::bit_cast<const float*>(tab - x - 32));
 		} else {
-			t0 = _mm_load_ps (reinterpret_cast<const float*>(tab + x +  0));
-			t1 = _mm_load_ps (reinterpret_cast<const float*>(tab + x + 16));
+			t0 = _mm_load_ps (std::bit_cast<const float*>(tab + x +  0));
+			t1 = _mm_load_ps (std::bit_cast<const float*>(tab + x + 16));
 		}
 		__m128 m0 = _mm_mul_ps(b0, t0);
 		__m128 m1 = _mm_mul_ps(b1, t1);
@@ -428,12 +438,12 @@ static inline void calcSseMono(const float* buf_, const float* tab_, size_t len,
 		x += 2 * sizeof(__m128);
 	} while (x < 0);
 	if (len & 4) {
-		__m128 b0 = _mm_loadu_ps(reinterpret_cast<const float*>(buf));
+		__m128 b0 = _mm_loadu_ps(std::bit_cast<const float*>(buf));
 		__m128 t0;
-		if (REVERSE) {
-			t0 = _mm_loadr_ps(reinterpret_cast<const float*>(tab - 16));
+		if constexpr (REVERSE) {
+			t0 = _mm_loadr_ps(std::bit_cast<const float*>(tab - 16));
 		} else {
-			t0 = _mm_load_ps (reinterpret_cast<const float*>(tab));
+			t0 = _mm_load_ps (std::bit_cast<const float*>(tab));
 		}
 		__m128 m0 = _mm_mul_ps(b0, t0);
 		a0 = _mm_add_ps(a0, m0);
@@ -445,7 +455,7 @@ static inline void calcSseMono(const float* buf_, const float* tab_, size_t len,
 	__m128 t = _mm_add_ps(a, _mm_movehl_ps(a, a));
 	__m128 s = _mm_add_ss(t, _mm_shuffle_ps(t, t, 1));
 
-	*out = _mm_cvtss_si32(s);
+	_mm_store_ss(out, s);
 }
 
 template<int N> static inline __m128 shuffle(__m128 x)
@@ -453,14 +463,14 @@ template<int N> static inline __m128 shuffle(__m128 x)
 	return _mm_castsi128_ps(_mm_shuffle_epi32(_mm_castps_si128(x), N));
 }
 template<bool REVERSE>
-static inline void calcSseStereo(const float* buf_, const float* tab_, size_t len, int* out)
+static inline void calcSseStereo(const float* buf_, const float* tab_, size_t len, float* out)
 {
 	assert((len % 4) == 0);
 	assert((uintptr_t(tab_) % 16) == 0);
 
-	ptrdiff_t x = 2 * (len & ~7) * sizeof(float);
-	const char* buf = reinterpret_cast<const char*>(buf_) + x;
-	const char* tab = reinterpret_cast<const char*>(tab_);
+	auto x = narrow<ptrdiff_t>(2 * (len & ~7) * sizeof(float));
+	const auto* buf = std::bit_cast<const char*>(buf_) + x;
+	const auto* tab = std::bit_cast<const char*>(tab_);
 	x = -x;
 
 	__m128 a0 = _mm_setzero_ps();
@@ -468,18 +478,18 @@ static inline void calcSseStereo(const float* buf_, const float* tab_, size_t le
 	__m128 a2 = _mm_setzero_ps();
 	__m128 a3 = _mm_setzero_ps();
 	do {
-		__m128 b0 = _mm_loadu_ps(reinterpret_cast<const float*>(buf + x +  0));
-		__m128 b1 = _mm_loadu_ps(reinterpret_cast<const float*>(buf + x + 16));
-		__m128 b2 = _mm_loadu_ps(reinterpret_cast<const float*>(buf + x + 32));
-		__m128 b3 = _mm_loadu_ps(reinterpret_cast<const float*>(buf + x + 48));
+		__m128 b0 = _mm_loadu_ps(std::bit_cast<const float*>(buf + x +  0));
+		__m128 b1 = _mm_loadu_ps(std::bit_cast<const float*>(buf + x + 16));
+		__m128 b2 = _mm_loadu_ps(std::bit_cast<const float*>(buf + x + 32));
+		__m128 b3 = _mm_loadu_ps(std::bit_cast<const float*>(buf + x + 48));
 		__m128 ta, tb;
-		if (REVERSE) {
-			ta = _mm_loadr_ps(reinterpret_cast<const float*>(tab - 16));
-			tb = _mm_loadr_ps(reinterpret_cast<const float*>(tab - 32));
+		if constexpr (REVERSE) {
+			ta = _mm_loadr_ps(std::bit_cast<const float*>(tab - 16));
+			tb = _mm_loadr_ps(std::bit_cast<const float*>(tab - 32));
 			tab -= 2 * sizeof(__m128);
 		} else {
-			ta = _mm_load_ps (reinterpret_cast<const float*>(tab +  0));
-			tb = _mm_load_ps (reinterpret_cast<const float*>(tab + 16));
+			ta = _mm_load_ps (std::bit_cast<const float*>(tab +  0));
+			tb = _mm_load_ps (std::bit_cast<const float*>(tab + 16));
 			tab += 2 * sizeof(__m128);
 		}
 		__m128 t0 = shuffle<0x50>(ta);
@@ -497,13 +507,13 @@ static inline void calcSseStereo(const float* buf_, const float* tab_, size_t le
 		x += 4 * sizeof(__m128);
 	} while (x < 0);
 	if (len & 4) {
-		__m128 b0 = _mm_loadu_ps(reinterpret_cast<const float*>(buf +  0));
-		__m128 b1 = _mm_loadu_ps(reinterpret_cast<const float*>(buf + 16));
+		__m128 b0 = _mm_loadu_ps(std::bit_cast<const float*>(buf +  0));
+		__m128 b1 = _mm_loadu_ps(std::bit_cast<const float*>(buf + 16));
 		__m128 ta;
-		if (REVERSE) {
-			ta = _mm_loadr_ps(reinterpret_cast<const float*>(tab - 16));
+		if constexpr (REVERSE) {
+			ta = _mm_loadr_ps(std::bit_cast<const float*>(tab - 16));
 		} else {
-			ta = _mm_load_ps (reinterpret_cast<const float*>(tab +  0));
+			ta = _mm_load_ps (std::bit_cast<const float*>(tab +  0));
 		}
 		__m128 t0 = shuffle<0x50>(ta);
 		__m128 t1 = shuffle<0xFA>(ta);
@@ -518,20 +528,15 @@ static inline void calcSseStereo(const float* buf_, const float* tab_, size_t le
 	__m128 a   = _mm_add_ps(a01, a23);
 	// Can faster with SSE3, but (like above) not worth the trouble.
 	__m128 s = _mm_add_ps(a, _mm_movehl_ps(a, a));
-	__m128i si = _mm_cvtps_epi32(s);
-#if ASM_X86_64
-	*reinterpret_cast<int64_t*>(out) = _mm_cvtsi128_si64(si);
-#else
-	out[0] = _mm_cvtsi128_si32(si);
-	out[1] = _mm_cvtsi128_si32(_mm_shuffle_epi32(si, 0x55));
-#endif
+	_mm_store_ss(&out[0], s);
+	_mm_store_ss(&out[1], shuffle<0x55>(s));
 }
 
 #endif
 
-template <unsigned CHANNELS>
+template<unsigned CHANNELS>
 void ResampleHQ<CHANNELS>::calcOutput(
-	float pos, int* __restrict output)
+	float pos, float* __restrict output)
 {
 	assert((filterLen & 3) == 0);
 
@@ -540,14 +545,14 @@ void ResampleHQ<CHANNELS>::calcOutput(
 	bufIdx *= CHANNELS;
 	const float* buf = &buffer[bufIdx];
 
-	int t = unsigned(lrintf(pos * TAB_LEN)) % TAB_LEN;
+	auto t = size_t(lrintf(pos * TAB_LEN)) % TAB_LEN;
 	if (!(t & HALF_TAB_LEN)) {
 		// first half, begin of row 't'
 		t = permute[t];
 		const float* tab = &table[t * filterLen];
 
 #ifdef __SSE2__
-		if (CHANNELS == 1) {
+		if constexpr (CHANNELS == 1) {
 			calcSseMono  <false>(buf, tab, filterLen, output);
 		} else {
 			calcSseStereo<false>(buf, tab, filterLen, output);
@@ -556,7 +561,7 @@ void ResampleHQ<CHANNELS>::calcOutput(
 #endif
 
 		// c++ version, both mono and stereo
-		for (unsigned ch = 0; ch < CHANNELS; ++ch) {
+		for (auto ch : xrange(CHANNELS)) {
 			float r0 = 0.0f;
 			float r1 = 0.0f;
 			float r2 = 0.0f;
@@ -567,7 +572,7 @@ void ResampleHQ<CHANNELS>::calcOutput(
 				r2 += tab[i + 2] * buf[CHANNELS * (i + 2)];
 				r3 += tab[i + 3] * buf[CHANNELS * (i + 3)];
 			}
-			output[ch] = lrintf(r0 + r1 + r2 + r3);
+			output[ch] = r0 + r1 + r2 + r3;
 			++buf;
 		}
 	} else {
@@ -576,7 +581,7 @@ void ResampleHQ<CHANNELS>::calcOutput(
 		const float* tab = &table[(t + 1) * filterLen];
 
 #ifdef __SSE2__
-		if (CHANNELS == 1) {
+		if constexpr (CHANNELS == 1) {
 			calcSseMono  <true>(buf, tab, filterLen, output);
 		} else {
 			calcSseStereo<true>(buf, tab, filterLen, output);
@@ -585,7 +590,7 @@ void ResampleHQ<CHANNELS>::calcOutput(
 #endif
 
 		// c++ version, both mono and stereo
-		for (unsigned ch = 0; ch < CHANNELS; ++ch) {
+		for (auto ch : xrange(CHANNELS)) {
 			float r0 = 0.0f;
 			float r1 = 0.0f;
 			float r2 = 0.0f;
@@ -596,13 +601,13 @@ void ResampleHQ<CHANNELS>::calcOutput(
 				r2 += tab[-i - 3] * buf[CHANNELS * (i + 2)];
 				r3 += tab[-i - 4] * buf[CHANNELS * (i + 3)];
 			}
-			output[ch] = lrintf(r0 + r1 + r2 + r3);
+			output[ch] = r0 + r1 + r2 + r3;
 			++buf;
 		}
 	}
 }
 
-template <unsigned CHANNELS>
+template<unsigned CHANNELS>
 void ResampleHQ<CHANNELS>::prepareData(unsigned emuNum)
 {
 	// Still enough free space at end of buffer?
@@ -611,14 +616,14 @@ void ResampleHQ<CHANNELS>::prepareData(unsigned emuNum)
 		// No, then move everything to the start
 		// (data needs to be in a contiguous memory block)
 		unsigned available = bufEnd - bufStart;
-		memmove(&buffer[0], &buffer[bufStart * CHANNELS],
-			available * CHANNELS * sizeof(float));
+		memmove(&buffer[0], &buffer[bufStart * size_t(CHANNELS)],
+			available * size_t(CHANNELS) * sizeof(float));
 		bufStart = 0;
 		bufEnd = available;
 
 		free = unsigned(buffer.size() / CHANNELS) - bufEnd;
-		int missing = emuNum - free;
-		if (unlikely(missing > 0)) {
+		auto missing = narrow_cast<int>(emuNum - free);
+		if (missing > 0) [[unlikely]] {
 			// Still not enough room: grow the buffer.
 			// TODO an alternative is to instead of using a large
 			// buffer, chop the work in multiple smaller pieces.
@@ -626,19 +631,18 @@ void ResampleHQ<CHANNELS>::prepareData(unsigned emuNum)
 			// the CPU's data cache. OTOH too small chunks have
 			// more overhead. (Not yet implemented because it's
 			// more complex).
-			buffer.resize(buffer.size() + missing * CHANNELS);
+			buffer.resize(buffer.size() + missing * size_t(CHANNELS));
 		}
 	}
-	VLA_SSE_ALIGNED(int, tmpBuf, emuNum * CHANNELS + 3);
-	if (input.generateInput(tmpBuf, emuNum)) {
-		for (unsigned i = 0; i < emuNum * CHANNELS; ++i) {
-			buffer[bufEnd * CHANNELS + i] = float(tmpBuf[i]);
-		}
+	VLA_SSE_ALIGNED(float, tmpBufExtra, emuNum * CHANNELS + 3);
+	auto tmpBuf = tmpBufExtra.subspan(0, emuNum * CHANNELS);
+	if (input.generateInput(tmpBufExtra.data(), emuNum)) {
+		ranges::copy(tmpBuf,
+		             subspan(buffer, bufEnd * CHANNELS));
 		bufEnd += emuNum;
 		nonzeroSamples = bufEnd - bufStart;
 	} else {
-		memset(&buffer[bufEnd * CHANNELS], 0,
-		       emuNum * CHANNELS * sizeof(float));
+		ranges::fill(subspan(buffer, bufEnd * CHANNELS, emuNum * CHANNELS), 0);
 		bufEnd += emuNum;
 	}
 
@@ -646,11 +650,12 @@ void ResampleHQ<CHANNELS>::prepareData(unsigned emuNum)
 	assert(bufEnd <= (buffer.size() / CHANNELS));
 }
 
-template <unsigned CHANNELS>
-bool ResampleHQ<CHANNELS>::generateOutput(
-	int* __restrict dataOut, unsigned hostNum, EmuTime::param time)
+template<unsigned CHANNELS>
+bool ResampleHQ<CHANNELS>::generateOutputImpl(
+	float* __restrict dataOut, size_t hostNum, EmuTime::param time)
 {
-	unsigned emuNum = emuClock.getTicksTill(time);
+	auto& emuClk = getEmuClock();
+	unsigned emuNum = emuClk.getTicksTill(time);
 	if (emuNum > 0) {
 		prepareData(emuNum);
 	}
@@ -659,21 +664,21 @@ bool ResampleHQ<CHANNELS>::generateOutput(
 	if (notMuted) {
 		// main processing loop
 		EmuTime host1 = hostClock.getFastAdd(1);
-		assert(host1 > emuClock.getTime());
-		float pos = emuClock.getTicksTillDouble(host1);
+		assert(host1 > emuClk.getTime());
+		float pos = narrow_cast<float>(emuClk.getTicksTillDouble(host1));
 		assert(pos <= (ratio + 2));
-		for (unsigned i = 0; i < hostNum; ++i) {
+		for (auto i : xrange(hostNum)) {
 			calcOutput(pos, &dataOut[i * CHANNELS]);
 			pos += ratio;
 		}
 	}
-	emuClock += emuNum;
+	emuClk += emuNum;
 	bufStart += emuNum;
 	nonzeroSamples = std::max<int>(0, nonzeroSamples - emuNum);
 
 	assert(bufStart <= bufEnd);
 	unsigned available = bufEnd - bufStart;
-	unsigned extra = int(filterLen + 1 + ratio + 1);
+	unsigned extra = filterLen + 1 + narrow_cast<int>(ratio) + 1;
 	assert(available == extra); (void)available; (void)extra;
 
 	return notMuted;

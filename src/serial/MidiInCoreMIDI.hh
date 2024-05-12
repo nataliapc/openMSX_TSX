@@ -35,8 +35,8 @@ public:
 	// Pluggable
 	void plugHelper(Connector& connector, EmuTime::param time) override;
 	void unplugHelper(EmuTime::param time) override;
-	const std::string& getName() const override;
-	string_view getDescription() const override;
+	[[nodiscard]] std::string_view getName() const override;
+	[[nodiscard]] std::string_view getDescription() const override;
 
 	// MidiInDevice
 	void signal(EmuTime::param time) override;
@@ -47,12 +47,13 @@ public:
 
 private:
 	// EventListener
-	int signalEvent(const std::shared_ptr<const Event>& event) override;
+	int signalEvent(const Event& event) override;
 
-	static void sendPacketList(const MIDIPacketList *pktlist,
-                         void *readProcRefCon, void *srcConnRefCon);
-	void sendPacketList(const MIDIPacketList *pktlist, void *srcConnRefCon);
+	static void sendPacketList(const MIDIPacketList *pktList,
+	                           void *readProcRefCon, void *srcConnRefCon);
+	void sendPacketList(const MIDIPacketList *pktList, void *srcConnRefCon);
 
+private:
 	EventDistributor& eventDistributor;
 	Scheduler& scheduler;
 	cb_queue<byte> queue;
@@ -80,8 +81,8 @@ public:
 	// Pluggable
 	void plugHelper(Connector& connector, EmuTime::param time) override;
 	void unplugHelper(EmuTime::param time) override;
-	const std::string& getName() const override;
-	string_view getDescription() const override;
+	std::string_view getName() const override;
+	std::string_view getDescription() const override;
 
 	// MidiInDevice
 	void signal(EmuTime::param time) override;
@@ -91,11 +92,11 @@ public:
 
 private:
 	// EventListener
-	int signalEvent(const std::shared_ptr<const Event>& event) override;
+	int signalEvent(const Event& event) override;
 
-	static void sendPacketList(const MIDIPacketList *pktlist,
-                         void *readProcRefCon, void *srcConnRefCon);
-	void sendPacketList(const MIDIPacketList *pktlist, void *srcConnRefCon);
+	static void sendPacketList(const MIDIPacketList *pktList,
+	                           void *readProcRefCon, void *srcConnRefCon);
+	void sendPacketList(const MIDIPacketList *pktList, void *srcConnRefCon);
 
 	EventDistributor& eventDistributor;
 	Scheduler& scheduler;

@@ -5,6 +5,7 @@
 #include "MB89352.hh"
 #include "SRAM.hh"
 #include "RomBlockDebuggable.hh"
+#include <array>
 
 namespace openmsx {
 
@@ -15,25 +16,26 @@ public:
 
 	void reset(EmuTime::param time) override;
 
-	byte readMem(word address, EmuTime::param time) override;
-	byte peekMem(word address, EmuTime::param time) const override;
+	[[nodiscard]] byte readMem(word address, EmuTime::param time) override;
+	[[nodiscard]]byte peekMem(word address, EmuTime::param time) const override;
 	void writeMem(word address, byte value, EmuTime::param time) override;
-	const byte* getReadCacheLine(word address) const override;
-	byte* getWriteCacheLine(word address) const override;
+	[[nodiscard]]const byte* getReadCacheLine(word address) const override;
+	[[nodiscard]]byte* getWriteCacheLine(word address) const override;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 private:
-	unsigned getSramSize() const;
+	[[nodiscard]] size_t getSramSize() const;
 	void setSRAM(unsigned region, byte block);
 
+private:
 	MB89352 mb89352;
 	SRAM sram;
 	RomBlockDebuggable romBlockDebug;
 
-	bool isWriteable[4]; // which region is readonly?
-	byte mapped[4]; // SPC block mapped in this region?
+	std::array<bool, 4> isWriteable; // which region is readonly?
+	std::array<byte, 4> mapped; // SPC block mapped in this region?
 	const byte blockMask;
 };
 

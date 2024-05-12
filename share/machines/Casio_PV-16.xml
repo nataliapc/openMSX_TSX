@@ -8,6 +8,7 @@
     <release_year>1984</release_year>
     <description>Cheap gaming MSX, with joystick buttons and bad keyboard and no printer port.</description>
     <type>MSX</type>
+    <region>jp</region>
   </info>
 
   <CassettePort/>
@@ -39,12 +40,13 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <primary slot="0">
       <RAM id="Main RAM">
+          <initialContent encoding="gz-base64">eJz78IEywE8hAAAZuT/B</initialContent> <!-- (64*chr(0xF0)+64*0x0F)).encode('zip').encode('base64') as found on the machine of Peter Hanraets with serial 1023398 -->
         <mem base="0xC000" size="0x4000"/>
       </RAM>
       <ROM id="MSX BIOS with BASIC ROM">

@@ -9,11 +9,10 @@ class RomAscii16kB : public Rom16kBBlocks
 {
 public:
 	RomAscii16kB(const DeviceConfig& config, Rom&& rom);
-	virtual ~RomAscii16kB() {}
 
 	void reset(EmuTime::param time) override;
 	void writeMem(word address, byte value, EmuTime::param time) override;
-	byte* getWriteCacheLine(word address) const override;
+	[[nodiscard]] byte* getWriteCacheLine(word address) const override;
 };
 
 REGISTER_BASE_CLASS(RomAscii16kB, "RomAscii16kB");

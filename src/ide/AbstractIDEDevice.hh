@@ -15,8 +15,8 @@ class AbstractIDEDevice : public IDEDevice
 public:
 	void reset(EmuTime::param time) override;
 
-	word readData(EmuTime::param time) override;
-	byte readReg(nibble reg, EmuTime::param time) override;
+	[[nodiscard]] word readData(EmuTime::param time) override;
+	[[nodiscard]] byte readReg(nibble reg, EmuTime::param time) override;
 
 	void writeData(word value, EmuTime::param time) override;
 	void writeReg(nibble reg, byte value, EmuTime::param time) override;
@@ -26,29 +26,29 @@ public:
 
 protected:
 	// Bit flags for the status register:
-	static const byte DRDY = 0x40;
-	static const byte DSC = 0x10;
-	static const byte DRQ = 0x08;
-	static const byte ERR = 0x01;
+	static constexpr byte DRDY = 0x40;
+	static constexpr byte DSC = 0x10;
+	static constexpr byte DRQ = 0x08;
+	static constexpr byte ERR = 0x01;
 
 	// Bit flags for the error register:
-	static const byte UNC = 0x40;
-	static const byte IDNF = 0x10;
-	static const byte ABORT = 0x04;
+	static constexpr byte UNC = 0x40;
+	static constexpr byte IDNF = 0x10;
+	static constexpr byte ABORT = 0x04;
 
 	explicit AbstractIDEDevice(MSXMotherBoard& motherBoard);
-	~AbstractIDEDevice() = default;
+	~AbstractIDEDevice() override = default;
 
 	/** Is this device a packet (ATAPI) device?
 	  * @return True iff this device supports the packet commands.
 	  */
-	virtual bool isPacketDevice() = 0;
+	[[nodiscard]] virtual bool isPacketDevice() = 0;
 
 	/** Gets the device name to insert as "model number" into the identify
 	  * block.
 	  * @return An ASCII string, up to 40 characters long.
 	  */
-	virtual const std::string& getDeviceName() = 0;
+	[[nodiscard]] virtual std::string_view getDeviceName() = 0;
 
 	/** Tells a subclass to fill the device specific parts of the identify
 	  * block located in the buffer.
@@ -66,7 +66,7 @@ protected:
 	  *   or 0 if the transfer was aborted (the implementation of this method
 	  *   must set the relevant error flags as well).
 	  */
-	virtual unsigned readBlockStart(AlignedBuffer& buffer, unsigned count) = 0;
+	[[nodiscard]] virtual unsigned readBlockStart(AlignedBuffer& buffer, unsigned count) = 0;
 
 	/** Called when a read transfer completes.
 	  * The default implementation does nothing.
@@ -94,11 +94,11 @@ protected:
 	/** Creates an LBA sector address from the contents of the sectorNumReg,
 	  * cylinderLowReg, cylinderHighReg and devHeadReg registers.
 	  */
-	unsigned getSectorNumber() const;
+	[[nodiscard]] unsigned getSectorNumber() const;
 
 	/** Gets the number of sectors indicated by the sector count register.
 	  */
-	unsigned getNumSectors() const;
+	[[nodiscard]] unsigned getNumSectors() const;
 
 	/** Writes the interrupt reason register.
 	  * This is the same as register as sector count, but serves a different
@@ -109,7 +109,7 @@ protected:
 	/** Reads the byte count limit of a packet transfer in the registers.
 	  * The cylinder low/high registers are used for this.
 	  */
-	unsigned getByteCount();
+	[[nodiscard]] unsigned getByteCount() const;
 
 	/** Writes the byte count of a packet transfer in the registers.
 	  * The cylinder low/high registers are used for this.
@@ -136,7 +136,7 @@ protected:
 	  *   The caller should write the data there.
 	  *   The relevant part of the buffer contains zeroes.
 	  */
-	AlignedBuffer& startShortReadTransfer(unsigned count);
+	[[nodiscard]] AlignedBuffer& startShortReadTransfer(unsigned count);
 
 	/** Aborts the read transfer in progress.
 	  */
@@ -151,18 +151,18 @@ protected:
 	  */
 	void abortWriteTransfer(byte error);
 
-	byte getFeatureReg() const { return featureReg; }
+	[[nodiscard]] byte getFeatureReg() const { return featureReg; }
 	void setLBALow (byte value) { sectorNumReg    = value; }
 	void setLBAMid (byte value) { cylinderLowReg  = value; }
 	void setLBAHigh(byte value) { cylinderHighReg = value; }
 
-	MSXMotherBoard& getMotherBoard() const { return motherBoard; }
+	[[nodiscard]] MSXMotherBoard& getMotherBoard() const { return motherBoard; }
 
 private:
 	/** Perform diagnostic and return result.
 	  * Actually, just return success, because we don't emulate faulty hardware.
 	  */
-	byte diagnostic();
+	[[nodiscard]] byte diagnostic() const;
 
 	/** Puts special values in the sector address, sector count and device
 	  * registers to identify the type of device.
@@ -199,6 +199,7 @@ private:
 	  */
 	void setTransferWrite(bool status);
 
+private:
 	MSXMotherBoard& motherBoard;
 
 	/** Data buffer shared by all transfers.
@@ -210,16 +211,16 @@ private:
 
 	/** Index of current read/write position in the buffer.
 	  */
-	unsigned transferIdx;
+	unsigned transferIdx = 0; // avoid UMR on serialize
 
 	/** Number of bytes remaining in the buffer.
 	  */
-	unsigned bufferLeft;
+	unsigned bufferLeft = 0;
 
 	/** Number of bytes remaining in the transfer after this buffer.
 	  * (total bytes remaining == transferCount + bufferLeft)
 	  */
-	unsigned transferCount;
+	unsigned transferCount = 0;
 
 	// ATA registers:
 	byte errorReg;
@@ -231,8 +232,8 @@ private:
 	byte statusReg;
 	byte featureReg;
 
-	bool transferRead;
-	bool transferWrite;
+	bool transferRead = false;
+	bool transferWrite = false;
 };
 
 REGISTER_BASE_NAME_HELPER(AbstractIDEDevice, "IDEDevice");

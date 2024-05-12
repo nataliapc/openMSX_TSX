@@ -8,11 +8,11 @@ static bool approxEq(float x, float y)
 {
 	return fabsf(x - y) < 1.0e-5f;
 }
-static bool approxEq(const vec4& x, const vec4&y)
+static constexpr bool approxEq(const vec4& x, const vec4&y)
 {
 	return length2(x - y) < 1.0e-4f;
 }
-static bool approxEq(const mat4& x, const mat4&y)
+static constexpr bool approxEq(const mat4& x, const mat4&y)
 {
 	return norm2_2(x - y) < 1.0e-3f;
 }
@@ -153,7 +153,7 @@ TEST_CASE("gl_transform: rotation")
 		CHECK(approxEq(rot2, rot3));
 		vec4 p(-1, 2, 1, 1);
 		vec4 q = rot1 * p;
-		CHECK(approxEq(q, vec4(-1.05647, 0.231566, 2.19778, 1)));
+		CHECK(approxEq(q, vec4(-1.05647f, 0.231566f, 2.19778f, 1.0f)));
 		CHECK(approxEq(length(p), length(q)));
 		CHECK(approxEq(inverse(rot1), rotate(-1.23f, axis)));
 		CHECK(approxEq(inverse(rot1), transpose(rot1)));
@@ -162,20 +162,22 @@ TEST_CASE("gl_transform: rotation")
 
 TEST_CASE("gl_transform: ortho")
 {
-	mat4 O = ortho(0, 640, 0, 480, -1, 1);
-	CHECK(approxEq(O, mat4(vec4(0.003125, 0, 0, 0),
-			       vec4(0, 0.00416667, 0, 0),
-			       vec4(0, 0, -1, 0),
-			       vec4(-1, -1, 0, 1))));
+	mat4 O1 = ortho(0, 640, 480, 0, -1, 1);
+	mat4 O2 = ortho(640, 480);
+	CHECK(approxEq(O1, O2));
+	CHECK(approxEq(O1, mat4(vec4(0.003125f, 0.0f, 0.0f, 0.0f),
+			        vec4(0.0f, -0.00416667f, 0.0f, 0.0f),
+			        vec4(0.0f, 0.0f, -1.0f, 0.0f),
+			        vec4(-1.0f, 1.0f, 0.0f, 1.0f))));
 }
 
 TEST_CASE("gl_transform: frustum")
 {
 	mat4 F = frustum(0, 640, 0, 480, -1, 1);
-	CHECK(approxEq(F, mat4(vec4(-0.003125, 0, 0, 0),
-			       vec4(0, 0.00416667, 0, 0),
-			       vec4(1, 1, 0, -1),
-			       vec4(0, 0, 1, 0))));
+	CHECK(approxEq(F, mat4(vec4(-0.003125f, 0.0f, 0.0f, 0.0f),
+			       vec4(0.0f, 0.00416667f, 0.0f, 0.0f),
+			       vec4(1.0f, 1.0f, 0.0f, -1.0f),
+			       vec4(0.0f, 0.0f, 1.0f, 0.0f))));
 }
 
 

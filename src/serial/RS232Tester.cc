@@ -4,7 +4,10 @@
 #include "EventDistributor.hh"
 #include "Scheduler.hh"
 #include "FileOperations.hh"
+#include "checked_cast.hh"
+#include "narrow.hh"
 #include "serialize.hh"
+#include <array>
 
 namespace openmsx {
 
@@ -21,40 +24,41 @@ RS232Tester::RS232Tester(EventDistributor& eventDistributor_,
 	        "filename of the file where the RS232 output is written to",
 	        "rs232-output")
 {
-	eventDistributor.registerEventListener(OPENMSX_RS232_TESTER_EVENT, *this);
+	eventDistributor.registerEventListener(EventType::RS232_TESTER, *this);
 }
 
 RS232Tester::~RS232Tester()
 {
-	eventDistributor.unregisterEventListener(OPENMSX_RS232_TESTER_EVENT, *this);
+	eventDistributor.unregisterEventListener(EventType::RS232_TESTER, *this);
 }
 
 // Pluggable
 void RS232Tester::plugHelper(Connector& connector_, EmuTime::param /*time*/)
 {
 	// output
-	string_view outName = rs232OutputFilenameSetting.getString();
-	FileOperations::openofstream(outFile, outName.str());
+	auto outName = rs232OutputFilenameSetting.getString();
+	FileOperations::openOfStream(outFile, outName);
 	if (outFile.fail()) {
 		outFile.clear();
 		throw PlugException("Error opening output file: ", outName);
 	}
 
 	// input
-	string_view inName = rs232InputFilenameSetting.getString();
-	inFile = FileOperations::openFile(inName.str(), "rb");
+	auto inName = rs232InputFilenameSetting.getString();
+	inFile = FileOperations::openFile(inName, "rb");
 	if (!inFile) {
 		outFile.close();
 		throw PlugException("Error opening input file: ", inName);
 	}
 
-	auto& rs232Connector = static_cast<RS232Connector&>(connector_);
+	auto& rs232Connector = checked_cast<RS232Connector&>(connector_);
 	rs232Connector.setDataBits(SerialDataInterface::DATA_8);	// 8 data bits
 	rs232Connector.setStopBits(SerialDataInterface::STOP_1);	// 1 stop bit
 	rs232Connector.setParityBit(false, SerialDataInterface::EVEN); // no parity
 
 	setConnector(&connector_); // base class will do this in a moment,
 	                           // but thread already needs it
+	poller.reset();
 	thread = std::thread([this]() { run(); });
 }
 
@@ -69,13 +73,12 @@ void RS232Tester::unplugHelper(EmuTime::param /*time*/)
 	inFile.reset();
 }
 
-const std::string& RS232Tester::getName() const
+std::string_view RS232Tester::getName() const
 {
-	static const std::string name("rs232-tester");
-	return name;
+	return "rs232-tester";
 }
 
-string_view RS232Tester::getDescription() const
+std::string_view RS232Tester::getDescription() const
 {
 	return	"RS232 tester pluggable. Reads all data from file specified "
 		"with the 'rs-232-inputfilename' setting. Writes all data "
@@ -85,7 +88,6 @@ string_view RS232Tester::getDescription() const
 
 void RS232Tester::run()
 {
-	byte buf;
 	if (!inFile) return;
 	while (!feof(inFile.get())) {
 #ifndef _WIN32
@@ -93,7 +95,8 @@ void RS232Tester::run()
 			break;
 		}
 #endif
-		size_t num = fread(&buf, 1, 1, inFile.get());
+		std::array<uint8_t, 1> buf;
+		size_t num = fread(buf.data(), sizeof(uint8_t), buf.size(), inFile.get());
 		if (poller.aborted()) {
 			break;
 		}
@@ -101,36 +104,48 @@ void RS232Tester::run()
 			continue;
 		}
 		assert(isPluggedIn());
-		std::lock_guard<std::mutex> lock(mutex);
-		queue.push_back(buf);
-		eventDistributor.distributeEvent(
-			std::make_shared<SimpleEvent>(OPENMSX_RS232_TESTER_EVENT));
+		std::scoped_lock lock(mutex);
+		queue.push_back(buf[0]);
+		eventDistributor.distributeEvent(Rs232TesterEvent());
 	}
+}
+
+// Control lines
+// Needed to set these lines in the correct state for a plugged device
+
+std::optional<bool> RS232Tester::getDSR(EmuTime::param /*time*/) const
+{
+	return true;
+}
+
+std::optional<bool> RS232Tester::getCTS(EmuTime::param /*time*/) const
+{
+	return true;
 }
 
 // input
 void RS232Tester::signal(EmuTime::param time)
 {
-	auto* conn = static_cast<RS232Connector*>(getConnector());
+	auto* conn = checked_cast<RS232Connector*>(getConnector());
 	if (!conn->acceptsData()) {
-		std::lock_guard<std::mutex> lock(mutex);
+		std::scoped_lock lock(mutex);
 		queue.clear();
 		return;
 	}
 	if (!conn->ready()) return;
 
-	std::lock_guard<std::mutex> lock(mutex);
+	std::scoped_lock lock(mutex);
 	if (queue.empty()) return;
 	conn->recvByte(queue.pop_front(), time);
 }
 
 // EventListener
-int RS232Tester::signalEvent(const std::shared_ptr<const Event>& /*event*/)
+int RS232Tester::signalEvent(const Event& /*event*/)
 {
 	if (isPluggedIn()) {
 		signal(scheduler.getCurrentTime());
 	} else {
-		std::lock_guard<std::mutex> lock(mutex);
+		std::scoped_lock lock(mutex);
 		queue.clear();
 	}
 	return 0;
@@ -138,10 +153,10 @@ int RS232Tester::signalEvent(const std::shared_ptr<const Event>& /*event*/)
 
 
 // output
-void RS232Tester::recvByte(byte value, EmuTime::param /*time*/)
+void RS232Tester::recvByte(uint8_t value, EmuTime::param /*time*/)
 {
 	if (outFile.is_open()) {
-		outFile.put(value);
+		outFile.put(narrow_cast<char>(value));
 		outFile.flush();
 	}
 }

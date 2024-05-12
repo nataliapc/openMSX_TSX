@@ -1,24 +1,22 @@
 #include "MusicalMemoryMapper.hh"
-#include "SN76489.hh"
+#include "enumerate.hh"
+#include "narrow.hh"
 #include "serialize.hh"
-#include <memory>
+#include "xrange.hh"
 
 namespace openmsx {
 
-static const byte MEM_ACCESS_ENABLED = 1 << 7;
-static const byte SOUND_PORT_ENABLED = 1 << 6;
-static const byte PORT_ACCESS_DISABLED = 1 << 5;
-static const byte UNUSED = 1 << 4;
-static const byte WRITE_PROTECT = 0x0F;
+static constexpr byte MEM_ACCESS_ENABLED = 1 << 7;
+static constexpr byte SOUND_PORT_ENABLED = 1 << 6;
+static constexpr byte PORT_ACCESS_DISABLED = 1 << 5;
+static constexpr byte UNUSED = 1 << 4;
+static constexpr byte WRITE_PROTECT = 0x0F;
 
 MusicalMemoryMapper::MusicalMemoryMapper(const DeviceConfig& config)
-	: MSXMemoryMapper(config)
-	, sn76489(std::make_unique<SN76489>(config))
-	, controlReg(0x00)
+	: MSXMemoryMapperBase(config)
+	, sn76489(config)
 {
 }
-
-MusicalMemoryMapper::~MusicalMemoryMapper() = default;
 
 void MusicalMemoryMapper::reset(EmuTime::param time)
 {
@@ -26,15 +24,15 @@ void MusicalMemoryMapper::reset(EmuTime::param time)
 
 	// MMM inits the page registers to 3, 2, 1, 0 instead of zeroes, so we
 	// don't call the superclass implementation.
-	for (unsigned page = 0; page < 4; page++) {
-		registers[page] = 3 - page;
+	for (auto [page, reg] : enumerate(registers)) {
+		reg = byte(3 - page);
 	}
 
 	// Note: The actual SN76489AN chip does not have a reset pin. I assume
 	//       MMM either powers off the chip on reset or suppresses its audio
 	//       output. We instead keep the chip in a silent state until it is
 	//       activated.
-	sn76489->reset(time);
+	sn76489.reset(time);
 }
 
 byte MusicalMemoryMapper::readIO(word port, EmuTime::param time)
@@ -42,7 +40,7 @@ byte MusicalMemoryMapper::readIO(word port, EmuTime::param time)
 	if (controlReg & PORT_ACCESS_DISABLED) {
 		return 0xFF;
 	} else {
-		return MSXMemoryMapper::readIO(port, time);
+		return MSXMemoryMapperBase::readIO(port, time);
 	}
 }
 
@@ -51,7 +49,7 @@ byte MusicalMemoryMapper::peekIO(word port, EmuTime::param time) const
 	if (controlReg & PORT_ACCESS_DISABLED) {
 		return 0xFF;
 	} else {
-		return MSXMemoryMapper::peekIO(port, time);
+		return MSXMemoryMapperBase::peekIO(port, time);
 	}
 }
 
@@ -60,12 +58,13 @@ void MusicalMemoryMapper::writeIO(word port, byte value, EmuTime::param time)
 	if ((port & 0xFC) == 0xFC) {
 		// Mapper port.
 		if (!(controlReg & PORT_ACCESS_DISABLED)) {
-			MSXMemoryMapper::writeIO(port, value, time);
+			MSXMemoryMapperBase::writeIOImpl(port, value, time);
+			invalidateDeviceRWCache(0x4000 * (port & 0x03), 0x4000);
 		}
 	} else if (port & 1) {
 		// Sound chip.
 		if (controlReg & SOUND_PORT_ENABLED) {
-			sn76489->write(value, time);
+			sn76489.write(value, time);
 		}
 	} else {
 		// Control port.
@@ -127,19 +126,19 @@ void MusicalMemoryMapper::updateControlReg(byte value)
 
 		// Invalidate pages for which register access changes.
 		byte regAccessBefore = 0;
-		for (unsigned page = 0; page < 4; page++) {
-			regAccessBefore |= registerAccessAt(0x4000 * page) << page;
+		for (auto page : xrange(4)) {
+			regAccessBefore |= byte(registerAccessAt(narrow_cast<word>(0x4000 * page)) << page);
 		}
 		controlReg = value;
 		byte regAccessAfter = 0;
-		for (unsigned page = 0; page < 4; page++) {
-			regAccessAfter |= registerAccessAt(0x4000 * page) << page;
+		for (auto page : xrange(4)) {
+			regAccessAfter |= byte(registerAccessAt(narrow_cast<word>(0x4000 * page)) << page);
 		}
 		invalidate |= regAccessBefore ^ regAccessAfter;
 
-		for (unsigned page = 0; page < 4; page++) {
+		for (auto page : xrange(4)) {
 			if ((invalidate >> page) & 1) {
-				invalidateMemCache(0x4000 * page, 0x4000);
+				invalidateDeviceRWCache(0x4000 * page, 0x4000);
 			}
 		}
 	}
@@ -148,13 +147,13 @@ void MusicalMemoryMapper::updateControlReg(byte value)
 byte MusicalMemoryMapper::peekMem(word address, EmuTime::param time) const
 {
 	int reg = readReg(address);
-	return reg >= 0 ? reg : MSXMemoryMapper::peekMem(address, time);
+	return reg >= 0 ? narrow<byte>(reg) : MSXMemoryMapperBase::peekMem(address, time);
 }
 
 byte MusicalMemoryMapper::readMem(word address, EmuTime::param time)
 {
 	int reg = readReg(address);
-	return reg >= 0 ? reg : MSXMemoryMapper::readMem(address, time);
+	return reg >= 0 ? narrow<byte>(reg) : MSXMemoryMapperBase::readMem(address, time);
 }
 
 void MusicalMemoryMapper::writeMem(word address, byte value, EmuTime::param time)
@@ -173,12 +172,13 @@ void MusicalMemoryMapper::writeMem(word address, byte value, EmuTime::param time
 		case 0xFD:
 		case 0xFE:
 		case 0xFF:
-			MSXMemoryMapper::writeIO(address & 0xFF, value, time);
+			MSXMemoryMapperBase::writeIOImpl(address & 0xFF, value, time);
+			invalidateDeviceRWCache(0x4000 * (address & 0x03), 0x4000);
 			return;
 		}
 	}
 	if (!writeProtected(address)) {
-		MSXMemoryMapper::writeMem(address, value, time);
+		MSXMemoryMapperBase::writeMem(address, value, time);
 	}
 }
 
@@ -189,7 +189,7 @@ const byte* MusicalMemoryMapper::getReadCacheLine(word start) const
 			return nullptr;
 		}
 	}
-	return MSXMemoryMapper::getReadCacheLine(start);
+	return MSXMemoryMapperBase::getReadCacheLine(start);
 }
 
 byte* MusicalMemoryMapper::getWriteCacheLine(word start) const
@@ -200,18 +200,18 @@ byte* MusicalMemoryMapper::getWriteCacheLine(word start) const
 		}
 	}
 	if (writeProtected(start)) {
-		return unmappedWrite;
+		return unmappedWrite.data();
 	} else {
-		return MSXMemoryMapper::getWriteCacheLine(start);
+		return MSXMemoryMapperBase::getWriteCacheLine(start);
 	}
 }
 
 template<typename Archive>
 void MusicalMemoryMapper::serialize(Archive& ar, unsigned /*version*/)
 {
-	ar.template serializeBase<MSXMemoryMapper>(*this);
-	ar.serialize("ctrl", controlReg);
-	ar.serialize("sn76489", *sn76489);
+	ar.template serializeBase<MSXMemoryMapperBase>(*this);
+	ar.serialize("ctrl",    controlReg,
+	             "sn76489", sn76489);
 }
 INSTANTIATE_SERIALIZE_METHODS(MusicalMemoryMapper);
 REGISTER_MSXDEVICE(MusicalMemoryMapper, "MusicalMemoryMapper");

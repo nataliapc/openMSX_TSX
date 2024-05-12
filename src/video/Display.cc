@@ -1,36 +1,41 @@
 #include "Display.hh"
+
 #include "RendererFactory.hh"
+#include "ImGuiManager.hh"
 #include "Layer.hh"
-#include "VideoSystem.hh"
+#include "OutputSurface.hh"
 #include "VideoLayer.hh"
+#include "VideoSystem.hh"
+#include "VideoSystemChangeListener.hh"
+
+#include "BooleanSetting.hh"
+#include "CommandException.hh"
 #include "EventDistributor.hh"
-#include "FinishFrameEvent.hh"
+#include "Event.hh"
 #include "FileOperations.hh"
 #include "FileContext.hh"
-#include "InputEvents.hh"
 #include "CliComm.hh"
 #include "Timer.hh"
-#include "BooleanSetting.hh"
 #include "IntegerSetting.hh"
 #include "EnumSetting.hh"
 #include "Reactor.hh"
 #include "MSXMotherBoard.hh"
 #include "HardwareConfig.hh"
+#include "TclArgParser.hh"
 #include "XMLElement.hh"
-#include "VideoSystemChangeListener.hh"
-#include "CommandException.hh"
-#include "StringOp.hh"
 #include "Version.hh"
-#include "build-info.hh"
-#include "checked_cast.hh"
+
+#include "narrow.hh"
 #include "outer.hh"
+#include "ranges.hh"
 #include "stl.hh"
 #include "unreachable.hh"
-#include <algorithm>
+#include "xrange.hh"
+
+#include <array>
 #include <cassert>
 
 using std::string;
-using std::vector;
 
 namespace openmsx {
 
@@ -41,57 +46,32 @@ Display::Display(Reactor& reactor_)
 	, osdGui(reactor_.getCommandController(), *this)
 	, reactor(reactor_)
 	, renderSettings(reactor.getCommandController())
-	, commandConsole(reactor.getGlobalCommandController(),
-	                 reactor.getEventDistributor(), *this)
-	, currentRenderer(RenderSettings::UNINITIALIZED)
-	, resolution(-1, -1)
-	, switchInProgress(false)
 {
 	frameDurationSum = 0;
-	for (unsigned i = 0; i < NUM_FRAME_DURATIONS; ++i) {
+	repeat(NUM_FRAME_DURATIONS, [&] {
 		frameDurations.addFront(20);
 		frameDurationSum += 20;
-	}
+	});
 	prevTimeStamp = Timer::getTime();
 
 	EventDistributor& eventDistributor = reactor.getEventDistributor();
-	eventDistributor.registerEventListener(OPENMSX_FINISH_FRAME_EVENT,
-			*this);
-	eventDistributor.registerEventListener(OPENMSX_SWITCH_RENDERER_EVENT,
-			*this);
-	eventDistributor.registerEventListener(OPENMSX_MACHINE_LOADED_EVENT,
-			*this);
-	eventDistributor.registerEventListener(OPENMSX_EXPOSE_EVENT,
-			*this);
-#if PLATFORM_ANDROID
-	eventDistributor.registerEventListener(OPENMSX_FOCUS_EVENT,
-			*this);
-#endif
+	using enum EventType;
+	for (auto type : {FINISH_FRAME, SWITCH_RENDERER, MACHINE_LOADED, WINDOW}) {
+		eventDistributor.registerEventListener(type, *this);
+	}
+
 	renderSettings.getRendererSetting().attach(*this);
-	renderSettings.getFullScreenSetting().attach(*this);
-	renderSettings.getScaleFactorSetting().attach(*this);
-	renderFrozen = false;
 }
 
 Display::~Display()
 {
 	renderSettings.getRendererSetting().detach(*this);
-	renderSettings.getFullScreenSetting().detach(*this);
-	renderSettings.getScaleFactorSetting().detach(*this);
 
 	EventDistributor& eventDistributor = reactor.getEventDistributor();
-#if PLATFORM_ANDROID
-	eventDistributor.unregisterEventListener(OPENMSX_FOCUS_EVENT,
-			*this);
-#endif
-	eventDistributor.unregisterEventListener(OPENMSX_EXPOSE_EVENT,
-			*this);
-	eventDistributor.unregisterEventListener(OPENMSX_MACHINE_LOADED_EVENT,
-			*this);
-	eventDistributor.unregisterEventListener(OPENMSX_SWITCH_RENDERER_EVENT,
-			*this);
-	eventDistributor.unregisterEventListener(OPENMSX_FINISH_FRAME_EVENT,
-			*this);
+	using enum EventType;
+	for (auto type : {WINDOW, MACHINE_LOADED, SWITCH_RENDERER, FINISH_FRAME}) {
+		eventDistributor.unregisterEventListener(type, *this);
+	}
 
 	resetVideoSystem();
 
@@ -114,10 +94,15 @@ VideoSystem& Display::getVideoSystem()
 	return *videoSystem;
 }
 
+OutputSurface* Display::getOutputSurface()
+{
+	return videoSystem ? videoSystem->getOutputSurface() : nullptr;
+}
+
 void Display::resetVideoSystem()
 {
 	videoSystem.reset();
-	// At this point all layers expect for the Video9000 layer
+	// At this point all layers except for the Video9000 layer
 	// should be gone.
 	//assert(layers.empty());
 }
@@ -140,12 +125,8 @@ void Display::detach(VideoSystemChangeListener& listener)
 
 Layer* Display::findActiveLayer() const
 {
-	for (auto& l : layers) {
-		if (l->getZ() == Layer::Z_MSX_ACTIVE) {
-			return l;
-		}
-	}
-	return nullptr;
+	auto it = ranges::find_if(layers, &Layer::isActive);
+	return (it != layers.end()) ? *it : nullptr;
 }
 
 Display::Layers::iterator Display::baseLayer()
@@ -172,44 +153,52 @@ void Display::executeRT()
 	repaint();
 }
 
-int Display::signalEvent(const std::shared_ptr<const Event>& event)
+int Display::signalEvent(const Event& event)
 {
-	if (event->getType() == OPENMSX_FINISH_FRAME_EVENT) {
-		auto& ffe = checked_cast<const FinishFrameEvent&>(*event);
-		if (ffe.needRender()) {
-			repaint();
-			reactor.getEventDistributor().distributeEvent(
-				std::make_shared<SimpleEvent>(
-					OPENMSX_FRAME_DRAWN_EVENT));
-		}
-	} else if (event->getType() == OPENMSX_SWITCH_RENDERER_EVENT) {
-		doRendererSwitch();
-	} else if (event->getType() == OPENMSX_MACHINE_LOADED_EVENT) {
-		videoSystem->updateWindowTitle();
-	} else if (event->getType() == OPENMSX_EXPOSE_EVENT) {
-		// Don't render too often, and certainly not when the screen
-		// will anyway soon be rendered.
-		repaintDelayed(100 * 1000); // 10fps
-	} else if (PLATFORM_ANDROID && event->getType() == OPENMSX_FOCUS_EVENT) {
-		// On Android, the rendering must be frozen when the app is sent to
-		// the background, because Android takes away all graphics resources
-		// from the app. It simply destroys the entire graphics context.
-		// Though, a repaint() must happen within the focus-lost event
-		// so that the SDL Android port realises that the graphix context
-		// is gone and will re-build it again on the first flush to the
-		// surface after the focus has been regained.
+	std::visit(overloaded{
+		[&](const FinishFrameEvent& e) {
+			if (e.needRender()) {
+				repaint();
+				reactor.getEventDistributor().distributeEvent(FrameDrawnEvent());
+			}
+		},
+		[&](const SwitchRendererEvent& /*e*/) {
+			doRendererSwitch(); // might throw
+		},
+		[&](const MachineLoadedEvent& /*e*/) {
+			videoSystem->updateWindowTitle();
+		},
+		[&](const WindowEvent& e) {
+			const auto& evt = e.getSdlWindowEvent();
+			if (evt.event == SDL_WINDOWEVENT_EXPOSED) {
+				// Don't render too often, and certainly not when the screen
+				// will anyway soon be rendered.
+				repaintDelayed(100 * 1000); // 10fps
+			}
+			if (PLATFORM_ANDROID && e.isMainWindow() &&
+			    evt.event == one_of(SDL_WINDOWEVENT_FOCUS_GAINED, SDL_WINDOWEVENT_FOCUS_LOST)) {
+				// On Android, the rendering must be frozen when the app is sent to
+				// the background, because Android takes away all graphics resources
+				// from the app. It simply destroys the entire graphics context.
+				// Though, a repaint() must happen within the focus-lost event
+				// so that the SDL Android port realizes that the graphics context
+				// is gone and will re-build it again on the first flush to the
+				// surface after the focus has been regained.
 
-		// Perform a repaint before updating the renderFrozen flag:
-		// -When loosing the focus, this repaint will flush a last
-		//  time the SDL surface, making sure that the Android SDL
-		//  port discovers that the graphics context is gone.
-		// -When gaining the focus, this repaint does nothing as
-		//  the renderFrozen flag is still false
-		repaint();
-		auto& focusEvent = checked_cast<const FocusEvent&>(*event);
-		ad_printf("Setting renderFrozen to %d", !focusEvent.getGain());
-		renderFrozen = !focusEvent.getGain();
-	}
+				// Perform a repaint before updating the renderFrozen flag:
+				// -When loosing the focus, this repaint will flush a last
+				//  time the SDL surface, making sure that the Android SDL
+				//  port discovers that the graphics context is gone.
+				// -When gaining the focus, this repaint does nothing as
+				//  the renderFrozen flag is still false
+				repaint();
+				bool lost = evt.event == SDL_WINDOWEVENT_FOCUS_LOST;
+				ad_printf("Setting renderFrozen to %d", lost);
+				renderFrozen = lost;
+			}
+		},
+		[](const EventBase&) { /*ignore*/ }
+	}, event);
 	return 0;
 }
 
@@ -221,7 +210,7 @@ string Display::getWindowTitle()
 	}
 	if (MSXMotherBoard* motherboard = reactor.getMotherBoard()) {
 		if (const HardwareConfig* machine = motherboard->getMachineConfig()) {
-			const XMLElement& config = machine->getConfig();
+			const auto& config = machine->getConfig();
 			strAppend(title, " - ",
 			          config.getChild("info").getChildData("manufacturer"), ' ',
 			          config.getChild("info").getChildData("code"));
@@ -230,13 +219,33 @@ string Display::getWindowTitle()
 	return title;
 }
 
-void Display::update(const Setting& setting)
+gl::ivec2 Display::getWindowPosition()
+{
+	if (auto pos = videoSystem->getWindowPosition()) {
+		storeWindowPosition(*pos);
+	}
+	return retrieveWindowPosition();
+}
+
+void Display::setWindowPosition(gl::ivec2 pos)
+{
+	storeWindowPosition(pos);
+	videoSystem->setWindowPosition(pos);
+}
+
+void Display::storeWindowPosition(gl::ivec2 pos)
+{
+	reactor.getImGuiManager().storeWindowPosition(pos);
+}
+
+gl::ivec2 Display::retrieveWindowPosition()
+{
+	return reactor.getImGuiManager().retrieveWindowPosition();
+}
+
+void Display::update(const Setting& setting) noexcept
 {
 	if (&setting == &renderSettings.getRendererSetting()) {
-		checkRendererSwitch();
-	} else if (&setting == &renderSettings.getFullScreenSetting()) {
-		checkRendererSwitch();
-	} else if (&setting == &renderSettings.getScaleFactorSetting()) {
 		checkRendererSwitch();
 	} else {
 		UNREACHABLE;
@@ -252,16 +261,13 @@ void Display::checkRendererSwitch()
 		return;
 	}
 	auto newRenderer = renderSettings.getRenderer();
-	if ((newRenderer != currentRenderer) ||
-	    !getVideoSystem().checkSettings()) {
+	if (newRenderer != currentRenderer) {
 		currentRenderer = newRenderer;
-		// don't do the actualing swithing in the Tcl callback
+		// don't do the actual switching in the Tcl callback
 		// it seems creating and destroying Settings (= Tcl vars)
 		// causes problems???
 		switchInProgress = true;
-		reactor.getEventDistributor().distributeEvent(
-			std::make_shared<SimpleEvent>(
-				OPENMSX_SWITCH_RENDERER_EVENT));
+		reactor.getEventDistributor().distributeEvent(SwitchRendererEvent());
 	}
 }
 
@@ -281,22 +287,16 @@ void Display::doRendererSwitch()
 				rendererSetting.getString(),
 				": ", e.getMessage());
 			// now try some things that might work against this:
-			if (rendererSetting.getEnum() != RenderSettings::SDL) {
-				errorMsg += "\nTrying to switch to SDL renderer instead...";
-				rendererSetting.setEnum(RenderSettings::SDL);
-				currentRenderer = RenderSettings::SDL;
-			} else {
-				auto& scaleFactorSetting = renderSettings.getScaleFactorSetting();
-				unsigned curval = scaleFactorSetting.getInt();
-				if (curval == 1) {
-					throw MSXException(
-						e.getMessage(),
-						" (and I have no other ideas to try...)"); // give up and die... :(
-				}
-				strAppend(errorMsg, "\nTrying to decrease scale_factor setting from ",
-                                          curval, " to ", curval - 1, "...");
-				scaleFactorSetting.setInt(curval - 1);
+			auto& scaleFactorSetting = renderSettings.getScaleFactorSetting();
+			auto curVal = scaleFactorSetting.getInt();
+			if (curVal == MIN_SCALE_FACTOR) {
+				throw FatalError(
+					e.getMessage(),
+					" (and I have no other ideas to try...)"); // give up and die... :(
 			}
+			strAppend(errorMsg, "\nTrying to decrease scale_factor setting from ",
+					curVal, " to ", curVal - 1, "...");
+			scaleFactorSetting.setInt(curVal - 1);
 			getCliComm().printWarning(errorMsg);
 		}
 	}
@@ -318,7 +318,7 @@ void Display::doRendererSwitch2()
 	}
 }
 
-void Display::repaint()
+void Display::repaintImpl()
 {
 	if (switchInProgress) {
 		// The checkRendererSwitch() method will queue a
@@ -336,7 +336,7 @@ void Display::repaint()
 	if (!renderFrozen) {
 		assert(videoSystem);
 		if (OutputSurface* surface = videoSystem->getOutputSurface()) {
-			repaint(*surface);
+			repaintImpl(*surface);
 			videoSystem->flush();
 		}
 	}
@@ -347,15 +347,26 @@ void Display::repaint()
 	prevTimeStamp = now;
 	frameDurationSum += duration - frameDurations.removeBack();
 	frameDurations.addFront(duration);
+
+	// TODO maybe revisit this later (and/or simplify other calls to repaintDelayed())
+	// This ensures a minimum framerate for ImGui
+	repaintDelayed(40 * 1000); // 25fps
 }
 
-void Display::repaint(OutputSurface& surface)
+void Display::repaintImpl(OutputSurface& surface)
 {
 	for (auto it = baseLayer(); it != end(layers); ++it) {
 		if ((*it)->getCoverage() != Layer::COVER_NONE) {
 			(*it)->paint(surface);
 		}
 	}
+}
+
+void Display::repaint()
+{
+	// Request a repaint from the VideoSystem. This may call repaintImpl()
+	// directly or for example defer to a signal callback on VisibleSurface.
+	videoSystem->repaint();
 }
 
 void Display::repaintDelayed(uint64_t delta)
@@ -370,8 +381,7 @@ void Display::repaintDelayed(uint64_t delta)
 void Display::addLayer(Layer& layer)
 {
 	int z = layer.getZ();
-	auto it = find_if(begin(layers), end(layers),
-		[&](Layer* l) { return l->getZ() > z; });
+	auto it = ranges::find_if(layers, [&](const Layer* l) { return l->getZ() > z; });
 	layers.insert(it, &layer);
 	layer.setDisplay(*this);
 }
@@ -381,7 +391,7 @@ void Display::removeLayer(Layer& layer)
 	layers.erase(rfind_unguarded(layers, &layer));
 }
 
-void Display::updateZ(Layer& layer)
+void Display::updateZ(Layer& layer) noexcept
 {
 	// Remove at old Z-index...
 	removeLayer(layer);
@@ -397,45 +407,29 @@ Display::ScreenShotCmd::ScreenShotCmd(CommandController& commandController_)
 {
 }
 
-void Display::ScreenShotCmd::execute(array_ref<TclObject> tokens, TclObject& result)
+void Display::ScreenShotCmd::execute(std::span<const TclObject> tokens, TclObject& result)
 {
-	auto& display = OUTER(Display, screenShotCmd);
+	std::string_view prefix = "openmsx";
 	bool rawShot = false;
-	bool withOsd = false;
+	bool msxOnly = false;
 	bool doubleSize = false;
-	string_view prefix = "openmsx";
-	vector<TclObject> arguments;
-	for (unsigned i = 1; i < tokens.size(); ++i) {
-		string_view tok = tokens[i].getString();
-		if (StringOp::startsWith(tok, '-')) {
-			if (tok == "--") {
-				arguments.insert(end(arguments),
-					std::begin(tokens) + i + 1, std::end(tokens));
-				break;
-			}
-			if (tok == "-prefix") {
-				if (++i == tokens.size()) {
-					throw CommandException("Missing argument");
-				}
-				prefix = tokens[i].getString();
-			} else if (tok == "-raw") {
-				rawShot = true;
-			} else if (tok == "-msxonly") {
-				display.getCliComm().printWarning(
-					"The -msxonly option has been deprecated and will "
-					"be removed in a future release. Instead, use the "
-					"-raw option for the same effect.");
-				rawShot = true;
-			} else if (tok == "-doublesize") {
-				doubleSize = true;
-			} else if (tok == "-with-osd") {
-				withOsd = true;
-			} else {
-				throw CommandException("Invalid option: ", tok);
-			}
-		} else {
-			arguments.push_back(tokens[i]);
-		}
+	bool withOsd = false;
+	std::array info = {
+		valueArg("-prefix", prefix),
+		flagArg("-raw", rawShot),
+		flagArg("-msxonly", msxOnly),
+		flagArg("-doublesize", doubleSize),
+		flagArg("-with-osd", withOsd)
+	};
+	auto arguments = parseTclArgs(getInterpreter(), tokens.subspan(1), info);
+
+	auto& display = OUTER(Display, screenShotCmd);
+	if (msxOnly) {
+		display.getCliComm().printWarning(
+			"The -msxonly option has been deprecated and will "
+			"be removed in a future release. Instead, use the "
+			"-raw option for the same effect.");
+		rawShot = true;
 	}
 	if (doubleSize && !rawShot) {
 		throw CommandException("-doublesize option can only be used in "
@@ -446,7 +440,7 @@ void Display::ScreenShotCmd::execute(array_ref<TclObject> tokens, TclObject& res
 		                       "combination with -raw");
 	}
 
-	string_view fname;
+	std::string_view fname;
 	switch (arguments.size()) {
 	case 0:
 		// nothing
@@ -458,10 +452,10 @@ void Display::ScreenShotCmd::execute(array_ref<TclObject> tokens, TclObject& res
 		throw SyntaxError();
 	}
 	string filename = FileOperations::parseCommandFileArgument(
-		fname, "screenshots", prefix, ".png");
+		fname, SCREENSHOT_DIR, prefix, SCREENSHOT_EXTENSION);
 
 	if (!rawShot) {
-		// include all layers (OSD stuff, console)
+		// take screenshot as displayed, possibly with other layers (OSD stuff, ImGUI)
 		try {
 			display.getVideoSystem().takeScreenShot(filename, withOsd);
 		} catch (MSXException& e) {
@@ -469,7 +463,7 @@ void Display::ScreenShotCmd::execute(array_ref<TclObject> tokens, TclObject& res
 				"Failed to take screenshot: ", e.getMessage());
 		}
 	} else {
-		auto videoLayer = dynamic_cast<VideoLayer*>(
+		auto* videoLayer = dynamic_cast<VideoLayer*>(
 			display.findActiveLayer());
 		if (!videoLayer) {
 			throw CommandException(
@@ -485,25 +479,29 @@ void Display::ScreenShotCmd::execute(array_ref<TclObject> tokens, TclObject& res
 	}
 
 	display.getCliComm().printInfo("Screen saved to ", filename);
-	result.setString(filename);
+	result = filename;
 }
 
-string Display::ScreenShotCmd::help(const vector<string>& /*tokens*/) const
+string Display::ScreenShotCmd::help(std::span<const TclObject> /*tokens*/) const
 {
-	// Note: -no-sprites option is implemented in Tcl
+	// Note: -no-sprites and -guess-name options are implemented in Tcl.
+	// TODO: find a way to extend the help and completion for a command
+	// when extending it in Tcl
 	return "screenshot                   Write screenshot to file \"openmsxNNNN.png\"\n"
 	       "screenshot <filename>        Write screenshot to indicated file\n"
 	       "screenshot -prefix foo       Write screenshot to file \"fooNNNN.png\"\n"
 	       "screenshot -raw              320x240 raw screenshot (of MSX screen only)\n"
 	       "screenshot -raw -doublesize  640x480 raw screenshot (of MSX screen only)\n"
 	       "screenshot -with-osd         Include OSD elements in the screenshot\n"
-	       "screenshot -no-sprites       Don't include sprites in the screenshot\n";
+	       "screenshot -no-sprites       Don't include sprites in the screenshot\n"
+	       "screenshot -guess-name       Guess the name of the running software and use it as prefix\n";
 }
 
-void Display::ScreenShotCmd::tabCompletion(vector<string>& tokens) const
+void Display::ScreenShotCmd::tabCompletion(std::vector<string>& tokens) const
 {
-	static const char* const extra[] = {
-		"-prefix", "-raw", "-doublesize", "-with-osd", "-no-sprites",
+	using namespace std::literals;
+	static constexpr std::array extra = {
+		"-prefix"sv, "-raw"sv, "-doublesize"sv, "-with-osd"sv, "-no-sprites"sv, "-guess-name"sv,
 	};
 	completeFileName(tokens, userFileContext(), extra);
 }
@@ -516,15 +514,14 @@ Display::FpsInfoTopic::FpsInfoTopic(InfoCommand& openMSXInfoCommand)
 {
 }
 
-void Display::FpsInfoTopic::execute(array_ref<TclObject> /*tokens*/,
-                           TclObject& result) const
+void Display::FpsInfoTopic::execute(std::span<const TclObject> /*tokens*/,
+                                    TclObject& result) const
 {
 	auto& display = OUTER(Display, fpsInfo);
-	float fps = 1000000.0f * Display::NUM_FRAME_DURATIONS / display.frameDurationSum;
-	result.setDouble(fps);
+	result = 1000000.0f * Display::NUM_FRAME_DURATIONS / narrow_cast<float>(display.frameDurationSum);
 }
 
-string Display::FpsInfoTopic::help(const vector<string>& /*tokens*/) const
+string Display::FpsInfoTopic::help(std::span<const TclObject> /*tokens*/) const
 {
 	return "Returns the current rendering speed in frames per second.";
 }

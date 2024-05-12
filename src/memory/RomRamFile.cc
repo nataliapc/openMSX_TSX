@@ -1,5 +1,5 @@
 /**
- * Tecall MSX Ramfile TM220
+ * Tecall MSX RAMFile TM220
  *
  * This is a cartridge with 16kB ROM and 16kB RAM (powered by a battery). It
  * offers BASIC commands to load/save files to this RAM. See manual for more
@@ -26,6 +26,7 @@
 
 #include "RomRamFile.hh"
 #include "MSXCPU.hh"
+#include "narrow.hh"
 #include "serialize.hh"
 #include <memory>
 
@@ -50,7 +51,7 @@ byte RomRamFile::readMem(word address, EmuTime::param /*time*/)
 		byte result = rom[address & 0x1fff];
 		if (cpu.isM1Cycle(address)) {
 			bool tmp = (result & 0x44) == 0x44;
-			shiftValue = (shiftValue << 1) | byte(tmp);
+			shiftValue = narrow_cast<byte>((shiftValue << 1) | byte(tmp));
 		}
 		return result;
 	} else if ((0x8000 <= address) && (address < 0xC000)) {
@@ -79,7 +80,7 @@ const byte* RomRamFile::getReadCacheLine(word address) const
 	} else if ((0x8000 <= address) && (address < 0xC000)) {
 		return &(*sram)[address & 0x3fff];
 	} else {
-		return unmappedRead;
+		return unmappedRead.data();
 	}
 }
 
@@ -97,7 +98,7 @@ byte* RomRamFile::getWriteCacheLine(word address) const
 		// writes to SRAM are not cacheable because of sync-to-disk
 		return nullptr;
 	} else {
-		return unmappedWrite;
+		return unmappedWrite.data();
 	}
 }
 

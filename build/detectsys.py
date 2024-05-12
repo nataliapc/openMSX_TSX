@@ -22,8 +22,13 @@ def detectCPU():
 		return 'x86_64'
 	elif cpu in ('x86', 'i386', 'i486', 'i586', 'i686'):
 		return 'x86'
+	elif cpu == 'ppc64le':
+		return 'ppc64le'
 	elif cpu.startswith('ppc') or cpu.endswith('ppc') or cpu.startswith('power'):
 		return 'ppc64' if cpu.endswith('64') else 'ppc'
+	elif cpu == 'arm64':
+		# Darwin uses "arm64", unlike Linux.
+		return 'aarch64'
 	elif cpu.startswith('arm'):
 		return 'arm'
 	elif cpu == 'aarch64':
@@ -48,6 +53,10 @@ def detectCPU():
 		return 'sheb' if cpu.endswith('eb') else 'sh'
 	elif cpu == 'avr32':
 		return 'avr32'
+	elif cpu == 'riscv64':
+		return 'riscv64'
+	elif cpu == 'loongarch64':
+		return 'loongarch64'
 	elif cpu == '':
 		# Python couldn't figure it out.
 		os = system().lower()
@@ -102,10 +111,11 @@ if __name__ == '__main__':
 			elif compilerCPU == 'mipsel':
 				hostCPU = compilerCPU
 			else:
-				print >>sys.stderr, (
-						'Warning: Unabling to determine endianess; '
-						'compiling for big endian'
-						)
+				print(
+					'Warning: Unabling to determine endianess; '
+					'compiling for big endian',
+					file=sys.stderr
+					)
 
 		hostOS = detectOS()
 		if hostOS == 'mingw32' and hostCPU == 'x86_64':
@@ -119,7 +129,7 @@ if __name__ == '__main__':
 			if architecture()[0] == '64bit':
 				hostCPU = 'x86_64'
 
-		print hostCPU, hostOS
-	except ValueError, ex:
-		print >> sys.stderr, ex
+		print(hostCPU, hostOS)
+	except ValueError as ex:
+		print(ex, file=sys.stderr)
 		sys.exit(1)

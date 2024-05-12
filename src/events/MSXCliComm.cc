@@ -1,6 +1,7 @@
 #include "MSXCliComm.hh"
 #include "GlobalCliComm.hh"
 #include "MSXMotherBoard.hh"
+#include "MSXCommandController.hh"
 
 namespace openmsx {
 
@@ -10,24 +11,37 @@ MSXCliComm::MSXCliComm(MSXMotherBoard& motherBoard_, GlobalCliComm& cliComm_)
 {
 }
 
-void MSXCliComm::log(LogLevel level, string_view message)
+void MSXCliComm::log(LogLevel level, std::string_view message, float fraction)
 {
-	cliComm.log(level, message);
+	if (!suppressMessages) {
+		cliComm.log(level, message, fraction);
+	}
 }
 
-void MSXCliComm::update(UpdateType type, string_view name, string_view value)
+void MSXCliComm::update(UpdateType type, std::string_view name, std::string_view value)
 {
 	assert(type < NUM_UPDATES);
-	auto it = prevValues[type].find(name);
-	if (it != end(prevValues[type])) {
+	cliComm.updateHelper(type, motherBoard.getMachineID(), name, value);
+}
+
+void MSXCliComm::updateFiltered(UpdateType type, std::string_view name, std::string_view value)
+{
+	assert(type < NUM_UPDATES);
+	if (auto [it, inserted] = prevValues[type].try_emplace(name, value);
+	    !inserted) { // was already present ..
 		if (it->second == value) {
-			return;
+			return; // .. with the same value
+		} else {
+			it->second = value; // .. but with a different value
 		}
-		it->second = value.str();
-	} else {
-		prevValues[type].emplace_noDuplicateCheck(name.str(), value.str());
 	}
 	cliComm.updateHelper(type, motherBoard.getMachineID(), name, value);
 }
+
+void MSXCliComm::setSuppressMessages(bool enable)
+{
+	suppressMessages = enable;
+}
+
 
 } // namespace openmsx

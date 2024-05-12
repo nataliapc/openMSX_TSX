@@ -2,7 +2,8 @@
 #define COMMANDCONTROLLER_HH
 
 #include "TclObject.hh"
-#include "string_view.hh"
+#include "zstring_view.hh"
+#include <string_view>
 
 namespace openmsx {
 
@@ -21,27 +22,22 @@ public:
 	 * (Un)register a command completer, used to complete build-in Tcl cmds
 	 */
 	virtual void   registerCompleter(CommandCompleter& completer,
-	                                 string_view str) = 0;
+	                                 std::string_view str) = 0;
 	virtual void unregisterCompleter(CommandCompleter& completer,
-	                                 string_view str) = 0;
+	                                 std::string_view str) = 0;
 
 	/**
 	 * (Un)register a command
 	 */
 	virtual void   registerCommand(Command& command,
-	                               const std::string& str) = 0;
+	                               zstring_view str) = 0;
 	virtual void unregisterCommand(Command& command,
-	                               string_view str) = 0;
-
-	/**
-	 * Does a command with this name already exist?
-	 */
-	virtual bool hasCommand(string_view command) const = 0;
+	                               std::string_view str) = 0;
 
 	/**
 	 * Execute the given command
 	 */
-	virtual TclObject executeCommand(const std::string& command,
+	virtual TclObject executeCommand(zstring_view command,
 	                                 CliConnection* connection = nullptr) = 0;
 
 	/** TODO
@@ -53,8 +49,8 @@ public:
 	virtual Interpreter& getInterpreter() = 0;
 
 protected:
-	CommandController() {}
-	~CommandController() {}
+	CommandController() = default;
+	~CommandController() = default;
 };
 
 } // namespace openmsx

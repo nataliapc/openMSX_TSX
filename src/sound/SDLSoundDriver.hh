@@ -2,8 +2,12 @@
 #define SDLSOUNDDRIVER_HH
 
 #include "SoundDriver.hh"
+
+#include "SDLSurfacePtr.hh"
+
 #include "MemBuffer.hh"
-#include "openmsx.hh"
+
+#include <SDL.h>
 
 namespace openmsx {
 
@@ -12,34 +16,38 @@ class Reactor;
 class SDLSoundDriver final : public SoundDriver
 {
 public:
-	SDLSoundDriver(const SDLSoundDriver&) = delete;
-	SDLSoundDriver& operator=(const SDLSoundDriver&) = delete;
-
 	SDLSoundDriver(Reactor& reactor, unsigned wantedFreq, unsigned samples);
-	~SDLSoundDriver();
+	SDLSoundDriver(const SDLSoundDriver&) = delete;
+	SDLSoundDriver(SDLSoundDriver&&) = delete;
+	SDLSoundDriver& operator=(const SDLSoundDriver&) = delete;
+	SDLSoundDriver& operator=(SDLSoundDriver&&) = delete;
+	~SDLSoundDriver() override;
 
 	void mute() override;
 	void unmute() override;
 
-	unsigned getFrequency() const override;
-	unsigned getSamples() const override;
+	[[nodiscard]] unsigned getFrequency() const override;
+	[[nodiscard]] unsigned getSamples() const override;
 
-	void uploadBuffer(int16_t* buffer, unsigned len) override;
+	void uploadBuffer(std::span<const StereoFloat> buffer) override;
 
 private:
 	void reInit();
-	unsigned getBufferFilled() const;
-	unsigned getBufferFree() const;
-	static void audioCallbackHelper(void* userdata, byte* strm, int len);
-	void audioCallback(int16_t* stream, unsigned len);
+	[[nodiscard]] unsigned getBufferFilled() const;
+	[[nodiscard]] unsigned getBufferFree() const;
+	static void audioCallbackHelper(void* userdata, uint8_t* strm, int len);
+	void audioCallback(std::span<StereoFloat> stream);
 
+private:
 	Reactor& reactor;
-	MemBuffer<int16_t> mixBuffer;
+	SDL_AudioDeviceID deviceID;
+	MemBuffer<StereoFloat> mixBuffer;
 	unsigned mixBufferSize;
 	unsigned frequency;
 	unsigned fragmentSize;
 	unsigned readIdx, writeIdx;
-	bool muted;
+	bool muted = true;
+	[[no_unique_address]] SDLSubSystemInitializer<SDL_INIT_AUDIO> audioInitializer;
 };
 
 } // namespace openmsx

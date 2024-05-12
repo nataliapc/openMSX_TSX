@@ -2,59 +2,89 @@
 #define OSDIMAGEBASEDWIDGET_HH
 
 #include "OSDWidget.hh"
+#include "stl.hh"
+#include <array>
 #include <cstdint>
+#include <optional>
+#include <span>
 
 namespace openmsx {
 
-class BaseImage;
+class GLImage;
 class Display;
 
 class OSDImageBasedWidget : public OSDWidget
 {
+protected:
+	static constexpr auto imageBasedProperties = [] {
+		using namespace std::literals;
+		return concatArray(
+			widgetProperties,
+			std::array{
+				"-rgba"sv, "-rgb"sv, "-alpha"sv,
+				"-fadePeriod"sv, "-fadeTarget"sv,
+				"-fadeCurrent"sv,
+				"-scrollSpeed"sv,
+				"-scrollPauseLeft"sv,
+				"-scrollPauseRight"sv,
+				"-query-size"sv,
+			});
+	}();
+
 public:
-	uint32_t getRGBA(uint32_t corner) const { return rgba[corner]; }
-	const uint32_t* getRGBA4() const { return rgba; }
+	[[nodiscard]] gl::vec2 getPos() const override;
+	[[nodiscard]] uint32_t getRGBA(uint32_t corner) const { return rgba[corner]; }
+	[[nodiscard]] std::span<const uint32_t, 4> getRGBA4() const { return rgba; }
 
-	virtual uint8_t getFadedAlpha() const = 0;
+	[[nodiscard]] virtual uint8_t getFadedAlpha() const = 0;
 
-	std::vector<string_view> getProperties() const override;
+	[[nodiscard]] std::span<const std::string_view> getProperties() const override {
+		return imageBasedProperties;
+	}
 	void setProperty(Interpreter& interp,
-	                 string_view name, const TclObject& value) override;
-	void getProperty(string_view name, TclObject& result) const override;
-	float getRecursiveFadeValue() const override;
+	                 std::string_view name, const TclObject& value) override;
+	void getProperty(std::string_view name, TclObject& result) const override;
+	[[nodiscard]] float getRecursiveFadeValue() const override;
+	[[nodiscard]] bool isVisible() const override;
+	[[nodiscard]] bool isRecursiveFading() const override;
 
 protected:
 	OSDImageBasedWidget(Display& display, const TclObject& name);
-	~OSDImageBasedWidget();
-	bool hasConstantAlpha() const;
-	void createImage(OutputRectangle& output);
+	~OSDImageBasedWidget() override;
+	[[nodiscard]] bool hasConstantAlpha() const;
+	void createImage(OutputSurface& output);
 	void invalidateLocal() override;
-	void paintSDL(OutputSurface& output) override;
-	void paintGL (OutputSurface& output) override;
-	virtual std::unique_ptr<BaseImage> createSDL(OutputRectangle& output) = 0;
-	virtual std::unique_ptr<BaseImage> createGL (OutputRectangle& output) = 0;
+	void paint(OutputSurface& output) override;
+	[[nodiscard]] virtual std::unique_ptr<GLImage> create(OutputSurface& output) = 0;
+	[[nodiscard]] gl::vec2 getRenderedSize() const;
 
 	void setError(std::string message);
-	bool hasError() const { return error; }
+	[[nodiscard]] bool hasError() const { return error; }
 
-	std::unique_ptr<BaseImage> image;
+	std::unique_ptr<GLImage> image;
 
 private:
-	void setRGBA(const uint32_t newRGBA[4]);
-	bool isFading() const;
-	float getCurrentFadeValue() const;
-	float getCurrentFadeValue(uint64_t) const;
+	void setRGBA(std::span<const uint32_t, 4> newRGBA);
+	[[nodiscard]] bool isFading() const;
+	[[nodiscard]] float getCurrentFadeValue() const;
+	[[nodiscard]] float getCurrentFadeValue(uint64_t now) const;
+	[[nodiscard]] bool isAnimating() const;
+	[[nodiscard]] std::optional<float> getScrollWidth() const;
 	void updateCurrentFadeValue();
 
-	void paint(OutputSurface& output, bool openGL);
-	gl::vec2 getTransformedPos(const OutputRectangle& output) const;
+	[[nodiscard]] gl::vec2 getTransformedPos(const OutputSurface& output) const;
 
-	uint64_t startFadeTime;
-	float fadePeriod;
-	float fadeTarget;
-	mutable float startFadeValue;
-	uint32_t rgba[4];
-	bool error;
+private:
+	uint64_t startFadeTime = 0;
+	float fadePeriod = 0.0f;
+	float fadeTarget = 1.0f;
+	mutable float startFadeValue = 1.0f;
+	float scrollSpeed = 0.0f; // 0 means disabled
+	float scrollPauseLeft = 0.0f;
+	float scrollPauseRight = 0.0f;
+	uint64_t startScrollTime = 0;
+	std::array<uint32_t, 4> rgba;
+	bool error = false;
 };
 
 } // namespace openmsx

@@ -1,71 +1,68 @@
 #include "SDLSoundDriver.hh"
+
+#include "Mixer.hh"
 #include "Reactor.hh"
+#include "MSXMixer.hh"
 #include "MSXMotherBoard.hh"
 #include "RealTime.hh"
 #include "GlobalSettings.hh"
 #include "ThrottleManager.hh"
 #include "MSXException.hh"
-#include "Math.hh"
 #include "Timer.hh"
-#include "build-info.hh"
-#include <SDL.h>
+
+#include "narrow.hh"
+
 #include <algorithm>
+#include <bit>
 #include <cassert>
-#include <cstring>
 
 namespace openmsx {
 
 SDLSoundDriver::SDLSoundDriver(Reactor& reactor_,
                                unsigned wantedFreq, unsigned wantedSamples)
 	: reactor(reactor_)
-	, muted(true)
 {
 	SDL_AudioSpec desired;
-	desired.freq     = wantedFreq;
-	desired.samples  = Math::powerOfTwo(wantedSamples);
+	desired.freq     = narrow<int>(wantedFreq);
+	desired.samples  = narrow<Uint16>(std::bit_ceil(wantedSamples));
 	desired.channels = 2; // stereo
-	desired.format   = OPENMSX_BIGENDIAN ? AUDIO_S16MSB : AUDIO_S16LSB;
+	desired.format   = AUDIO_F32SYS;
 	desired.callback = audioCallbackHelper; // must be a static method
 	desired.userdata = this;
 
-	if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
-		throw MSXException(
-			"Unable to initialize SDL audio subsystem: ",
-			SDL_GetError());
-	}
-	SDL_AudioSpec audioSpec;
-	if (SDL_OpenAudio(&desired, &audioSpec) != 0) {
-		SDL_QuitSubSystem(SDL_INIT_AUDIO);
+	SDL_AudioSpec obtained;
+	deviceID = SDL_OpenAudioDevice(nullptr, SDL_FALSE, &desired, &obtained,
+	                               SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
+	if (!deviceID) {
 		throw MSXException("Unable to open SDL audio: ", SDL_GetError());
 	}
 
-	frequency = audioSpec.freq;
-	fragmentSize = audioSpec.samples;
+	frequency = obtained.freq;
+	fragmentSize = obtained.samples;
 
-	mixBufferSize = 3 * (audioSpec.size / sizeof(int16_t)) + 2;
+	mixBufferSize = narrow<unsigned>(3 * (obtained.size / sizeof(StereoFloat)) + 1);
 	mixBuffer.resize(mixBufferSize);
 	reInit();
 }
 
 SDLSoundDriver::~SDLSoundDriver()
 {
-	SDL_CloseAudio();
-	SDL_QuitSubSystem(SDL_INIT_AUDIO);
+	SDL_CloseAudioDevice(deviceID);
 }
 
 void SDLSoundDriver::reInit()
 {
-	SDL_LockAudio();
+	SDL_LockAudioDevice(deviceID);
 	readIdx  = 0;
 	writeIdx = 0;
-	SDL_UnlockAudio();
+	SDL_UnlockAudioDevice(deviceID);
 }
 
 void SDLSoundDriver::mute()
 {
 	if (!muted) {
 		muted = true;
-		SDL_PauseAudio(1);
+		SDL_PauseAudioDevice(deviceID, 1);
 	}
 }
 
@@ -74,7 +71,7 @@ void SDLSoundDriver::unmute()
 	if (muted) {
 		muted = false;
 		reInit();
-		SDL_PauseAudio(0);
+		SDL_PauseAudioDevice(deviceID, 0);
 	}
 }
 
@@ -88,18 +85,19 @@ unsigned SDLSoundDriver::getSamples() const
 	return fragmentSize;
 }
 
-void SDLSoundDriver::audioCallbackHelper(void* userdata, byte* strm, int len)
+void SDLSoundDriver::audioCallbackHelper(void* userdata, uint8_t* strm, int len)
 {
-	assert((len & 3) == 0); // stereo, 16-bit
+	assert((len & 7) == 0); // stereo, 32 bit float
 	static_cast<SDLSoundDriver*>(userdata)->
-		audioCallback(reinterpret_cast<int16_t*>(strm), len / sizeof(int16_t));
+		audioCallback(std::span{std::bit_cast<StereoFloat*>(strm),
+		                        len / (2 * sizeof(float))});
 }
 
 unsigned SDLSoundDriver::getBufferFilled() const
 {
-	int result = writeIdx - readIdx;
-	if (result < 0) result += mixBufferSize;
-	assert((0 <= result) && (unsigned(result) < mixBufferSize));
+	int result = narrow_cast<int>(writeIdx - readIdx);
+	if (result < 0) result += narrow<int>(mixBufferSize);
+	assert((0 <= result) && (narrow<unsigned>(result) < mixBufferSize));
 	return result;
 }
 
@@ -107,69 +105,69 @@ unsigned SDLSoundDriver::getBufferFree() const
 {
 	// we can't distinguish completely filled from completely empty
 	// (in both cases readIx would be equal to writeIdx), so instead
-	// we define full as '(writeIdx + 2) == readIdx' (note that index
-	// increases in steps of 2 (stereo)).
-	int result = mixBufferSize - 2 - getBufferFilled();
-	assert((0 <= result) && (unsigned(result) < mixBufferSize));
+	// we define full as '(writeIdx + 1) == readIdx'.
+	unsigned result = mixBufferSize - 1 - getBufferFilled();
+	assert(narrow_cast<int>(result) >= 0);
+	assert(result < mixBufferSize);
 	return result;
 }
 
-void SDLSoundDriver::audioCallback(int16_t* stream, unsigned len)
+void SDLSoundDriver::audioCallback(std::span<StereoFloat> stream)
 {
-	assert((len & 1) == 0); // stereo
-	unsigned available = getBufferFilled();
-	unsigned num = std::min(len, available);
+	auto len = stream.size();
+
+	size_t available = getBufferFilled();
+	auto num = narrow<unsigned>(std::min(len, available));
 	if ((readIdx + num) < mixBufferSize) {
-		memcpy(stream, &mixBuffer[readIdx], num * sizeof(int16_t));
+		ranges::copy(std::span{&mixBuffer[readIdx], num}, stream);
 		readIdx += num;
 	} else {
 		unsigned len1 = mixBufferSize - readIdx;
-		memcpy(stream, &mixBuffer[readIdx], len1 * sizeof(int16_t));
+		ranges::copy(std::span{&mixBuffer[readIdx], len1}, stream);
 		unsigned len2 = num - len1;
-		memcpy(&stream[len1], &mixBuffer[0], len2 * sizeof(int16_t));
+		ranges::copy(std::span{&mixBuffer[0], len2}, stream.subspan(len1));
 		readIdx = len2;
 	}
-	int missing = len - available;
+	auto missing = narrow_cast<ptrdiff_t>(len - available);
 	if (missing > 0) {
 		// buffer underrun
-		memset(&stream[available], 0, missing * sizeof(int16_t));
+		ranges::fill(subspan(stream, available, missing), StereoFloat{});
 	}
 }
 
-void SDLSoundDriver::uploadBuffer(int16_t* buffer, unsigned len)
+void SDLSoundDriver::uploadBuffer(std::span<const StereoFloat> buffer)
 {
-	SDL_LockAudio();
-	len *= 2; // stereo
+	SDL_LockAudioDevice(deviceID);
 	unsigned free = getBufferFree();
-	if (len > free) {
-		if (reactor.getGlobalSettings().getThrottleManager().isThrottled()) {
+	if (buffer.size() > free) {
+		auto* board = reactor.getMotherBoard();
+		if (board && !board->getMSXMixer().isSynchronousMode() && // when not recording
+		    reactor.getGlobalSettings().getThrottleManager().isThrottled()) {
 			do {
-				SDL_UnlockAudio();
+				SDL_UnlockAudioDevice(deviceID);
 				Timer::sleep(5000); // 5ms
-				SDL_LockAudio();
-				if (MSXMotherBoard* board = reactor.getMotherBoard()) {
-					board->getRealTime().resync();
-				}
+				SDL_LockAudioDevice(deviceID);
+				board->getRealTime().resync();
 				free = getBufferFree();
-			} while (len > free);
+			} while (buffer.size() > free);
 		} else {
 			// drop excess samples
-			len = free;
+			buffer = buffer.subspan(0, free);
 		}
 	}
-	assert(len <= free);
-	if ((writeIdx + len) < mixBufferSize) {
-		memcpy(&mixBuffer[writeIdx], buffer, len * sizeof(int16_t));
-		writeIdx += len;
+	assert(buffer.size() <= free);
+	if ((writeIdx + buffer.size()) < mixBufferSize) {
+		ranges::copy(buffer, &mixBuffer[writeIdx]);
+		writeIdx += narrow<unsigned>(buffer.size());
 	} else {
 		unsigned len1 = mixBufferSize - writeIdx;
-		memcpy(&mixBuffer[writeIdx], buffer, len1 * sizeof(int16_t));
-		unsigned len2 = len - len1;
-		memcpy(&mixBuffer[0], &buffer[len1], len2 * sizeof(int16_t));
+		ranges::copy(buffer.subspan(0, len1), &mixBuffer[writeIdx]);
+		unsigned len2 = narrow<unsigned>(buffer.size()) - len1;
+		ranges::copy(buffer.subspan(len1, len2), &mixBuffer[0]);
 		writeIdx = len2;
 	}
 
-	SDL_UnlockAudio();
+	SDL_UnlockAudioDevice(deviceID);
 }
 
 } // namespace openmsx

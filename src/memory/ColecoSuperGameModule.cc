@@ -10,10 +10,10 @@ namespace openmsx {
 // So, if the BIOS is disabled to show RAM and the SGM RAM is disabled, is
 // there is 8kB SGM RAM on 0-0x1FFF.
 
-static const unsigned MAIN_RAM_AREA_START = 0x6000;
-static const unsigned MAIN_RAM_SIZE = 0x400; // 1kB
-static const unsigned SGM_RAM_SIZE = 0x8000; // 32kB
-static const unsigned BIOS_ROM_SIZE = 0x2000; // 8kB
+static constexpr unsigned MAIN_RAM_AREA_START = 0x6000;
+static constexpr unsigned MAIN_RAM_SIZE = 0x400; // 1kB
+static constexpr unsigned SGM_RAM_SIZE = 0x8000; // 32kB
+static constexpr unsigned BIOS_ROM_SIZE = 0x2000; // 8kB
 
 ColecoSuperGameModule::ColecoSuperGameModule(const DeviceConfig& config)
 	: MSXDevice(config)
@@ -22,27 +22,27 @@ ColecoSuperGameModule::ColecoSuperGameModule(const DeviceConfig& config)
 	, mainRam(config, "Main RAM", "Main RAM", MAIN_RAM_SIZE)
 	, biosRom(getName(), "BIOS ROM", config)
 {
-	if (biosRom.getSize() != BIOS_ROM_SIZE) {
+	if (biosRom.size() != BIOS_ROM_SIZE) {
 		throw MSXException("ColecoVision BIOS ROM must be exactly 8kB in size.");
 	}
-	getCPUInterface().register_IO_Out(0x50, this);
-	getCPUInterface().register_IO_Out(0x51, this);
-	getCPUInterface().register_IO_In (0x52, this);
-	getCPUInterface().register_IO_Out(0x53, this);
-	getCPUInterface().register_IO_Out(0x7F, this);
+	auto& cpuInterface = getCPUInterface();
+	for (auto port : {0x50, 0x51, 0x53, 0x7F}) {
+		cpuInterface.register_IO_Out(narrow_cast<byte>(port), this);
+	}
+	cpuInterface.register_IO_In(0x52, this);
 	reset(getCurrentTime());
 }
 
 ColecoSuperGameModule::~ColecoSuperGameModule()
 {
-	getCPUInterface().unregister_IO_Out(0x50, this);
-	getCPUInterface().unregister_IO_Out(0x51, this);
-	getCPUInterface().unregister_IO_In (0x52, this);
-	getCPUInterface().unregister_IO_Out(0x53, this);
-	getCPUInterface().unregister_IO_Out(0x7F, this);
+	auto& cpuInterface = getCPUInterface();
+	for (auto port : {0x50, 0x51, 0x53, 0x7F}) {
+		cpuInterface.unregister_IO_Out(narrow_cast<byte>(port), this);
+	}
+	cpuInterface.unregister_IO_In(0x52, this);
 }
 
-unsigned ColecoSuperGameModule::translateMainRamAddress(unsigned address) const
+static constexpr unsigned translateMainRamAddress(unsigned address)
 {
 	return address & (MAIN_RAM_SIZE - 1);
 }
@@ -53,7 +53,7 @@ void ColecoSuperGameModule::reset(EmuTime::param time)
 	ramAtBiosEnabled = false;
 	psgLatch = 0;
 	psg.reset(time);
-	invalidateMemCache(0x0000, 0x10000); // flush all to be sure
+	invalidateDeviceRWCache(); // flush all to be sure
 }
 
 byte ColecoSuperGameModule::readIO(word port, EmuTime::param time)
@@ -83,11 +83,11 @@ void ColecoSuperGameModule::writeIO(word port, byte value, EmuTime::param time)
 			break;
 		case 0x53: // bit0=1 means enable SGM RAM in 0x2000-0x7FFF range
 			ramEnabled = (value & 1) != 0;
-			invalidateMemCache(0x0000, SGM_RAM_SIZE); // just flush the whole area
+			invalidateDeviceRWCache(0x0000, SGM_RAM_SIZE); // just flush the whole area
 			break;
 		case 0x7F: // bit1=0 means enable SGM RAM in BIOS area (0-0x1FFF), 1 means BIOS
 			ramAtBiosEnabled = (value & 2) == 0;
-			invalidateMemCache(0x0000, BIOS_ROM_SIZE);
+			invalidateDeviceRWCache(0x0000, BIOS_ROM_SIZE);
 			break;
 		default:
 			// ignore
@@ -149,7 +149,7 @@ const byte* ColecoSuperGameModule::getReadCacheLine(word start) const
 			return mainRam.getReadCacheLine(translateMainRamAddress(start));
 		}
 	}
-	return unmappedRead;
+	return unmappedRead.data();
 }
 
 byte* ColecoSuperGameModule::getWriteCacheLine(word start) const
@@ -165,18 +165,18 @@ byte* ColecoSuperGameModule::getWriteCacheLine(word start) const
 			return mainRam.getWriteCacheLine(translateMainRamAddress(start));
 		}
 	}
-	return unmappedWrite;
+	return unmappedWrite.data();
 }
 
 template<typename Archive>
 void ColecoSuperGameModule::serialize(Archive& ar, unsigned /*version*/)
 {
-	ar.serialize("mainRam", mainRam.getUncheckedRam());
-	ar.serialize("sgmRam", sgmRam.getUncheckedRam());
-	ar.serialize("psg", psg);
-	ar.serialize("psgLatch", psgLatch);
-	ar.serialize("ramEnabled", ramEnabled);
-	ar.serialize("ramAtBiosEnabled", ramAtBiosEnabled);
+	ar.serialize("mainRam",          mainRam.getUncheckedRam(),
+	             "sgmRam",           sgmRam.getUncheckedRam(),
+	             "psg",              psg,
+	             "psgLatch",         psgLatch,
+	             "ramEnabled",       ramEnabled,
+	             "ramAtBiosEnabled", ramAtBiosEnabled);
 }
 INSTANTIATE_SERIALIZE_METHODS(ColecoSuperGameModule);
 REGISTER_MSXDEVICE(ColecoSuperGameModule, "ColecoSuperGameModule");

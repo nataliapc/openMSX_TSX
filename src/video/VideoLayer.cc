@@ -6,6 +6,7 @@
 #include "MSXEventDistributor.hh"
 #include "MSXMotherBoard.hh"
 #include "Event.hh"
+#include "one_of.hh"
 
 namespace openmsx {
 
@@ -16,8 +17,6 @@ VideoLayer::VideoLayer(MSXMotherBoard& motherBoard_,
 	, videoSourceSetting(motherBoard.getVideoSource())
 	, videoSourceActivator(videoSourceSetting, videoSource_)
 	, powerSetting(motherBoard.getReactor().getGlobalSettings().getPowerSetting())
-	, video9000Source(0)
-	, activeVideo9000(INACTIVE)
 {
 	calcCoverage();
 	calcZ();
@@ -46,7 +45,7 @@ int VideoLayer::getVideoSourceSetting() const
 	return videoSourceSetting.getSource();
 }
 
-void VideoLayer::update(const Setting& setting)
+void VideoLayer::update(const Setting& setting) noexcept
 {
 	if (&setting == &videoSourceSetting) {
 		calcZ();
@@ -64,20 +63,17 @@ void VideoLayer::calcZ()
 
 void VideoLayer::calcCoverage()
 {
-	Coverage cov;
-	if (!powerSetting.getBoolean() || !motherBoard.isActive()) {
-		cov = COVER_NONE;
-	} else {
-		cov = COVER_FULL;
-	}
+	auto cov = (!powerSetting.getBoolean() || !motherBoard.isActive())
+	         ? COVER_NONE
+	         : COVER_FULL;
 	setCoverage(cov);
 }
 
-void VideoLayer::signalEvent(const std::shared_ptr<const Event>& event,
-                             EmuTime::param /*time*/)
+void VideoLayer::signalMSXEvent(const Event& event,
+                                EmuTime::param /*time*/) noexcept
 {
-	if ((event->getType() == OPENMSX_MACHINE_ACTIVATED) ||
-	    (event->getType() == OPENMSX_MACHINE_DEACTIVATED)) {
+	if (getType(event) == one_of(EventType::MACHINE_ACTIVATED,
+		                     EventType::MACHINE_DEACTIVATED)) {
 		calcCoverage();
 	}
 }

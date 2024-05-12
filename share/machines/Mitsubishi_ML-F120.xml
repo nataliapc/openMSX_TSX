@@ -5,9 +5,10 @@
   <info>
     <manufacturer>Mitsubishi</manufacturer>
     <code>ML-F120</code>
-    <release_year></release_year>
-    <description>A Japanese MSX1 with built in software.</description>
+    <release_year>1984</release_year>
+    <description>A Japanese MSX1 with built in software and 32kB RAM.</description>
     <type>MSX</type>
+    <region>jp</region>
   </info>
 
   <!-- Based on Werner Kai's machine with serial 1012478
@@ -24,6 +25,8 @@
        PSGmask: AY8910-like
 
        See: https://plus.google.com/u/0/photos/112629367302659371233/albums/6162689764184673953
+
+       Note that an ML-F120D has the same ROMs, as checked by Tristan Zondag.
   -->
 
   <CassettePort/>
@@ -49,12 +52,12 @@
 
     <PSG id="PSG">
       <type>AY8910</type>
-      <keyboardlayout>jis</keyboardlayout>
+      <keyboardlayout>JIS</keyboardlayout>
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <PrinterPort id="Printer Port">

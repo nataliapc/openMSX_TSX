@@ -6,19 +6,16 @@
     <manufacturer>Talent</manufacturer>
     <code>TPC-310</code>
     <release_year>1988</release_year>
-    <description>The most advanced Argentinian MSX, includes turbo BASIC and several built in programs.</description>
+    <description>The most advanced Argentinian MSX, includes 128kB RAM, turbo BASIC and several built in programs.</description>
     <type>MSX2</type>
+    <region>ar</region>
   </info>
-
-  <!-- Note: also has an expansion bus slot, but it is not known to which MSX slot it maps. -->
-
-  <MapperReadBackBits>largest</MapperReadBackBits>
 
   <CassettePort/>
 
   <devices>
 
-    <S1985 id="S1985"> <!-- Actually seems to be an YM3814, which is the same? -->
+    <S1985 id="S1985"> <!-- includes 5 bits mapper-read-back. Actually seems to be an YM3814, which is the same? -->
       <sramname>tpc-310_s1985.sram</sramname>
     </S1985>
 
@@ -26,7 +23,7 @@
       <sound>
         <volume>16000</volume>
       </sound>
-      <io base="0xA8" num="4"/>
+      <io base="0xA8" num="8"/> <!-- S-1985 mirrors -->
       <keyboard_type>es</keyboard_type>
       <has_keypad>false</has_keypad>
       <key_ghosting_sgc_protected>true</key_ghosting_sgc_protected>
@@ -46,18 +43,19 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="8" type="IO"/> <!-- S-1985 mirrors -->
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <RTC id="Real time clock">
       <sramname>tpc-310.cmos</sramname>
-      <io base="0xB4" num="2" type="O"/>
-      <io base="0xB5" num="1" type="I"/>
+      <io base="0xB4" num="4" type="IO"/> <!-- S-1985 mirrors -->
     </RTC>
 
     <PrinterPort id="Printer Port">
-      <io base="0x90" num="2"/>
+      <io base="0x90" num="8" type="IO"/> <!-- S-1985 mirrors -->
+      <bidirectional>true</bidirectional> <!-- S-1985 feature (but not used, nor implemented) -->
+      <unused_bits>0x00</unused_bits>
     </PrinterPort>
 
     <primary slot="0">
@@ -112,6 +110,8 @@
           <mem base="0x4000" size="0x8000"/>
         </ROM>
       </secondary>
+
+      <secondary external="true" slot="2"/> <!-- Note: this connector is actually a non-standard expansion connector on the back. According to flyguille it is mapped to slot 3-2 indeed. -->
 
     </primary>
 

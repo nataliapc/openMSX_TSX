@@ -20,18 +20,18 @@ protected:
 	void setNbSectors(size_t num);
 
 protected:
-	~SectorBasedDisk() = default;
+	~SectorBasedDisk() override = default;
 
 private:
 	// Disk
-	size_t getNbSectorsImpl() const override;
-	void readTrack(byte track, byte side, RawTrack& output) override;
-	void writeTrackImpl(byte track, byte side, const RawTrack& input) override;
+	[[nodiscard]] size_t getNbSectorsImpl() const override;
+	void readTrack(uint8_t track, uint8_t side, RawTrack& output) override;
+	void writeTrackImpl(uint8_t track, uint8_t side, const RawTrack& input) override;
 
-	size_t nbSectors;
-
+private:
+	size_t nbSectors = size_t(-1); // to detect misuse
 	RawTrack cachedTrackData;
-	int cachedTrackNum;
+	int cachedTrackNum = -1;
 };
 
 } // namespace openmsx

@@ -4,8 +4,8 @@
 #include "openmsx.hh"
 #include "circular_buffer.hh"
 #include "DiskImageUtils.hh"
+#include <array>
 #include <memory>
-#include <string>
 
 namespace openmsx {
 
@@ -20,8 +20,8 @@ public:
 
 	byte transfer(byte value, bool cs);
 
-        template<typename Archive>
-        void serialize(Archive& ar, unsigned version);
+	template<typename Archive>
+	void serialize(Archive& ar, unsigned version);
 
 // private:
 	enum Mode {
@@ -34,20 +34,21 @@ public:
 
 private:
 	void executeCommand();
-	byte readCurrentByteFromCurrentSector();
+	[[nodiscard]] byte readCurrentByteFromCurrentSector();
 
+private:
 	const std::unique_ptr<HD> hd; // can be nullptr
 
-	byte cmdBuf[6];
+	std::array<byte, 6> cmdBuf;
 	SectorBuffer sectorBuf;
-	unsigned cmdIdx;
+	unsigned cmdIdx = 0;
 
 	cb_queue<byte> responseQueue;
 
-	byte transferDelayCounter;
-	Mode mode;
-	unsigned currentSector;
-	int currentByteInSector;
+	byte transferDelayCounter = 0;
+	Mode mode = COMMAND;
+	unsigned currentSector = 0;
+	int currentByteInSector = 0;
 };
 
 } // namespace openmsx

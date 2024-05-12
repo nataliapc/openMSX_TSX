@@ -15,11 +15,13 @@ public:
 	DSKDiskImage(const Filename& filename, std::shared_ptr<File> file);
 
 private:
-	void readSectorImpl (size_t sector,       SectorBuffer& buf) override;
+	void readSectorsImpl(
+		std::span<SectorBuffer> buffers, size_t startSector) override;
 	void writeSectorImpl(size_t sector, const SectorBuffer& buf) override;
-	bool isWriteProtectedImpl() const override;
-	Sha1Sum getSha1SumImpl(FilePool& filepool) override;
+	[[nodiscard]] bool isWriteProtectedImpl() const override;
+	[[nodiscard]] Sha1Sum getSha1SumImpl(FilePool& filePool) override;
 
+private:
 	const std::shared_ptr<File> file;
 };
 

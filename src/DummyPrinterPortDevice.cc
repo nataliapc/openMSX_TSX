@@ -12,12 +12,12 @@ void DummyPrinterPortDevice::setStrobe(bool /*strobe*/, EmuTime::param /*time*/)
 	// ignore strobe
 }
 
-void DummyPrinterPortDevice::writeData(byte /*data*/, EmuTime::param /*time*/)
+void DummyPrinterPortDevice::writeData(uint8_t /*data*/, EmuTime::param /*time*/)
 {
 	// ignore data
 }
 
-string_view DummyPrinterPortDevice::getDescription() const
+std::string_view DummyPrinterPortDevice::getDescription() const
 {
 	return {};
 }

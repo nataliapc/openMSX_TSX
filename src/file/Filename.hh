@@ -1,11 +1,13 @@
 #ifndef FILENAME_HH
 #define FILENAME_HH
 
+#include "FileContext.hh"
+#include "FileOperations.hh"
+
+#include <concepts>
 #include <string>
 
 namespace openmsx {
-
-class FileContext;
 
 /** This class represents a filename.
  * A filename is resolved in a certain context.
@@ -20,11 +22,21 @@ public:
 	// dummy constructor, to be able to serialize vector<Filename>
 	Filename() = default;
 
-	explicit Filename(std::string filename);
-	Filename(std::string filename, const FileContext& context);
+	template<typename String>
+		requires(!std::same_as<Filename, std::remove_cvref_t<String>>) // don't block copy-constructor
+	explicit Filename(String&& filename)
+		: originalFilename(std::forward<String>(filename))
+		, resolvedFilename(originalFilename) {}
 
-	const std::string& getOriginal() const { return originalFilename; }
-	const std::string& getResolved() const { return resolvedFilename; }
+	template<typename String>
+	Filename(String&& filename, const FileContext& context)
+		: originalFilename(std::forward<String>(filename))
+		, resolvedFilename(FileOperations::getAbsolutePath(
+			context.resolve(originalFilename))) {}
+
+	[[nodiscard]] const std::string& getOriginal() const { return originalFilename; }
+	[[nodiscard]] const std::string& getResolved() const & { return           resolvedFilename; }
+	[[nodiscard]]       std::string  getResolved() &&      { return std::move(resolvedFilename); }
 
 	/** After a loadstate we prefer to use the exact same file as before
 	  * savestate. But if that file is not available (possibly because
@@ -37,22 +49,19 @@ public:
 	 * In any case getOriginal().empty() and getResolved().empty() return
 	 * the same result. This method is a shortcut to either of these.
 	 */
-	bool empty() const;
+	[[nodiscard]] bool empty() const;
 
 	/** Change the resolved part of this filename
 	 * E.g. on loadstate when we didn't find the original file, but another
 	 * file with a matching checksum.
 	 */
-	void setResolved(const std::string& resolved) {
-		resolvedFilename = resolved;
+	void setResolved(std::string resolved) {
+		resolvedFilename = std::move(resolved);
 	}
 
 	// Do both Filename objects point to the same file?
-	bool operator==(const Filename& other) const {
+	[[nodiscard]] bool operator==(const Filename& other) const {
 		return resolvedFilename == other.resolvedFilename;
-	}
-	bool operator!=(const Filename& other) const {
-		return !(*this == other);
 	}
 
 	template<typename Archive>

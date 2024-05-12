@@ -1,84 +1,128 @@
 #ifndef HOTKEY_HH
 #define HOTKEY_HH
 
-#include "RTSchedulable.hh"
-#include "EventListener.hh"
 #include "Command.hh"
-#include "stl.hh"
-#include "string_view.hh"
+#include "Event.hh"
+#include "EventListener.hh"
+#include "EventDistributor.hh"
+#include "RTSchedulable.hh"
+
+#include "TclObject.hh"
+
 #include <map>
-#include <set>
-#include <vector>
+#include <optional>
 #include <string>
-#include <memory>
+#include <string_view>
+#include <vector>
 
 namespace openmsx {
 
-class Event;
-class RTScheduler;
 class GlobalCommandController;
-class EventDistributor;
-class XMLElement;
+class RTScheduler;
 
-class HotKey final : public RTSchedulable, public EventListener
+class HotKey final : public RTSchedulable
 {
 public:
+	struct Data {
+		std::string_view key;
+		std::string_view cmd;
+		bool repeat = false;
+		bool event = false;
+		bool msx = false;
+	};
+
 	struct HotKeyInfo {
-		HotKeyInfo() {} // for map::operator[]
-		explicit HotKeyInfo(std::string command_, bool repeat_ = false)
-			: command(std::move(command_)), repeat(repeat_) {}
+		HotKeyInfo(Event event_, std::string command_,
+		           bool repeat_ = false, bool passEvent_ = false, bool msx_ = false)
+			: event(std::move(event_)), command(std::move(command_))
+			, repeat(repeat_), passEvent(passEvent_), msx(msx_) {}
+		Event event;
 		std::string command;
 		bool repeat;
+		bool passEvent; // whether to pass event with args back to command
+		bool msx; // false->global binding,  true->only active when msx window has focus
 	};
-	using EventPtr = std::shared_ptr<const Event>;
-	using BindMap  = std::map<EventPtr, HotKeyInfo, LessDeref>;
-	using KeySet   = std::set<EventPtr,             LessDeref>;
+	using BindMap = std::vector<HotKeyInfo>; // unsorted
+	using KeySet  = std::vector<Event>;   // unsorted
 
 	HotKey(RTScheduler& rtScheduler,
 	       GlobalCommandController& commandController,
 	       EventDistributor& eventDistributor);
-	~HotKey();
 
-	void loadBindings(const XMLElement& config);
-	void saveBindings(XMLElement& config) const;
+	void loadInit();
+	void loadBind(const Data& data);
+	void loadUnbind(std::string_view key);
+
+	template<typename XmlStream>
+	void saveBindings(XmlStream& xml) const
+	{
+		xml.begin("bindings");
+		// add explicit binds
+		for (const auto& k : boundKeys) {
+			xml.begin("bind");
+			xml.attribute("key", toString(k));
+			const auto& info = *find_unguarded(cmdMap, k, &HotKeyInfo::event);
+			if (info.repeat) {
+				xml.attribute("repeat", "true");
+			}
+			if (info.passEvent) {
+				xml.attribute("event", "true");
+			}
+			if (info.msx) {
+				xml.attribute("msx", "true");
+			}
+			xml.data(info.command);
+			xml.end("bind");
+		}
+		// add explicit unbinds
+		for (const auto& k : unboundKeys) {
+			xml.begin("unbind");
+			xml.attribute("key", toString(k));
+			xml.end("unbind");
+		}
+		xml.end("bindings");
+	}
+
+	const auto& getGlobalBindings() const { return cmdMap; }
 
 private:
 	struct LayerInfo {
+		LayerInfo(std::string l, bool b)
+			: layer(std::move(l)), blocking(b) {} // clang-15 workaround
+
 		std::string layer;
 		bool blocking;
 	};
 
 	void initDefaultBindings();
-	void bind         (const EventPtr& event, const HotKeyInfo& info);
-	void unbind       (const EventPtr& event);
-	void bindDefault  (const EventPtr& event, const HotKeyInfo& info);
-	void unbindDefault(const EventPtr& event);
-	void bindLayer    (const EventPtr& event, const HotKeyInfo& info,
-	                   const std::string& layer);
-	void unbindLayer  (const EventPtr& event, const std::string& layer);
+	void bind         (HotKeyInfo&& info);
+	void unbind       (const Event& event);
+	void bindDefault  (HotKeyInfo&& info);
+	void unbindDefault(const Event& event);
+	void bindLayer    (HotKeyInfo&& info, const std::string& layer);
+	void unbindLayer  (const Event& event, const std::string& layer);
 	void unbindFullLayer(const std::string& layer);
 	void activateLayer  (std::string layer, bool blocking);
-	void deactivateLayer(string_view layer);
+	void deactivateLayer(std::string_view layer);
 
-	int executeEvent(const EventPtr& event);
-	void executeBinding(const EventPtr& event, const HotKeyInfo& info);
-	void startRepeat  (const EventPtr& event);
+	int executeEvent(const Event& event, EventDistributor::Priority priority);
+	void executeBinding(const Event& event, const HotKeyInfo& info);
+	void startRepeat  (const Event& event);
 	void stopRepeat();
 
-	// EventListener
-	int signalEvent(const EventPtr& event) override;
+	int signalEvent(const Event& event, EventDistributor::Priority priority);
+
 	// RTSchedulable
 	void executeRT() override;
 
+private:
 	class BindCmd final : public Command {
 	public:
 		BindCmd(CommandController& commandController, HotKey& hotKey,
 			bool defaultCmd);
-		void execute(array_ref<TclObject> tokens, TclObject& result) override;
-		std::string help(const std::vector<std::string>& tokens) const override;
+		void execute(std::span<const TclObject> tokens, TclObject& result) override;
+		[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override;
 	private:
-		std::string formatBinding(const HotKey::BindMap::value_type& p);
-
 		HotKey& hotKey;
 		const bool defaultCmd;
 	};
@@ -89,8 +133,8 @@ private:
 	public:
 		UnbindCmd(CommandController& commandController, HotKey& hotKey,
 			  bool defaultCmd);
-		void execute(array_ref<TclObject> tokens, TclObject& result) override;
-		std::string help(const std::vector<std::string>& tokens) const override;
+		void execute(std::span<const TclObject> tokens, TclObject& result) override;
+		[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override;
 	private:
 		HotKey& hotKey;
 		const bool defaultCmd;
@@ -100,25 +144,37 @@ private:
 
 	struct ActivateCmd final : Command {
 		explicit ActivateCmd(CommandController& commandController);
-		void execute(array_ref<TclObject> tokens, TclObject& result) override;
-		std::string help(const std::vector<std::string>& tokens) const override;
+		void execute(std::span<const TclObject> tokens, TclObject& result) override;
+		[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override;
 	} activateCmd;
 
 	struct DeactivateCmd final : Command {
 		explicit DeactivateCmd(CommandController& commandController);
-		void execute(array_ref<TclObject> tokens, TclObject& result) override;
-		std::string help(const std::vector<std::string>& tokens) const override;
+		void execute(std::span<const TclObject> tokens, TclObject& result) override;
+		[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override;
 	} deactivateCmd;
 
 	BindMap cmdMap;
 	BindMap defaultMap;
-	std::map<std::string, BindMap> layerMap;
+	std::map<std::string, BindMap, std::less<>> layerMap;
 	std::vector<LayerInfo> activeLayers;
 	KeySet boundKeys;
 	KeySet unboundKeys;
 	GlobalCommandController& commandController;
 	EventDistributor& eventDistributor;
-	EventPtr lastEvent;
+	std::optional<Event> lastEvent;
+
+	class Listener : public EventListener {
+	public:
+		Listener(HotKey& hotKey, EventDistributor::Priority priority);
+		~Listener();
+		int signalEvent(const Event& event) override;
+	private:
+		HotKey& hotKey;
+		EventDistributor::Priority priority;
+	};
+	Listener listenerHigh;
+	Listener listenerLow;
 };
 
 } // namespace openmsx

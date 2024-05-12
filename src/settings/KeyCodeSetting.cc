@@ -4,28 +4,30 @@
 namespace openmsx {
 
 KeyCodeSetting::KeyCodeSetting(CommandController& commandController_,
-                               string_view name_, string_view description_,
-                               Keys::KeyCode initialValue)
+                               std::string_view name_, static_string_view description_,
+                               SDLKey initialValue)
 	: Setting(commandController_, name_, description_,
-	          TclObject(Keys::getName(initialValue)), SAVE)
+	          TclObject(initialValue.toString()), SAVE)
 {
-	setChecker([](TclObject& newValue) {
+	setChecker([](const TclObject& newValue) {
 		const auto& str = newValue.getString();
-		if (Keys::getCode(str) == Keys::K_NONE) {
+		if (!SDLKey::fromString(str)) {
 			throw CommandException("Not a valid key: ", str);
 		}
 	});
 	init();
 }
 
-string_view KeyCodeSetting::getTypeString() const
+std::string_view KeyCodeSetting::getTypeString() const
 {
 	return "key";
 }
 
-Keys::KeyCode KeyCodeSetting::getKey() const
+SDLKey KeyCodeSetting::getKey() const noexcept
 {
-	return Keys::getCode(getValue().getString());
+	auto key = SDLKey::fromString(getValue().getString());
+	assert(key);
+	return *key;
 }
 
 } // namespace openmsx

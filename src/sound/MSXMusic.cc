@@ -1,8 +1,8 @@
 #include "MSXMusic.hh"
 #include "CacheLine.hh"
-#include "Math.hh"
 #include "MSXException.hh"
 #include "serialize.hh"
+#include <bit>
 
 namespace openmsx {
 
@@ -13,39 +13,25 @@ MSXMusicBase::MSXMusicBase(const DeviceConfig& config)
 	, rom(getName() + " ROM", "rom", config)
 	, ym2413(getName(), config)
 {
-	auto sz = rom.getSize();
-	if ((sz == 0) || !Math::isPowerOfTwo(sz)) {
+	if (!std::has_single_bit(rom.size())) {
 		throw MSXException("MSX-Music ROM-size must be a non-zero power of two");
 	}
-	reset(getCurrentTime());
+	MSXMusicBase::reset(getCurrentTime());
 }
 
 void MSXMusicBase::reset(EmuTime::param time)
 {
 	ym2413.reset(time);
-	registerLatch = 0; // TODO check
 }
 
 void MSXMusicBase::writeIO(word port, byte value, EmuTime::param time)
 {
-	switch (port & 0x01) {
-	case 0:
-		writeRegisterPort(value, time);
-		break;
-	case 1:
-		writeDataPort(value, time);
-		break;
-	}
+	writePort(port & 1, value, time);
 }
 
-void MSXMusicBase::writeRegisterPort(byte value, EmuTime::param /*time*/)
+void MSXMusicBase::writePort(bool port, byte value, EmuTime::param time)
 {
-	registerLatch = value & 0x3F;
-}
-
-void MSXMusicBase::writeDataPort(byte value, EmuTime::param time)
-{
-	ym2413.writeReg(registerLatch, value, time);
+	ym2413.writePort(port, value, time);
 }
 
 byte MSXMusicBase::peekMem(word address, EmuTime::param /*time*/) const
@@ -60,11 +46,12 @@ byte MSXMusicBase::readMem(word address, EmuTime::param time)
 
 const byte* MSXMusicBase::getReadCacheLine(word start) const
 {
-	return &rom[start & (rom.getSize() - 1)];
+	return &rom[start & (rom.size() - 1)];
 }
 
-// version 1:  initial version
-// version 2:  refactored YM2413 class structure
+// version 1: initial version
+// version 2: refactored YM2413 class structure
+// version 3: removed 'registerLatch' (moved to YM2413 cores)
 template<typename Archive>
 void MSXMusicBase::serialize(Archive& ar, unsigned version)
 {
@@ -77,8 +64,6 @@ void MSXMusicBase::serialize(Archive& ar, unsigned version)
 		// directly to YM2413 without emitting the 'ym2413' tag.
 		ym2413.serialize(ar, version);
 	}
-
-	ar.serialize("registerLatch", registerLatch);
 }
 INSTANTIATE_SERIALIZE_METHODS(MSXMusicBase);
 
@@ -150,7 +135,7 @@ const byte* MSXMusicWX::getReadCacheLine(word start) const
 	} else if ((control & 1) == 0) {
 		return MSXMusicBase::getReadCacheLine(start);
 	} else {
-		return unmappedRead;
+		return unmappedRead.data();
 	}
 }
 
@@ -158,7 +143,7 @@ void MSXMusicWX::writeMem(word address, byte value, EmuTime::param /*time*/)
 {
 	if ((0x7FF0 <= address) && (address < 0x8000)) {
 		control = value & 3;
-		invalidateMemCache(0x0000, 0x10000);
+		invalidateDeviceRCache();
 	}
 }
 
@@ -167,7 +152,7 @@ byte* MSXMusicWX::getWriteCacheLine(word start) const
 	if ((0x7FF0 & CacheLine::HIGH) == start) {
 		return nullptr;
 	} else {
-		return unmappedWrite;
+		return unmappedWrite.data();
 	}
 }
 

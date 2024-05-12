@@ -12,26 +12,28 @@ class DiskManipulator;
 class IDEHD final : public HD, public AbstractIDEDevice
 {
 public:
-	IDEHD(const IDEHD&) = delete;
-	IDEHD& operator=(const IDEHD&) = delete;
-
 	explicit IDEHD(const DeviceConfig& config);
-	~IDEHD();
+	IDEHD(const IDEHD&) = delete;
+	IDEHD(IDEHD&&) = delete;
+	IDEHD& operator=(const IDEHD&) = delete;
+	IDEHD& operator=(IDEHD&&) = delete;
+	~IDEHD() override;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 private:
 	// AbstractIDEDevice:
-	bool isPacketDevice() override;
-	const std::string& getDeviceName() override;
+	[[nodiscard]] bool isPacketDevice() override;
+	[[nodiscard]] std::string_view getDeviceName() override;
 	void fillIdentifyBlock (AlignedBuffer& buffer) override;
-	unsigned readBlockStart(AlignedBuffer& buffer, unsigned count) override;
+	[[nodiscard]] unsigned readBlockStart(AlignedBuffer& buffer, unsigned count) override;
 	void writeBlockComplete(AlignedBuffer& buffer, unsigned count) override;
 	void executeCommand(byte cmd) override;
 
+private:
 	DiskManipulator& diskManipulator;
-	unsigned transferSectorNumber;
+	unsigned transferSectorNumber = 0; // avoid UMR in serialize()
 };
 
 } // namespace openmsx

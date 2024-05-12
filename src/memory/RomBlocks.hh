@@ -4,22 +4,24 @@
 #include "MSXRom.hh"
 #include "RomBlockDebuggable.hh"
 #include "serialize_meta.hh"
+#include <array>
 
 namespace openmsx {
 
 class SRAM;
 
-template <unsigned BANK_SIZE_>
+template<unsigned BANK_SIZE_>
 class RomBlocks : public MSXRom
 {
 public:
-	static const unsigned BANK_SIZE = BANK_SIZE_;
-	static const unsigned NUM_BANKS = 0x10000 / BANK_SIZE;
-	static const unsigned BANK_MASK = BANK_SIZE - 1;
+	static constexpr unsigned BANK_SIZE = BANK_SIZE_;
+	static constexpr unsigned NUM_BANKS = 0x10000 / BANK_SIZE;
+	static constexpr unsigned BANK_MASK = BANK_SIZE - 1;
 
-	byte readMem(word address, EmuTime::param time) override;
-	byte peekMem(word address, EmuTime::param time) const override;
-	const byte* getReadCacheLine(word address) const override;
+	[[nodiscard]] unsigned getBaseSizeAlignment() const override;
+	[[nodiscard]] byte readMem(word address, EmuTime::param time) override;
+	[[nodiscard]] byte peekMem(word address, EmuTime::param time) const override;
+	[[nodiscard]] const byte* getReadCacheLine(word address) const override;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
@@ -39,20 +41,20 @@ protected:
 	 */
 	RomBlocks(const DeviceConfig& config, Rom&& rom,
 	          unsigned debugBankSizeShift = 0);
-	~RomBlocks();
+	~RomBlocks() override;
 
 	/** Select 'unmapped' memory for this region. Reads from this
 	  * region will return 0xff.
 	  */
-	void setUnmapped(byte region);
+	void setUnmapped(unsigned region);
 
 	/** Sets the memory visible for reading in a certain region.
 	  * @param region number of 8kB region in Z80 address space
 	  *   (region i starts at Z80 address i * 0x2000)
 	  * @param adr pointer to memory, area must be at least 0x2000 bytes long
-	  * @param block Block number, only used for the 'romblock' debuggable.
+	  * @param block Block number, only used for the 'romblock' debuggable, limited to 8-bit.
 	  */
-	void setBank(byte region, const byte* adr, int block);
+	void setBank(unsigned region, const byte* adr, byte block);
 
 	/** Selects a block of the ROM image for reading in a certain region.
 	  * @param region number of 8kB region in Z80 address space
@@ -60,7 +62,7 @@ protected:
 	  * @param block number of 8kB block in the ROM image
 	  *   (block i starts at ROM image offset i * 0x2000)
 	  */
-	void setRom(byte region, unsigned block);
+	void setRom(unsigned region, unsigned block);
 
 	/** Sets a mask for the block numbers.
 	  * On every call to setRom, the given block number is AND-ed with this
@@ -71,21 +73,21 @@ protected:
 	  */
 	void setBlockMask(int mask) { blockMask = mask; }
 
-	/** Inform this base class of extra mapable memory block.
+	/** Inform this base class of extra mappable memory block.
 	 * This is needed for serialization of mappings in this block.
 	 * Should only be called from subclass constructor.
 	 * (e.g. used by RomPanasonic)
 	 */
-	void setExtraMemory(const byte* mem, unsigned size);
+	void setExtraMemory(std::span<const byte> mem);
 
-	const byte* bankPtr[NUM_BANKS];
+protected:
+	std::array<const byte*, NUM_BANKS> bankPtr;
 	std::unique_ptr<SRAM> sram; // can be nullptr
-	byte blockNr[NUM_BANKS];
+	std::array<byte, NUM_BANKS> blockNr;
 
 private:
 	RomBlockDebuggable romBlockDebug;
-	const byte* extraMem;
-	unsigned extraSize;
+	std::span<const byte> extraMem;
 	/*const*/ unsigned nrBlocks;
 	int blockMask;
 };

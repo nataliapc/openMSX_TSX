@@ -4,6 +4,7 @@
 #include "CliComm.hh"
 #include "hash_map.hh"
 #include "xxhash.hh"
+#include <array>
 
 namespace openmsx {
 
@@ -15,14 +16,20 @@ class MSXCliComm final : public CliComm
 public:
 	MSXCliComm(MSXMotherBoard& motherBoard, GlobalCliComm& cliComm);
 
-	void log(LogLevel level, string_view message) override;
-	void update(UpdateType type, string_view name,
-	            string_view value) override;
+	void log(LogLevel level, std::string_view message, float fraction) override;
+	void update(UpdateType type, std::string_view name,
+	            std::string_view value) override;
+	void updateFiltered(UpdateType type, std::string_view name,
+	            std::string_view value) override;
+
+	// enable/disable message suppression
+	void setSuppressMessages(bool enable);
 
 private:
 	MSXMotherBoard& motherBoard;
 	GlobalCliComm& cliComm;
-	hash_map<std::string, std::string, XXHasher> prevValues[NUM_UPDATES];
+	std::array<hash_map<std::string, std::string, XXHasher>, NUM_UPDATES> prevValues;
+	bool suppressMessages = false;
 };
 
 } // namespace openmsx

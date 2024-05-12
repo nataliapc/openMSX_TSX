@@ -1,45 +1,67 @@
 #include "SectorAccessibleDisk.hh"
+
+#include "DiskImageUtils.hh"
 #include "EmptyDiskPatch.hh"
 #include "IPSPatch.hh"
 #include "DiskExceptions.hh"
+
+#include "enumerate.hh"
 #include "sha1.hh"
-#include "xrange.hh"
+
+#include <array>
 #include <memory>
 
 namespace openmsx {
 
-#ifndef _MSC_VER
-// This line is required according to the c++ standard, but because of a vc++
-// extension, we get a link error in vc++ when we add this line. See also:
-//   http://blogs.msdn.com/b/xiangfan/archive/2010/03/03/vc-s-evil-extension-implicit-definition-of-static-constant-member.aspx
-const size_t SectorAccessibleDisk::SECTOR_SIZE;
-#endif
-
 SectorAccessibleDisk::SectorAccessibleDisk()
 	: patch(std::make_unique<EmptyDiskPatch>(*this))
-	, forcedWriteProtect(false)
-	, peekMode(false)
 {
 }
 
 SectorAccessibleDisk::~SectorAccessibleDisk() = default;
 
-void SectorAccessibleDisk::readSector(size_t sector, SectorBuffer& buf)
+void SectorAccessibleDisk::readSector(size_t sector, SectorBuffer& buf) const
 {
+	readSectors(std::span{&buf, 1}, sector);
+}
+
+void SectorAccessibleDisk::readSectors(
+	std::span<SectorBuffer> buffers, size_t startSector) const
+{
+	auto last = startSector + buffers.size() - 1;
 	if (!isDummyDisk() && // in that case we want DriveEmptyException
-	    (sector > 1) && // allow reading sector 0 and 1 without calling
-	                    // getNbSectors() because this potentially calls
-	                    // detectGeometry() and that would cause an
-	                    // infinite loop
-	    (getNbSectors() <= sector)) {
+	    (last > 1) && // allow reading sector 0 and 1 without calling
+	                  // getNbSectors() because this potentially calls
+	                  // detectGeometry() and that would cause an
+	                  // infinite loop
+	    (getNbSectors() <= last)) {
 		throw NoSuchSectorException("No such sector");
 	}
 	try {
-		// in the end this calls readSectorImpl()
-		patch->copyBlock(sector * sizeof(buf), buf.raw, sizeof(buf));
+		// in the end this calls readSectorsImpl()
+		patch->copyBlock(startSector * sizeof(SectorBuffer),
+		                 std::span{buffers[0].raw.data(),
+		                           buffers.size_bytes()});
 	} catch (MSXException& e) {
 		throw DiskIOErrorException("Disk I/O error: ", e.getMessage());
 	}
+}
+
+void SectorAccessibleDisk::readSectorsImpl(
+	std::span<SectorBuffer> buffers, size_t startSector)
+{
+	// Default implementation reads one sector at a time. But subclasses can
+	// override this method if they can do it more efficiently.
+	for (auto [i, buf] : enumerate(buffers)) {
+		readSectorImpl(startSector + i, buf);
+	}
+}
+
+void SectorAccessibleDisk::readSectorImpl(size_t /*sector*/, SectorBuffer& /*buf*/)
+{
+	// subclass should override exactly one of
+	//    readSectorImpl() or readSectorsImpl()
+	assert(false);
 }
 
 void SectorAccessibleDisk::writeSector(size_t sector, const SectorBuffer& buf)
@@ -57,6 +79,17 @@ void SectorAccessibleDisk::writeSector(size_t sector, const SectorBuffer& buf)
 	}
 	flushCaches();
 }
+
+void SectorAccessibleDisk::writeSectors(
+	std::span<const SectorBuffer> buffers, size_t startSector)
+{
+	// Simply write one-at-a-time. There's no possibility (nor any need) yet
+	// to allow to optimize this
+	for (auto [i, buf] : enumerate(buffers)) {
+		writeSector(startSector + i, buf);
+	}
+}
+
 
 size_t SectorAccessibleDisk::getNbSectors() const
 {
@@ -92,42 +125,23 @@ Sha1Sum SectorAccessibleDisk::getSha1SumImpl(FilePool& /*filePool*/)
 	try {
 		setPeekMode(true);
 		SHA1 sha1;
-		for (auto i : xrange(getNbSectors())) {
-			SectorBuffer buf;
-			readSector(i, buf);
-			sha1.update(buf.raw, sizeof(buf));
+
+		std::array<SectorBuffer, 32> buf;
+		size_t total = getNbSectors();
+		size_t sector = 0;
+		while (sector < total) {
+			auto chunk = std::min(buf.size(), total - sector);
+			auto sub = subspan(buf, 0, chunk);
+			readSectors(sub, sector);
+			sha1.update({sub[0].raw.data(), sub.size_bytes()});
+			sector += chunk;
 		}
+
 		setPeekMode(false);
 		return sha1.digest();
 	} catch (MSXException&) {
 		setPeekMode(false);
 		throw;
-	}
-}
-
-int SectorAccessibleDisk::readSectors (
-	SectorBuffer* buffers, size_t startSector, size_t nbSectors)
-{
-	try {
-		for (auto i : xrange(nbSectors)) {
-			readSector(startSector + i, buffers[i]);
-		}
-		return 0;
-	} catch (MSXException&) {
-		return -1;
-	}
-}
-
-int SectorAccessibleDisk::writeSectors(
-	const SectorBuffer* buffers, size_t startSector, size_t nbSectors)
-{
-	try {
-		for (auto i : xrange(nbSectors)) {
-			writeSector(startSector + i, buffers[i]);
-		}
-		return 0;
-	} catch (MSXException&) {
-		return -1;
 	}
 }
 

@@ -1,8 +1,7 @@
 #include "RTScheduler.hh"
 #include "RTSchedulable.hh"
-#include <algorithm>
+#include "ranges.hh"
 #include <limits>
-#include <iterator>
 
 namespace openmsx {
 
@@ -19,7 +18,7 @@ void RTScheduler::add(uint64_t delta, RTSchedulable& schedulable)
 {
 	queue.insert(RTSyncPoint{Timer::getTime() + delta, &schedulable},
 	             [](RTSyncPoint& sp) {
-                             sp.time = std::numeric_limits<uint64_t>::max(); },
+	                     sp.time = std::numeric_limits<uint64_t>::max(); },
 	             [](const RTSyncPoint& x, const RTSyncPoint& y) {
 	                     return x.time < y.time; });
 }
@@ -31,8 +30,7 @@ bool RTScheduler::remove(RTSchedulable& schedulable)
 
 bool RTScheduler::isPending(const RTSchedulable& schedulable) const
 {
-	return std::find_if(std::begin(queue), std::end(queue),
-	                    EqualRTSchedulable(schedulable)) != std::end(queue);
+	return ranges::any_of(queue, EqualRTSchedulable(schedulable));
 }
 
 void RTScheduler::scheduleHelper(uint64_t limit)
@@ -50,7 +48,7 @@ void RTScheduler::scheduleHelper(uint64_t limit)
 		// It's possible RTSchedulables are canceled in the mean time,
 		// so we can't rely on 'count' to replace this empty check.
 		if (queue.empty()) break;
-		if (likely(queue.front().time > limit)) break;
+		if (queue.front().time > limit) [[likely]] break;
 		if (--count == 0) break;
 	}
 }

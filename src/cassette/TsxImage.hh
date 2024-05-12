@@ -28,11 +28,12 @@ class TsxImage final : public CassetteImage
 public:
 	TsxImage(const Filename& fileName, FilePool& filePool, CliComm& cliComm);
 
-	// CassetteImage
-	int16_t getSampleAt(EmuTime::param time) override;
+    [[nodiscard]] int16_t getSampleAt(EmuTime::param time) const override;
+    [[nodiscard]] float getAmplificationFactorImpl() const override;
+
 	EmuTime getEndTime() const override;
 	unsigned getFrequency() const override;
-	void fillBuffer(unsigned pos, int** bufs, unsigned num) const override;
+	void fillBuffer(unsigned pos, std::span<float*, 1> bufs, unsigned num) const override;
 
 private:
 	const static uint8_t MSX_BITCFG  = 0x24;

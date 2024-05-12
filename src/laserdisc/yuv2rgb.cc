@@ -1,16 +1,22 @@
 #include "yuv2rgb.hh"
+
 #include "RawFrame.hh"
+
 #include "Math.hh"
-#include "cstd.hh"
+#include "xrange.hh"
+
+#include <array>
+#include <bit>
 #include <cassert>
+#include <concepts>
 #include <cstdint>
-#include <SDL.h>
 #ifdef __SSE2__
 #include <emmintrin.h>
 #endif
 
-namespace openmsx {
-namespace yuv2rgb {
+namespace openmsx::yuv2rgb {
+
+using Pixel = uint32_t;
 
 #ifdef __SSE2__
 
@@ -42,17 +48,17 @@ namespace yuv2rgb {
 static inline void yuv2rgb_sse2(
 	const uint8_t* u_ , const uint8_t* v_,
 	const uint8_t* y0_, const uint8_t* y1_,
-	uint32_t* out0_, uint32_t* out1_)
+	Pixel* out0_, Pixel* out1_)
 {
 	// This routine calculates 32x2 RGBA pixels. Each output pixel uses a
 	// unique corresponding input Y value, but a group of 2x2 ouput pixels
 	// shares the same U and V input value.
-	auto* u    = reinterpret_cast<const __m128i*>(u_);
-	auto* v    = reinterpret_cast<const __m128i*>(v_);
-	auto* y0   = reinterpret_cast<const __m128i*>(y0_);
-	auto* y1   = reinterpret_cast<const __m128i*>(y1_);
-	auto* out0 = reinterpret_cast<      __m128i*>(out0_);
-	auto* out1 = reinterpret_cast<      __m128i*>(out1_);
+	const auto* u    = std::bit_cast<const __m128i*>(u_);
+	const auto* v    = std::bit_cast<const __m128i*>(v_);
+	const auto* y0   = std::bit_cast<const __m128i*>(y0_);
+	const auto* y1   = std::bit_cast<const __m128i*>(y1_);
+	      auto* out0 = std::bit_cast<      __m128i*>(out0_);
+	      auto* out1 = std::bit_cast<      __m128i*>(out1_);
 
 	// constants
 	const __m128i ZERO    = _mm_setzero_si128();
@@ -99,18 +105,18 @@ static inline void yuv2rgb_sse2(
 	                                      _mm_packus_epi16(g00_odd,  g00_odd));
 	__m128i b00_0f    = _mm_unpackhi_epi8(_mm_packus_epi16(b00_even, b00_even),
 	                                      _mm_packus_epi16(b00_odd,  b00_odd));
-	__m128i br00_07   = _mm_unpacklo_epi8(b00_0f, r00_0f);
-	__m128i br00_8f   = _mm_unpackhi_epi8(b00_0f, r00_0f);
+	__m128i rb00_07   = _mm_unpacklo_epi8(r00_0f, b00_0f);
+	__m128i rb00_8f   = _mm_unpackhi_epi8(r00_0f, b00_0f);
 	__m128i ga00_07   = _mm_unpacklo_epi8(g00_0f, ALPHA);
 	__m128i ga00_8f   = _mm_unpackhi_epi8(g00_0f, ALPHA);
-	__m128i bgra00_03 = _mm_unpacklo_epi8(br00_07, ga00_07);
-	__m128i bgra00_47 = _mm_unpackhi_epi8(br00_07, ga00_07);
-	__m128i bgra00_8b = _mm_unpacklo_epi8(br00_8f, ga00_8f);
-	__m128i bgra00_cf = _mm_unpackhi_epi8(br00_8f, ga00_8f);
-	_mm_store_si128(out0 + 0, bgra00_03);
-	_mm_store_si128(out0 + 1, bgra00_47);
-	_mm_store_si128(out0 + 2, bgra00_8b);
-	_mm_store_si128(out0 + 3, bgra00_cf);
+	__m128i rgba00_03 = _mm_unpacklo_epi8(rb00_07, ga00_07);
+	__m128i rgba00_47 = _mm_unpackhi_epi8(rb00_07, ga00_07);
+	__m128i rgba00_8b = _mm_unpacklo_epi8(rb00_8f, ga00_8f);
+	__m128i rgba00_cf = _mm_unpackhi_epi8(rb00_8f, ga00_8f);
+	_mm_store_si128(out0 + 0, rgba00_03);
+	_mm_store_si128(out0 + 1, rgba00_47);
+	_mm_store_si128(out0 + 2, rgba00_8b);
+	_mm_store_si128(out0 + 3, rgba00_cf);
 
 	// block bottom,left
 	__m128i y10_0f    = _mm_load_si128(y1 + 0);
@@ -130,18 +136,18 @@ static inline void yuv2rgb_sse2(
 	                                      _mm_packus_epi16(g10_odd,  g10_odd));
 	__m128i b10_0f    = _mm_unpackhi_epi8(_mm_packus_epi16(b10_even, b10_even),
 	                                      _mm_packus_epi16(b10_odd,  b10_odd));
-	__m128i br10_07   = _mm_unpacklo_epi8(b10_0f, r10_0f);
-	__m128i br10_8f   = _mm_unpackhi_epi8(b10_0f, r10_0f);
+	__m128i rb10_07   = _mm_unpacklo_epi8(r10_0f, b10_0f);
+	__m128i rb10_8f   = _mm_unpackhi_epi8(r10_0f, b10_0f);
 	__m128i ga10_07   = _mm_unpacklo_epi8(g10_0f, ALPHA);
 	__m128i ga10_8f   = _mm_unpackhi_epi8(g10_0f, ALPHA);
-	__m128i bgra10_03 = _mm_unpacklo_epi8(br10_07, ga10_07);
-	__m128i bgra10_47 = _mm_unpackhi_epi8(br10_07, ga10_07);
-	__m128i bgra10_8b = _mm_unpacklo_epi8(br10_8f, ga10_8f);
-	__m128i bgra10_cf = _mm_unpackhi_epi8(br10_8f, ga10_8f);
-	_mm_store_si128(out1 + 0, bgra10_03);
-	_mm_store_si128(out1 + 1, bgra10_47);
-	_mm_store_si128(out1 + 2, bgra10_8b);
-	_mm_store_si128(out1 + 3, bgra10_cf);
+	__m128i rgba10_03 = _mm_unpacklo_epi8(rb10_07, ga10_07);
+	__m128i rgba10_47 = _mm_unpackhi_epi8(rb10_07, ga10_07);
+	__m128i rgba10_8b = _mm_unpacklo_epi8(rb10_8f, ga10_8f);
+	__m128i rgba10_cf = _mm_unpackhi_epi8(rb10_8f, ga10_8f);
+	_mm_store_si128(out1 + 0, rgba10_03);
+	_mm_store_si128(out1 + 1, rgba10_47);
+	_mm_store_si128(out1 + 2, rgba10_8b);
+	_mm_store_si128(out1 + 3, rgba10_cf);
 
 	// right
 	__m128i u8f  = _mm_unpackhi_epi8(u0f, ZERO);
@@ -173,18 +179,18 @@ static inline void yuv2rgb_sse2(
 	                                      _mm_packus_epi16(g01_odd,  g01_odd));
 	__m128i b01_0f    = _mm_unpackhi_epi8(_mm_packus_epi16(b01_even, b01_even),
 	                                      _mm_packus_epi16(b01_odd,  b01_odd));
-	__m128i br01_07   = _mm_unpacklo_epi8(b01_0f, r01_0f);
-	__m128i br01_8f   = _mm_unpackhi_epi8(b01_0f, r01_0f);
+	__m128i rb01_07   = _mm_unpacklo_epi8(r01_0f, b01_0f);
+	__m128i rb01_8f   = _mm_unpackhi_epi8(r01_0f, b01_0f);
 	__m128i ga01_07   = _mm_unpacklo_epi8(g01_0f, ALPHA);
 	__m128i ga01_8f   = _mm_unpackhi_epi8(g01_0f, ALPHA);
-	__m128i bgra01_03 = _mm_unpacklo_epi8(br01_07, ga01_07);
-	__m128i bgra01_47 = _mm_unpackhi_epi8(br01_07, ga01_07);
-	__m128i bgra01_8b = _mm_unpacklo_epi8(br01_8f, ga01_8f);
-	__m128i bgra01_cf = _mm_unpackhi_epi8(br01_8f, ga01_8f);
-	_mm_store_si128(out0 + 4, bgra01_03);
-	_mm_store_si128(out0 + 5, bgra01_47);
-	_mm_store_si128(out0 + 6, bgra01_8b);
-	_mm_store_si128(out0 + 7, bgra01_cf);
+	__m128i rgba01_03 = _mm_unpacklo_epi8(rb01_07, ga01_07);
+	__m128i rgba01_47 = _mm_unpackhi_epi8(rb01_07, ga01_07);
+	__m128i rgba01_8b = _mm_unpacklo_epi8(rb01_8f, ga01_8f);
+	__m128i rgba01_cf = _mm_unpackhi_epi8(rb01_8f, ga01_8f);
+	_mm_store_si128(out0 + 4, rgba01_03);
+	_mm_store_si128(out0 + 5, rgba01_47);
+	_mm_store_si128(out0 + 6, rgba01_8b);
+	_mm_store_si128(out0 + 7, rgba01_cf);
 
 	// block bottom,right
 	__m128i y11_0f    = _mm_load_si128(y1 + 1);
@@ -204,47 +210,45 @@ static inline void yuv2rgb_sse2(
 	                                      _mm_packus_epi16(g11_odd,  g11_odd));
 	__m128i b11_0f    = _mm_unpackhi_epi8(_mm_packus_epi16(b11_even, b11_even),
 	                                      _mm_packus_epi16(b11_odd,  b11_odd));
-	__m128i br11_07   = _mm_unpacklo_epi8(b11_0f, r11_0f);
-	__m128i br11_8f   = _mm_unpackhi_epi8(b11_0f, r11_0f);
+	__m128i rb11_07   = _mm_unpacklo_epi8(r11_0f, b11_0f);
+	__m128i rb11_8f   = _mm_unpackhi_epi8(r11_0f, b11_0f);
 	__m128i ga11_07   = _mm_unpacklo_epi8(g11_0f, ALPHA);
 	__m128i ga11_8f   = _mm_unpackhi_epi8(g11_0f, ALPHA);
-	__m128i bgra11_03 = _mm_unpacklo_epi8(br11_07, ga11_07);
-	__m128i bgra11_47 = _mm_unpackhi_epi8(br11_07, ga11_07);
-	__m128i bgra11_8b = _mm_unpacklo_epi8(br11_8f, ga11_8f);
-	__m128i bgra11_cf = _mm_unpackhi_epi8(br11_8f, ga11_8f);
-	_mm_store_si128(out1 + 4, bgra11_03);
-	_mm_store_si128(out1 + 5, bgra11_47);
-	_mm_store_si128(out1 + 6, bgra11_8b);
-	_mm_store_si128(out1 + 7, bgra11_cf);
+	__m128i rgba11_03 = _mm_unpacklo_epi8(rb11_07, ga11_07);
+	__m128i rgba11_47 = _mm_unpackhi_epi8(rb11_07, ga11_07);
+	__m128i rgba11_8b = _mm_unpacklo_epi8(rb11_8f, ga11_8f);
+	__m128i rgba11_cf = _mm_unpackhi_epi8(rb11_8f, ga11_8f);
+	_mm_store_si128(out1 + 4, rgba11_03);
+	_mm_store_si128(out1 + 5, rgba11_47);
+	_mm_store_si128(out1 + 6, rgba11_8b);
+	_mm_store_si128(out1 + 7, rgba11_cf);
 }
 
 static inline void convertHelperSSE2(
 	const th_ycbcr_buffer& buffer, RawFrame& output)
 {
-	const int width      = buffer[0].width;
-	const int y_stride   = buffer[0].stride;
-	const int uv_stride2 = buffer[1].stride / 2;
+	const int    width      = buffer[0].width;
+	const size_t y_stride   = buffer[0].stride;
+	const size_t uv_stride2 = buffer[1].stride / 2;
 
 	assert((width % 32) == 0);
 	assert((buffer[0].height % 2) == 0);
 
 	for (int y = 0; y < buffer[0].height; y += 2) {
-		const uint8_t* pY1 = buffer[0].data + y * y_stride;
+		const uint8_t* pY1 = buffer[0].data + (y + 0) * y_stride;
 		const uint8_t* pY2 = buffer[0].data + (y + 1) * y_stride;
-		const uint8_t* pCb = buffer[1].data + y * uv_stride2;
-		const uint8_t* pCr = buffer[2].data + y * uv_stride2;
-		auto* out0 = output.getLinePtrDirect<uint32_t>(y + 0);
-		auto* out1 = output.getLinePtrDirect<uint32_t>(y + 1);
+		const uint8_t* pCb = buffer[1].data + (y + 0) * uv_stride2;
+		const uint8_t* pCr = buffer[2].data + (y + 0) * uv_stride2;
+		auto out0 = output.getLineDirect(y + 0);
+		auto out1 = output.getLineDirect(y + 1);
 
 		for (int x = 0; x < width; x += 32) {
 			// convert a block of (32 x 2) pixels
-			yuv2rgb_sse2(pCb, pCr, pY1, pY2, out0, out1);
+			yuv2rgb_sse2(pCb, pCr, pY1, pY2, &out0[x], &out1[x]);
 			pCb += 16;
 			pCr += 16;
 			pY1 += 32;
 			pY2 += 32;
-			out0 += 32;
-			out1 += 32;
 		}
 
 		output.setLineWidth(y + 0, width);
@@ -262,17 +266,17 @@ static constexpr int COEF_GV = int(0.813 * (1 << PREC) + 0.5);
 static constexpr int COEF_BU = int(2.018 * (1 << PREC) + 0.5);
 
 struct Coefs {
-	int gu[256];
-	int gv[256];
-	int bu[256];
-	int rv[256];
-	int y [256];
+	std::array<int, 256> gu;
+	std::array<int, 256> gv;
+	std::array<int, 256> bu;
+	std::array<int, 256> rv;
+	std::array<int, 256> y;
 };
 
-static CONSTEXPR Coefs getCoefs()
+[[nodiscard]] static constexpr Coefs getCoefs()
 {
 	Coefs coefs = {};
-	for (int i = 0; i < 256; ++i) {
+	for (auto i : xrange(256)) {
 		coefs.gu[i] = -COEF_GU * (i - 128);
 		coefs.gv[i] = -COEF_GV * (i - 128);
 		coefs.bu[i] =  COEF_BU * (i - 128);
@@ -282,57 +286,49 @@ static CONSTEXPR Coefs getCoefs()
 	return coefs;
 }
 
-template<typename Pixel>
-static inline Pixel calc(const SDL_PixelFormat& format,
-                         int y, int ruv, int guv, int buv)
+[[nodiscard]] static inline Pixel calc(
+	int y, int ruv, int guv, int buv)
 {
 	uint8_t r = Math::clipIntToByte((y + ruv) >> PREC);
 	uint8_t g = Math::clipIntToByte((y + guv) >> PREC);
 	uint8_t b = Math::clipIntToByte((y + buv) >> PREC);
-	if (sizeof(Pixel) == 4) {
-		return (r << 16) | (g << 8) | (b << 0);
-	} else {
-		return static_cast<Pixel>(SDL_MapRGB(&format, r, g, b));
-	}
+	return (r << 0) | (g << 8) | (b << 16);
 }
 
-template<typename Pixel>
-static void convertHelper(const th_ycbcr_buffer& buffer, RawFrame& output,
-                          const SDL_PixelFormat& format)
+static void convertHelper(const th_ycbcr_buffer& buffer, RawFrame& output)
 {
 	assert(buffer[1].width  * 2 == buffer[0].width);
 	assert(buffer[1].height * 2 == buffer[0].height);
 
-	static CONSTEXPR Coefs coefs = getCoefs();
+	static constexpr Coefs coefs = getCoefs();
 
-	const int width      = buffer[0].width;
-	const int y_stride   = buffer[0].stride;
-	const int uv_stride2 = buffer[1].stride / 2;
+	const int    width      = buffer[0].width;
+	const size_t y_stride   = buffer[0].stride;
+	const size_t uv_stride2 = buffer[1].stride / 2;
 
 	for (int y = 0; y < buffer[0].height; y += 2) {
 		const uint8_t* pY  = buffer[0].data + y * y_stride;
 		const uint8_t* pCb = buffer[1].data + y * uv_stride2;
 		const uint8_t* pCr = buffer[2].data + y * uv_stride2;
-		auto* out0 = output.getLinePtrDirect<Pixel>(y + 0);
-		auto* out1 = output.getLinePtrDirect<Pixel>(y + 1);
+		auto out0 = output.getLineDirect(y + 0);
+		auto out1 = output.getLineDirect(y + 1);
 
-		for (int x = 0; x < width;
-		     x += 2, pY += 2, ++pCr, ++pCb, out0 += 2, out1 += 2) {
+		for (int x = 0; x < width; x += 2, pY += 2, ++pCr, ++pCb) {
 			int ruv = coefs.rv[*pCr];
 			int guv = coefs.gu[*pCb] + coefs.gv[*pCr];
 			int buv = coefs.bu[*pCb];
 
 			int Y00 = coefs.y[pY[0]];
-			out0[0] = calc<Pixel>(format, Y00, ruv, guv, buv);
+			out0[x + 0] = calc(Y00, ruv, guv, buv);
 
 			int Y01 = coefs.y[pY[1]];
-			out0[1] = calc<Pixel>(format, Y01, ruv, guv, buv);
+			out0[x + 1] = calc(Y01, ruv, guv, buv);
 
 			int Y10 = coefs.y[pY[y_stride + 0]];
-			out1[0] = calc<Pixel>(format, Y10, ruv, guv, buv);
+			out1[x + 0] = calc(Y10, ruv, guv, buv);
 
 			int Y11 = coefs.y[pY[y_stride + 1]];
-			out1[1] = calc<Pixel>(format, Y11, ruv, guv, buv);
+			out1[x + 1] = calc(Y11, ruv, guv, buv);
 		}
 
 		output.setLineWidth(y + 0, width);
@@ -342,18 +338,11 @@ static void convertHelper(const th_ycbcr_buffer& buffer, RawFrame& output,
 
 void convert(const th_ycbcr_buffer& input, RawFrame& output)
 {
-	const SDL_PixelFormat& format = output.getSDLPixelFormat();
-	if (format.BytesPerPixel == 4) {
 #ifdef __SSE2__
 		convertHelperSSE2(input, output);
-#else
-		convertHelper<uint32_t>(input, output, format);
+		return;
 #endif
-	} else {
-		assert(format.BytesPerPixel == 2);
-		convertHelper<uint16_t>(input, output, format);
-	}
+		convertHelper(input, output);
 }
 
-} // namespace yuv2rgb
-} // namespace openmsx
+} // namespace openmsx::yuv2rgb

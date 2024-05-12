@@ -1,42 +1,40 @@
 #include "CliExtension.hh"
 #include "CommandLineParser.hh"
+#include "HardwareConfig.hh"
 #include "MSXMotherBoard.hh"
 #include "MSXException.hh"
 #include <cassert>
-
-using std::string;
 
 namespace openmsx {
 
 CliExtension::CliExtension(CommandLineParser& cmdLineParser_)
 	: cmdLineParser(cmdLineParser_)
 {
-	cmdLineParser.registerOption("-ext", *this);
-	cmdLineParser.registerOption("-exta", *this);
-	cmdLineParser.registerOption("-extb", *this);
-	cmdLineParser.registerOption("-extc", *this);
-	cmdLineParser.registerOption("-extd", *this);
+	for (const auto* ext : {"-ext", "-exta", "-extb", "-extc", "-extd"}) {
+		cmdLineParser.registerOption(ext, *this);
+	}
 }
 
-void CliExtension::parseOption(const string& option, array_ref<string>& cmdLine)
+void CliExtension::parseOption(const std::string& option, std::span<std::string>& cmdLine)
 {
 	try {
-		string extensionName = getArgument(option, cmdLine);
+		std::string extensionName = getArgument(option, cmdLine);
 		MSXMotherBoard* motherboard = cmdLineParser.getMotherBoard();
 		assert(motherboard);
-		string slotname;
+		std::string slotName;
 		if (option.size() == 5) {
-			slotname = option[4];
+			slotName = option[4];
 		} else {
-			slotname = "any";
+			slotName = "any";
 		}
-		motherboard->loadExtension(extensionName, slotname);
+		motherboard->insertExtension(extensionName,
+			motherboard->loadExtension(extensionName, slotName));
 	} catch (MSXException& e) {
 		throw FatalError(std::move(e).getMessage());
 	}
 }
 
-string_view CliExtension::optionHelp() const
+std::string_view CliExtension::optionHelp() const
 {
 	return "Insert the extension specified in argument";
 }

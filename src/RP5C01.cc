@@ -1,6 +1,9 @@
 #include "RP5C01.hh"
 #include "SRAM.hh"
+#include "narrow.hh"
+#include "one_of.hh"
 #include "serialize.hh"
+#include <array>
 #include <cassert>
 #include <ctime>
 
@@ -9,32 +12,32 @@ namespace openmsx {
 // TODO  ALARM is not implemented        (not connected on MSX)
 // TODO  1Hz 16Hz output not implemented (not connected on MSX)
 
-static const nibble MODE_REG  = 13;
-static const nibble TEST_REG  = 14;
-static const nibble RESET_REG = 15;
+static constexpr nibble MODE_REG  = 13;
+static constexpr nibble TEST_REG  = 14;
+static constexpr nibble RESET_REG = 15;
 
-static const nibble TIME_BLOCK  = 0;
-static const nibble ALARM_BLOCK = 1;
+static constexpr nibble TIME_BLOCK  = 0;
+static constexpr nibble ALARM_BLOCK = 1;
 
-static const nibble MODE_BLOKSELECT  = 0x3;
-static const nibble MODE_ALARMENABLE = 0x4;
-static const nibble MODE_TIMERENABLE = 0x8;
+static constexpr nibble MODE_BLOK_SELECT  = 0x3;
+static constexpr nibble MODE_ALARM_ENABLE = 0x4;
+static constexpr nibble MODE_TIMER_ENABLE = 0x8;
 
-static const nibble TEST_SECONDS = 0x1;
-static const nibble TEST_MINUTES = 0x2;
-static const nibble TEST_DAYS    = 0x4;
-static const nibble TEST_YEARS   = 0x8;
+static constexpr nibble TEST_SECONDS = 0x1;
+static constexpr nibble TEST_MINUTES = 0x2;
+static constexpr nibble TEST_DAYS    = 0x4;
+static constexpr nibble TEST_YEARS   = 0x8;
 
-static const nibble RESET_ALARM    = 0x1;
-static const nibble RESET_FRACTION = 0x2;
+static constexpr nibble RESET_ALARM    = 0x1;
+static constexpr nibble RESET_FRACTION = 0x2;
 
 
 // 0-bits are ignored on writing and return 0 on reading
-static const nibble mask[4][13] = {
-	{ 0xf, 0x7, 0xf, 0x7, 0xf, 0x3, 0x7, 0xf, 0x3, 0xf, 0x1, 0xf, 0xf},
-	{ 0x0, 0x0, 0xf, 0x7, 0xf, 0x3, 0x7, 0xf, 0x3, 0x0, 0x1, 0x3, 0x0},
-	{ 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf},
-	{ 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf}
+static constexpr std::array mask = {
+	std::array<nibble, 13>{0xf, 0x7, 0xf, 0x7, 0xf, 0x3, 0x7, 0xf, 0x3, 0xf, 0x1, 0xf, 0xf},
+	std::array<nibble, 13>{0x0, 0x0, 0xf, 0x7, 0xf, 0x3, 0x7, 0xf, 0x3, 0x0, 0x1, 0x3, 0x0},
+	std::array<nibble, 13>{0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf},
+	std::array<nibble, 13>{0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf},
 };
 
 RP5C01::RP5C01(CommandController& commandController, SRAM& regs_,
@@ -42,8 +45,8 @@ RP5C01::RP5C01(CommandController& commandController, SRAM& regs_,
 	: regs(regs_)
 	, modeSetting(
 		commandController,
-		((name == "Real time clock") ? "rtcmode" // bw-compat
-		                             : (name + " mode")),
+		((name == "Real time clock") ? std::string_view("rtcmode") // bw-compat
+		                             : tmpStrCat(name + " mode")),
 		"Real Time Clock mode", RP5C01::EMUTIME,
 		EnumSetting<RP5C01::RTCMode>::Map{
 			{"EmuTime",  RP5C01::EMUTIME},
@@ -56,7 +59,7 @@ RP5C01::RP5C01(CommandController& commandController, SRAM& regs_,
 
 void RP5C01::reset(EmuTime::param time)
 {
-	modeReg = MODE_TIMERENABLE;
+	modeReg = MODE_TIMER_ENABLE;
 	testReg = 0;
 	resetReg = 0;
 	updateTimeRegs(time);
@@ -71,8 +74,8 @@ nibble RP5C01::readPort(nibble port, EmuTime::param time)
 		// nothing
 		break;
 	default:
-		unsigned block = modeReg & MODE_BLOKSELECT;
-		if (block == TIME_BLOCK) {
+		unsigned block = modeReg & MODE_BLOK_SELECT;
+		if (block == one_of(TIME_BLOCK, ALARM_BLOCK)) {
 			updateTimeRegs(time);
 		}
 	}
@@ -90,7 +93,7 @@ nibble RP5C01::peekPort(nibble port) const
 		// write only
 		return 0x0f; // TODO check this
 	default:
-		unsigned block = modeReg & MODE_BLOKSELECT;
+		unsigned block = modeReg & MODE_BLOK_SELECT;
 		nibble tmp = regs[block * 13 + port];
 		return tmp & mask[block][port];
 	}
@@ -98,7 +101,7 @@ nibble RP5C01::peekPort(nibble port) const
 
 void RP5C01::writePort(nibble port, nibble value, EmuTime::param time)
 {
-	assert (port<=0x0f);
+	assert (port <= 0x0f);
 	switch (port) {
 	case MODE_REG:
 		updateTimeRegs(time);
@@ -118,12 +121,12 @@ void RP5C01::writePort(nibble port, nibble value, EmuTime::param time)
 		}
 		break;
 	default:
-		unsigned block = modeReg & MODE_BLOKSELECT;
-		if (block == TIME_BLOCK) {
+		unsigned block = modeReg & MODE_BLOK_SELECT;
+		if (block == one_of(TIME_BLOCK, ALARM_BLOCK)) {
 			updateTimeRegs(time);
 		}
 		regs.write(block * 13 + port, value & mask[block][port]);
-		if (block == TIME_BLOCK) {
+		if (block == one_of(TIME_BLOCK, ALARM_BLOCK)) {
 			regs2Time();
 		}
 	}
@@ -170,25 +173,25 @@ void RP5C01::time2Regs()
 		if (hours >= 12) hours_ = (hours - 12) + 20;
 	}
 
-	regs.write(TIME_BLOCK  * 13 +  0,  seconds   % 10);
-	regs.write(TIME_BLOCK  * 13 +  1,  seconds   / 10);
-	regs.write(TIME_BLOCK  * 13 +  2,  minutes   % 10);
-	regs.write(TIME_BLOCK  * 13 +  3,  minutes   / 10);
-	regs.write(TIME_BLOCK  * 13 +  4,  hours_    % 10);
-	regs.write(TIME_BLOCK  * 13 +  5,  hours_    / 10);
-	regs.write(TIME_BLOCK  * 13 +  6,  dayWeek);
-	regs.write(TIME_BLOCK  * 13 +  7, (days+1)   % 10); // 0-30 -> 1-31
-	regs.write(TIME_BLOCK  * 13 +  8, (days+1)   / 10); // 0-11 -> 1-12
-	regs.write(TIME_BLOCK  * 13 +  9, (months+1) % 10);
-	regs.write(TIME_BLOCK  * 13 + 10, (months+1) / 10);
-	regs.write(TIME_BLOCK  * 13 + 11,  years     % 10);
-	regs.write(TIME_BLOCK  * 13 + 12,  years     / 10);
-	regs.write(ALARM_BLOCK * 13 + 11,  leapYear);
+	regs.write(TIME_BLOCK  * 13 +  0, narrow<byte>( seconds   % 10));
+	regs.write(TIME_BLOCK  * 13 +  1, narrow<byte>( seconds   / 10));
+	regs.write(TIME_BLOCK  * 13 +  2, narrow<byte>( minutes   % 10));
+	regs.write(TIME_BLOCK  * 13 +  3, narrow<byte>( minutes   / 10));
+	regs.write(TIME_BLOCK  * 13 +  4, narrow<byte>( hours_    % 10));
+	regs.write(TIME_BLOCK  * 13 +  5, narrow<byte>( hours_    / 10));
+	regs.write(TIME_BLOCK  * 13 +  6, narrow<byte>( dayWeek));
+	regs.write(TIME_BLOCK  * 13 +  7, narrow<byte>((days+1)   % 10)); // 0-30 -> 1-31
+	regs.write(TIME_BLOCK  * 13 +  8, narrow<byte>((days+1)   / 10)); // 0-11 -> 1-12
+	regs.write(TIME_BLOCK  * 13 +  9, narrow<byte>((months+1) % 10));
+	regs.write(TIME_BLOCK  * 13 + 10, narrow<byte>((months+1) / 10));
+	regs.write(TIME_BLOCK  * 13 + 11, narrow<byte>( years     % 10));
+	regs.write(TIME_BLOCK  * 13 + 12, narrow<byte>( years     / 10));
+	regs.write(ALARM_BLOCK * 13 + 11, narrow<byte>( leapYear));
 }
 
-static int daysInMonth(int month, unsigned leapYear)
+static constexpr int daysInMonth(int month, unsigned leapYear)
 {
-	const unsigned daysInMonths[12] = {
+	constexpr std::array<uint8_t, 12> daysInMonths = {
 		31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
 	};
 
@@ -200,11 +203,11 @@ void RP5C01::updateTimeRegs(EmuTime::param time)
 {
 	if (modeSetting.getEnum() == EMUTIME) {
 		// sync with EmuTime, perfect emulation
-		auto elapsed = unsigned(reference.getTicksTill(time));
+		auto elapsed = reference.getTicksTill(time);
 		reference.advance(time);
 
 		// in test mode increase sec/min/.. at a rate of 16384Hz
-		fraction += (modeReg & MODE_TIMERENABLE) ? elapsed : 0;
+		fraction += (modeReg & MODE_TIMER_ENABLE) ? elapsed : 0;
 		unsigned carrySeconds = (testReg & TEST_SECONDS)
 		                      ? elapsed : fraction / FREQ;
 		seconds  += carrySeconds;
@@ -214,14 +217,26 @@ void RP5C01::updateTimeRegs(EmuTime::param time)
 		hours    += minutes / 60;
 		unsigned carryDays = (testReg & TEST_DAYS)
 		                   ? elapsed : hours / 24;
-		days     += carryDays;
-		dayWeek  += carryDays;
-		while (days >= daysInMonth(months, leapYear)) {
-			// TODO not correct because leapYear is not updated
-			//      is only triggered when we update several months
-			//      at a time (but might happen in TEST_DAY mode)
-			days -= daysInMonth(months, leapYear);
-			months++;
+		if (carryDays) {
+			// Only correct for number of days in a month when we
+			// actually advance the day. Because otherwise e.g. the
+			// following scenario goes wrong:
+			// - Suppose current date is 'xx/07/31' and we want to
+			//   change that to 'xx/12/31'.
+			// - Changing the months is done in two steps: first the
+			//   lower then the higher nibble.
+			// - So temporary we go via the (invalid) date 'xx/02/31'
+			//   (february does not have 32 days)
+			// - We must NOT roll over the days and advance to march.
+			days     += narrow_cast<int>(carryDays);
+			dayWeek  += carryDays;
+			while (days >= daysInMonth(months, leapYear)) {
+				// TODO not correct because leapYear is not updated
+				//      is only triggered when we update several months
+				//      at a time (but might happen in TEST_DAY mode)
+				days -= daysInMonth(months, leapYear);
+				months++;
+			}
 		}
 		unsigned carryYears = (testReg & TEST_YEARS)
 		                    ? elapsed : unsigned(months / 12);
@@ -247,7 +262,7 @@ void RP5C01::updateTimeRegs(EmuTime::param time)
 
 void RP5C01::resetAlarm()
 {
-	for (unsigned i = 2; i <= 8; ++i) {
+	for (auto i : xrange(2, 9)) {
 		regs.write(ALARM_BLOCK * 13 + i, 0);
 	}
 }
@@ -255,19 +270,19 @@ void RP5C01::resetAlarm()
 template<typename Archive>
 void RP5C01::serialize(Archive& ar, unsigned /*version*/)
 {
-	ar.serialize("reference", reference);
-	ar.serialize("fraction",  fraction);
-	ar.serialize("seconds",   seconds);
-	ar.serialize("minutes",   minutes);
-	ar.serialize("hours",     hours);
-	ar.serialize("dayWeek",   dayWeek);
-	ar.serialize("years",     years);
-	ar.serialize("leapYear",  leapYear);
-	ar.serialize("days",      days);
-	ar.serialize("months",    months);
-	ar.serialize("modeReg",   modeReg);
-	ar.serialize("testReg",   testReg);
-	ar.serialize("resetReg",  resetReg);
+	ar.serialize("reference", reference,
+	             "fraction",  fraction,
+	             "seconds",   seconds,
+	             "minutes",   minutes,
+	             "hours",     hours,
+	             "dayWeek",   dayWeek,
+	             "years",     years,
+	             "leapYear",  leapYear,
+	             "days",      days,
+	             "months",    months,
+	             "modeReg",   modeReg,
+	             "testReg",   testReg,
+	             "resetReg",  resetReg);
 }
 INSTANTIATE_SERIALIZE_METHODS(RP5C01);
 

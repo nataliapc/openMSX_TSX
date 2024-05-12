@@ -1,15 +1,16 @@
 #include "SettingsManager.hh"
-#include "GlobalCommandController.hh"
-#include "TclObject.hh"
-#include "CommandException.hh"
-#include "XMLElement.hh"
-#include "outer.hh"
-#include "vla.hh"
-#include <cassert>
-#include <cstring>
 
-using std::string;
-using std::vector;
+#include "CommandException.hh"
+#include "GlobalCommandController.hh"
+#include "MSXException.hh"
+#include "SettingsConfig.hh"
+#include "TclObject.hh"
+
+#include "outer.hh"
+#include "view.hh"
+#include "vla.hh"
+
+#include <cassert>
 
 namespace openmsx {
 
@@ -41,24 +42,37 @@ void SettingsManager::unregisterSetting(BaseSetting& setting)
 	settings.erase(name);
 }
 
-BaseSetting* SettingsManager::findSetting(string_view name) const
+BaseSetting* SettingsManager::findSetting(std::string_view name) const
 {
-	auto it = settings.find(name);
-	return (it != end(settings)) ? *it : nullptr;
+	if (auto it = settings.find(name); it != end(settings)) {
+		return *it;
+	}
+	if (name.starts_with("::")) {
+		// try without leading ::
+		if (auto it = settings.find(name.substr(2)); it != end(settings)) {
+			return *it;
+		}
+	} else {
+		// try adding ::
+		if (auto it = settings.find(tmpStrCat("::", name)); it != end(settings)) {
+			return *it;
+		}
+	}
+	return nullptr;
 }
 
-BaseSetting* SettingsManager::findSetting(string_view prefix, string_view baseName) const
+BaseSetting* SettingsManager::findSetting(std::string_view prefix, std::string_view baseName) const
 {
 	auto size = prefix.size() + baseName.size();
 	VLA(char, fullname, size);
-	memcpy(&fullname[0],             prefix  .data(), prefix  .size());
-	memcpy(&fullname[prefix.size()], baseName.data(), baseName.size());
-	return findSetting(string_view(fullname, size));
+	ranges::copy(prefix,   fullname);
+	ranges::copy(baseName, fullname.subspan(prefix.size()));
+	return findSetting(std::string_view(fullname.data(), size)); // TODO simplify in c++23
 }
 
 // Helper functions for setting commands
 
-BaseSetting& SettingsManager::getByName(string_view cmd, string_view name) const
+BaseSetting& SettingsManager::getByName(std::string_view cmd, std::string_view name) const
 {
 	if (auto* setting = findSetting(name)) {
 		return *setting;
@@ -66,15 +80,15 @@ BaseSetting& SettingsManager::getByName(string_view cmd, string_view name) const
 	throw CommandException(cmd, ": ", name, ": no such setting");
 }
 
-vector<string> SettingsManager::getTabSettingNames() const
+std::vector<std::string> SettingsManager::getTabSettingNames() const
 {
-	vector<string> result;
+	std::vector<std::string> result;
 	result.reserve(settings.size() * 2);
 	for (auto* s : settings) {
-		string_view name = s->getFullName();
-		result.push_back(name.str());
+		std::string_view name = s->getFullName();
+		result.emplace_back(name);
 		if (name.starts_with("::")) {
-			result.push_back(name.substr(2).str());
+			result.emplace_back(name.substr(2));
 		} else {
 			result.push_back(strCat("::", name));
 		}
@@ -82,27 +96,21 @@ vector<string> SettingsManager::getTabSettingNames() const
 	return result;
 }
 
-void SettingsManager::loadSettings(const XMLElement& config)
+void SettingsManager::loadSettings(const SettingsConfig& config) const
 {
-	// restore default values
-	for (auto* s : settings) {
-		if (s->needLoadSave()) {
-			s->setValue(s->getRestoreValue());
-		}
-	}
-
-	// load new values
-	auto* settingsElem = config.findChild("settings");
-	if (!settingsElem) return;
+	// restore default values or load new values
 	for (auto* s : settings) {
 		if (!s->needLoadSave()) continue;
-		if (auto* elem = settingsElem->findChildWithAttribute(
-		                "setting", "id", s->getFullName())) {
+
+		if (const auto* savedValue = config.getValueForSetting(s->getBaseName())) {
 			try {
-				s->setValue(TclObject(elem->getData()));
+				s->setValue(TclObject(*savedValue));
 			} catch (MSXException&) {
-				// ignore, keep default value
+				// ignore error, instead set default value
+				s->setValue(s->getDefaultValue());
 			}
+		} else {
+			s->setValue(s->getDefaultValue());
 		}
 	}
 }
@@ -116,22 +124,27 @@ SettingsManager::SettingInfo::SettingInfo(InfoCommand& openMSXInfoCommand)
 }
 
 void SettingsManager::SettingInfo::execute(
-	array_ref<TclObject> tokens, TclObject& result) const
+	std::span<const TclObject> tokens, TclObject& result) const
 {
 	auto& manager = OUTER(SettingsManager, settingInfo);
 	switch (tokens.size()) {
 	case 2:
-		for (auto* p : manager.settings) {
-			result.addListElement(p->getFullNameObj());
-		}
+		result.addListElements(view::transform(
+			manager.settings,
+			[](auto* p) { return p->getFullNameObj(); }));
 		break;
 	case 3: {
 		const auto& settingName = tokens[2].getString();
-		auto it = manager.settings.find(settingName);
-		if (it == end(manager.settings)) {
+		auto* setting = manager.findSetting(settingName);
+		if (!setting) {
 			throw CommandException("No such setting: ", settingName);
 		}
-		(*it)->info(result);
+		try {
+			setting->info(result);
+		} catch (MSXException& e) {
+			throw CommandException(e.getMessage());
+
+		}
 		break;
 	}
 	default:
@@ -139,7 +152,7 @@ void SettingsManager::SettingInfo::execute(
 	}
 }
 
-string SettingsManager::SettingInfo::help(const vector<string>& /*tokens*/) const
+std::string SettingsManager::SettingInfo::help(std::span<const TclObject> /*tokens*/) const
 {
 	return "openmsx_info setting        : "
 	             "returns list of all settings\n"
@@ -147,7 +160,7 @@ string SettingsManager::SettingInfo::help(const vector<string>& /*tokens*/) cons
 	             "returns info on a specific setting\n";
 }
 
-void SettingsManager::SettingInfo::tabCompletion(vector<string>& tokens) const
+void SettingsManager::SettingInfo::tabCompletion(std::vector<std::string>& tokens) const
 {
 	if (tokens.size() == 3) {
 		// complete setting name
@@ -165,11 +178,11 @@ SettingsManager::SetCompleter::SetCompleter(
 {
 }
 
-string SettingsManager::SetCompleter::help(const vector<string>& tokens) const
+std::string SettingsManager::SetCompleter::help(std::span<const TclObject> tokens) const
 {
 	if (tokens.size() == 2) {
 		auto& manager = OUTER(SettingsManager, setCompleter);
-		return manager.getByName("set", tokens[1]).getDescription().str();
+		return std::string(manager.getByName("set", tokens[1].getString()).getDescription());
 	}
 	return "Set or query the value of a openMSX setting or Tcl variable\n"
 	       "  set <setting>          shows current value\n"
@@ -178,7 +191,7 @@ string SettingsManager::SetCompleter::help(const vector<string>& tokens) const
 	       "openMSX setting.\n";
 }
 
-void SettingsManager::SetCompleter::tabCompletion(vector<string>& tokens) const
+void SettingsManager::SetCompleter::tabCompletion(std::vector<std::string>& tokens) const
 {
 	auto& manager = OUTER(SettingsManager, setCompleter);
 	switch (tokens.size()) {
@@ -187,14 +200,12 @@ void SettingsManager::SetCompleter::tabCompletion(vector<string>& tokens) const
 		completeString(tokens, manager.getTabSettingNames(), false); // case insensitive
 		break;
 	}
-	case 3: {
+	case 3:
 		// complete setting value
-		auto it = manager.settings.find(tokens[1]);
-		if (it != end(manager.settings)) {
-			(*it)->tabCompletion(tokens);
+		if (auto* setting = manager.findSetting(tokens[1])) {
+			setting->tabCompletion(tokens);
 		}
 		break;
-	}
 	}
 }
 
@@ -203,18 +214,18 @@ void SettingsManager::SetCompleter::tabCompletion(vector<string>& tokens) const
 
 SettingsManager::SettingCompleter::SettingCompleter(
 		CommandController& commandController_, SettingsManager& manager_,
-		const string& name_)
+		const std::string& name_)
 	: CommandCompleter(commandController_, name_)
 	, manager(manager_)
 {
 }
 
-string SettingsManager::SettingCompleter::help(const vector<string>& /*tokens*/) const
+std::string SettingsManager::SettingCompleter::help(std::span<const TclObject> /*tokens*/) const
 {
 	return {}; // TODO
 }
 
-void SettingsManager::SettingCompleter::tabCompletion(vector<string>& tokens) const
+void SettingsManager::SettingCompleter::tabCompletion(std::vector<std::string>& tokens) const
 {
 	if (tokens.size() == 2) {
 		// complete setting name

@@ -31,6 +31,7 @@ DEALINGS IN THE SOFTWARE.
 #define UTF8_CHECKED_HH
 
 #include "utf8_core.hh"
+#include "zstring_view.hh"
 #include <stdexcept>
 
 namespace utf8 {
@@ -41,8 +42,8 @@ class invalid_code_point : public std::exception
 	uint32_t cp;
 public:
 	explicit invalid_code_point(uint32_t cp_) : cp(cp_) {}
-	const char* what() const throw() override { return "Invalid code point"; }
-	uint32_t code_point() const { return cp; }
+	[[nodiscard]] const char* what() const noexcept override { return "Invalid code point"; }
+	[[nodiscard]] uint32_t code_point() const { return cp; }
 };
 
 class invalid_utf8 : public std::exception
@@ -50,8 +51,8 @@ class invalid_utf8 : public std::exception
 	uint8_t u8;
 public:
 	explicit invalid_utf8(uint8_t u) : u8(u) {}
-	const char* what() const throw() override { return "Invalid UTF-8"; }
-	uint8_t utf8_octet() const { return u8; }
+	[[nodiscard]] const char* what() const noexcept override { return "Invalid UTF-8"; }
+	[[nodiscard]] uint8_t utf8_octet() const { return u8; }
 };
 
 class invalid_utf16 : public std::exception
@@ -59,19 +60,19 @@ class invalid_utf16 : public std::exception
 	uint16_t u16;
 public:
 	explicit invalid_utf16(uint16_t u) : u16(u) {}
-	const char* what() const throw() override { return "Invalid UTF-16"; }
-	uint16_t utf16_word() const { return u16; }
+	[[nodiscard]] const char* what() const noexcept override { return "Invalid UTF-16"; }
+	[[nodiscard]] uint16_t utf16_word() const { return u16; }
 };
 
 class not_enough_room : public std::exception
 {
 public:
-	const char* what() const throw() override { return "Not enough space"; }
+	[[nodiscard]] const char* what() const noexcept override { return "Not enough space"; }
 };
 
 // The library API - functions intended to be called by the users
 
-template <typename octet_iterator, typename output_iterator>
+template<typename octet_iterator, typename output_iterator>
 output_iterator replace_invalid(octet_iterator start, octet_iterator end,
                                 output_iterator out, uint32_t replacement)
 {
@@ -105,14 +106,14 @@ output_iterator replace_invalid(octet_iterator start, octet_iterator end,
 	return out;
 }
 
-template <typename octet_iterator, typename output_iterator>
+template<typename octet_iterator, typename output_iterator>
 inline output_iterator replace_invalid(octet_iterator start, octet_iterator end,
                                        output_iterator out)
 {
 	return replace_invalid(start, end, out, 0xfffd);
 }
 
-template <typename octet_iterator>
+template<typename octet_iterator>
 octet_iterator append(uint32_t cp, octet_iterator result)
 {
 	if (!internal::is_code_point_valid(cp)) {
@@ -123,26 +124,26 @@ octet_iterator append(uint32_t cp, octet_iterator result)
 		*result++ = cp;
 	} else if (cp < 0x800) {
 		// two octets
-		*result++ = ((cp >>  6)       ) | 0xc0;
-		*result++ = ((cp >>  0) & 0x3f) | 0x80;
+		*result++ = ((cp >>  6) & 0x1f) | 0xc0; // 0b110.'....  (5)
+		*result++ = ((cp >>  0) & 0x3f) | 0x80; // 0b10..'....  (6)
 	} else if (cp < 0x10000) {
 		// three octets
-		*result++ = ((cp >> 12)       ) | 0xe0;
-		*result++ = ((cp >>  6) & 0x3f) | 0x80;
-		*result++ = ((cp >>  0) & 0x3f) | 0x80;
+		*result++ = ((cp >> 12) & 0x0f) | 0xe0; // 0b1110'....  (4)
+		*result++ = ((cp >>  6) & 0x3f) | 0x80; // 0b10..'....  (6)
+		*result++ = ((cp >>  0) & 0x3f) | 0x80; // 0b10..'....  (6)
 	} else if (cp <= internal::CODE_POINT_MAX) {
 		// four octets
-		*result++ = ((cp >> 18)       ) | 0xf0;
-		*result++ = ((cp >> 12) & 0x3f) | 0x80;
-		*result++ = ((cp >>  6) & 0x3f) | 0x80;
-		*result++ = ((cp >>  0) & 0x3f) | 0x80;
+		*result++ = ((cp >> 18) & 0x07) | 0xf0; // 0b1111'0...  (3)
+		*result++ = ((cp >> 12) & 0x3f) | 0x80; // 0b10..'....  (6)
+		*result++ = ((cp >>  6) & 0x3f) | 0x80; // 0b10..'....  (6)
+		*result++ = ((cp >>  0) & 0x3f) | 0x80; // 0b10..'....  (6)
 	} else {
 		throw invalid_code_point(cp);
 	}
 	return result;
 }
 
-template <typename octet_iterator>
+template<typename octet_iterator>
 uint32_t next(octet_iterator& it, octet_iterator end)
 {
 	uint32_t cp = 0;
@@ -162,13 +163,13 @@ uint32_t next(octet_iterator& it, octet_iterator end)
 	return cp;
 }
 
-template <typename octet_iterator>
-uint32_t peek_next(octet_iterator it, octet_iterator end)
+template<typename octet_iterator>
+[[nodiscard]] uint32_t peek_next(octet_iterator it, octet_iterator end)
 {
 	return next(it, end);
 }
 
-template <typename octet_iterator>
+template<typename octet_iterator>
 uint32_t prior(octet_iterator& it, octet_iterator start)
 {
 	auto end = it;
@@ -182,26 +183,24 @@ uint32_t prior(octet_iterator& it, octet_iterator start)
 	return next(temp, end);
 }
 
-template <typename octet_iterator, typename distance_type>
+template<typename octet_iterator, typename distance_type>
 void advance(octet_iterator& it, distance_type n, octet_iterator end)
 {
-	for (distance_type i = 0; i < n; ++i) {
-		next(it, end);
-	}
+	repeat(n, [&] {	next(it, end); });
 }
 
-template <typename octet_iterator>
-typename std::iterator_traits<octet_iterator>::difference_type
-distance(octet_iterator first, octet_iterator last)
+template<typename octet_iterator>
+[[nodiscard]] auto distance(octet_iterator first, octet_iterator last)
 {
-	typename std::iterator_traits<octet_iterator>::difference_type dist;
-	for (dist = 0; first < last; ++dist) {
+	typename std::iterator_traits<octet_iterator>::difference_type dist = 0;
+	while (first < last) {
+		++dist;
 		next(first, last);
 	}
 	return dist;
 }
 
-template <typename u16bit_iterator, typename octet_iterator>
+template<typename u16bit_iterator, typename octet_iterator>
 octet_iterator utf16to8(u16bit_iterator start, u16bit_iterator end,
                         octet_iterator result)
 {
@@ -212,7 +211,7 @@ octet_iterator utf16to8(u16bit_iterator start, u16bit_iterator end,
 			if (start == end) {
 				throw invalid_utf16(*start);
 			}
-			uint32_t trail_surrogate = *start++;
+			auto trail_surrogate = *start++;
 			if (trail_surrogate < internal::TRAIL_SURROGATE_MIN ||
 			    trail_surrogate > internal::TRAIL_SURROGATE_MAX) {
 				throw invalid_utf16(trail_surrogate);
@@ -224,7 +223,7 @@ octet_iterator utf16to8(u16bit_iterator start, u16bit_iterator end,
 	return result;
 }
 
-template <typename u16bit_iterator, typename octet_iterator>
+template<typename u16bit_iterator, typename octet_iterator>
 u16bit_iterator utf8to16(octet_iterator start, octet_iterator end,
                          u16bit_iterator result)
 {
@@ -240,7 +239,7 @@ u16bit_iterator utf8to16(octet_iterator start, octet_iterator end,
 	return result;
 }
 
-template <typename octet_iterator, typename u32bit_iterator>
+template<typename octet_iterator, typename u32bit_iterator>
 octet_iterator utf32to8(u32bit_iterator start, u32bit_iterator end,
                         octet_iterator result)
 {
@@ -250,7 +249,7 @@ octet_iterator utf32to8(u32bit_iterator start, u32bit_iterator end,
 	return result;
 }
 
-template <typename octet_iterator, typename u32bit_iterator>
+template<typename octet_iterator, typename u32bit_iterator>
 u32bit_iterator utf8to32(octet_iterator start, octet_iterator end,
                          u32bit_iterator result)
 {
@@ -261,14 +260,21 @@ u32bit_iterator utf8to32(octet_iterator start, octet_iterator end,
 }
 
 // The iterator class
-template <typename octet_iterator>
-class iterator : public std::iterator<std::bidirectional_iterator_tag, uint32_t>
+template<typename octet_iterator>
+class iterator
 {
 	octet_iterator it;
 	octet_iterator range_start;
 	octet_iterator range_end;
+
 public:
-	iterator() {}
+	using iterator_category = std::bidirectional_iterator_tag;
+	using difference_type   = ptrdiff_t;
+	using value_type        = uint32_t;
+	using pointer           = uint32_t*;
+	using reference         = uint32_t&;
+
+	iterator() = default;
 	iterator(const octet_iterator& octet_it,
 	         const octet_iterator& range_start_,
 	         const octet_iterator& range_end_)
@@ -281,13 +287,13 @@ public:
 		}
 	}
 	// the default "big three" are OK
-	octet_iterator base() const { return it; }
-	uint32_t operator*() const
+	[[nodiscard]] octet_iterator base() const { return it; }
+	[[nodiscard]] uint32_t operator*() const
 	{
 		auto temp = it;
 		return next(temp, range_end);
 	}
-	bool operator==(const iterator& rhs) const
+	[[nodiscard]] bool operator==(const iterator& rhs) const
 	{
 		if ((range_start != rhs.range_start) ||
 		    (range_end   != rhs.range_end)) {
@@ -295,10 +301,6 @@ public:
 				"Comparing utf-8 iterators defined with different ranges");
 		}
 		return it == rhs.it;
-	}
-	bool operator!=(const iterator& rhs) const
-	{
-		return !(operator==(rhs));
 	}
 	iterator& operator++()
 	{
@@ -325,10 +327,9 @@ public:
 };
 
 #ifdef _WIN32
-std::string unknowntoutf8(const std::string& unknown);
-std::string utf8toansi(const std::string& utf8);
-std::wstring utf8to16(const std::string& utf8);
-std::string utf16to8(const std::wstring& utf16);
+[[nodiscard]] std::string  utf8ToAnsi(zstring_view utf8);
+[[nodiscard]] std::wstring utf8to16  (zstring_view utf8);
+[[nodiscard]] std::string  utf16to8  (const std::wstring& utf16);
 #endif
 
 } // namespace utf8

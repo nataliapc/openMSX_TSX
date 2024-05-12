@@ -11,8 +11,9 @@ Not derived from real machine, but just copied from CX7/128 file.
     <manufacturer>Yamaha</manufacturer>
     <code>CX7M/128</code>
     <release_year>1985</release_year>
-    <description>Music Computer</description>
+    <description>Music Computer: Japanese MSX2 with built in SFG-05 module.</description>
     <type>MSX2</type>
+    <region>jp</region>
   </info>
 
   <MapperReadBackBits>largest</MapperReadBackBits>
@@ -25,7 +26,7 @@ Not derived from real machine, but just copied from CX7/128 file.
       <sound>
         <volume>16000</volume>
       </sound>
-      <io base="0xA8" num="4"/>
+      <io base="0xA8" num="8"/> <!-- S-3527 mirrors -->
       <keyboard_type>jp_ansi</keyboard_type>
       <has_keypad>false</has_keypad>
       <key_ghosting_sgc_protected>false</key_ghosting_sgc_protected>
@@ -44,8 +45,8 @@ Not derived from real machine, but just copied from CX7/128 file.
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="8" type="IO"/> <!-- S-3527 mirrors -->
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <RTC id="Real time clock">
@@ -55,7 +56,8 @@ Not derived from real machine, but just copied from CX7/128 file.
     </RTC>
 
     <PrinterPort id="Printer Port">
-      <io base="0x90" num="2"/>
+      <io base="0x90" num="8" type="IO"/> <!-- S-3527 mirrors -->
+      <status_readable_on_all_ports>true</status_readable_on_all_ports> <!-- S-3527 property -->
     </PrinterPort>
 
     <primary slot="0">
@@ -108,6 +110,7 @@ Not derived from real machine, but just copied from CX7/128 file.
     MSX cartridgeslot signals. -->
       <secondary slot="3">
         <YamahaSFG id="Yamaha SFG-05">
+          <variant>YM2164</variant>
           <mem base="0x0000" size="0x10000"/>
           <sound>
             <volume>30000</volume>

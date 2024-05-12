@@ -4,7 +4,7 @@
 #include "OSDWidget.hh"
 #include "TclObject.hh"
 #include "hash_set.hh"
-#include "xxhash.hh"
+#include "view.hh"
 #include <vector>
 #include <string>
 
@@ -14,28 +14,33 @@ class OSDTopWidget final : public OSDWidget
 {
 public:
 	explicit OSDTopWidget(Display& display);
-	string_view getType() const override;
-	gl::vec2 getSize(const OutputRectangle& output) const override;
+	[[nodiscard]] std::string_view getType() const override;
+	[[nodiscard]] gl::vec2 getSize(const OutputSurface& output) const override;
+	[[nodiscard]] bool isVisible() const override;
+	[[nodiscard]] bool isRecursiveFading() const override;
 
 	void queueError(std::string message);
 	void showAllErrors();
 
-	OSDWidget* findByName(string_view name);
-	const OSDWidget* findByName(string_view name) const;
+	[[nodiscard]]       OSDWidget* findByName(std::string_view name);
+	[[nodiscard]] const OSDWidget* findByName(std::string_view name) const;
 	void addName(OSDWidget& widget);
 	void removeName(OSDWidget& widget);
-	std::vector<string_view> getAllWidgetNames() const;
+	[[nodiscard]] auto getAllWidgetNames() const {
+		return view::transform(widgetsByName,
+			[](auto* p) -> std::string_view { return p->getName(); });
+	}
+
 
 protected:
 	void invalidateLocal() override;
-	void paintSDL(OutputSurface& output) override;
-	void paintGL (OutputSurface& output) override;
+	void paint(OutputSurface& output) override;
 
 private:
 	std::vector<std::string> errors;
 
 	struct NameFromWidget {
-		string_view operator()(const OSDWidget* w) const {
+		[[nodiscard]] std::string_view operator()(const OSDWidget* w) const {
 			return w->getName();
 		}
 	};

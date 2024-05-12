@@ -1,12 +1,14 @@
 #include "TigerTree.hh"
+#include "tiger.hh"
 #include "Math.hh"
-#include <map>
-#include <cstring>
+#include "MemBuffer.hh"
+#include "ranges.hh"
+#include "ScopedAssign.hh"
 #include <cassert>
+#include <map>
+#include <span>
 
 namespace openmsx {
-
-static const size_t BLOCK_SIZE = 1024;
 
 struct TTCacheEntry
 {
@@ -21,22 +23,22 @@ struct TTCacheEntry
 // inserted. So still use std::map instead of std::vector.
 static std::map<std::pair<size_t, std::string>, TTCacheEntry> ttCache;
 
-static size_t calcNumNodes(size_t dataSize)
+[[nodiscard]] static constexpr size_t calcNumNodes(size_t dataSize)
 {
-	auto numBlocks = (dataSize + BLOCK_SIZE - 1) / BLOCK_SIZE;
+	auto numBlocks = (dataSize + TigerTree::BLOCK_SIZE - 1) / TigerTree::BLOCK_SIZE;
 	return (numBlocks == 0) ? 1 : 2 * numBlocks - 1;
 }
 
-static TTCacheEntry& getCacheEntry(
+[[nodiscard]] static TTCacheEntry& getCacheEntry(
 	TTData& data, size_t dataSize, const std::string& name)
 {
-	auto& result = ttCache[std::make_pair(dataSize, name)];
+	auto& result = ttCache[std::pair(dataSize, name)];
 	if (!data.isCacheStillValid(result.time)) { // note: has side effect
 		size_t numNodes = calcNumNodes(dataSize);
 		result.hash .resize(numNodes);
 		result.valid.resize(numNodes);
 		result.numNodes = numNodes;
-		memset(result.valid.data(), 0, numNodes); // all invalid
+		ranges::fill(std::span{result.valid.data(), numNodes}, false); // all invalid
 		result.numNodesValid = 0;
 	}
 	return result;
@@ -86,8 +88,8 @@ const TigerHash& TigerTree::calcHash(Node node, const std::function<void(size_t,
 			// interior node
 			auto left  = getLeftChild (node);
 			auto right = getRightChild(node);
-			auto& h1 = calcHash(left, progressCallback);
-			auto& h2 = calcHash(right, progressCallback);
+			const auto& h1 = calcHash(left, progressCallback);
+			const auto& h2 = calcHash(right, progressCallback);
 			tiger_int(h1, h2, entry.hash[n]);
 		} else {
 			// leaf node
@@ -96,14 +98,12 @@ const TigerHash& TigerTree::calcHash(Node node, const std::function<void(size_t,
 
 			if (l >= BLOCK_SIZE) {
 				auto* d = data.getData(b, BLOCK_SIZE);
-				tiger_leaf(d, entry.hash[n]);
+				tiger_leaf(std::span{d, BLOCK_SIZE}, entry.hash[n]);
 			} else {
 				// partial last block
 				auto* d = data.getData(b, l);
-				auto backup = d[-1];
-				d[-1] = 0;
-				tiger(d - 1, l + 1, entry.hash[n]);
-				d[-1] = backup;
+				auto sa = ScopedAssign(d[-1], uint8_t(0));
+				tiger(std::span{d - 1, l + 1}, entry.hash[n]);
 			}
 		}
 		entry.valid[n] = true;

@@ -1,22 +1,24 @@
 #include "ZlibInflate.hh"
 #include "FileException.hh"
 #include "MemBuffer.hh"
+#include "narrow.hh"
+#include "xrange.hh"
 #include <limits>
 
 namespace openmsx {
 
-ZlibInflate::ZlibInflate(const byte* input, size_t inputLen_)
+ZlibInflate::ZlibInflate(std::span<const uint8_t> input)
 {
-	if (inputLen_ > std::numeric_limits<decltype(s.avail_in)>::max()) {
+	if (input.size() > std::numeric_limits<decltype(s.avail_in)>::max()) {
 		throw FileException(
 			"Error while decompressing: input file too big");
 	}
-	auto inputLen = static_cast<decltype(s.avail_in)>(inputLen_);
+	auto inputLen = static_cast<decltype(s.avail_in)>(input.size());
 
 	s.zalloc = nullptr;
 	s.zfree  = nullptr;
 	s.opaque = nullptr;
-	s.next_in  = const_cast<byte*>(input);
+	s.next_in  = const_cast<uint8_t*>(input.data());
 	s.avail_in = inputLen;
 	wasInit = false;
 }
@@ -30,12 +32,10 @@ ZlibInflate::~ZlibInflate()
 
 void ZlibInflate::skip(size_t num)
 {
-	for (size_t i = 0; i < num; ++i) {
-		getByte();
-	}
+	repeat(num, [&] { (void)getByte(); });
 }
 
-byte ZlibInflate::getByte()
+uint8_t ZlibInflate::getByte()
 {
 	if (s.avail_in <= 0) {
 		throw FileException(
@@ -64,27 +64,26 @@ unsigned ZlibInflate::get32LE()
 std::string ZlibInflate::getString(size_t len)
 {
 	std::string result;
-	for (size_t i = 0; i < len; ++i) {
-		result.push_back(getByte());
-	}
+	result.reserve(len);
+	repeat(len, [&] { result.push_back(narrow_cast<char>(getByte())); });
 	return result;
 }
 
 std::string ZlibInflate::getCString()
 {
 	std::string result;
-	while (char c = getByte()) {
+	while (auto c = narrow_cast<char>(getByte())) {
 		result.push_back(c);
 	}
 	return result;
 }
 
-size_t ZlibInflate::inflate(MemBuffer<byte>& output, size_t sizeHint)
+size_t ZlibInflate::inflate(MemBuffer<uint8_t>& output, size_t sizeHint)
 {
-	int initErr = inflateInit2(&s, -MAX_WBITS);
-	if (initErr != Z_OK) {
+	if (int err = inflateInit2(&s, -MAX_WBITS);
+	    err != Z_OK) {
 		throw FileException(
-			"Error initializing inflate struct: ", zError(initErr));
+			"Error initializing inflate struct: ", zError(err));
 	}
 	wasInit = true;
 

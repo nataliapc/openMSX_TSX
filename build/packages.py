@@ -1,4 +1,4 @@
-from urlparse import urljoin
+from urllib.parse import urljoin
 
 class Package(object):
 	'''Abstract base class for packages.
@@ -8,7 +8,7 @@ class Package(object):
 
 	@classmethod
 	def getMakeName(cls):
-		return cls.sourceName.upper()
+		return cls.sourceName.upper().replace('-', '_')
 
 class DownloadablePackage(Package):
 	'''Abstract base class for packages that can be downloaded.
@@ -34,20 +34,9 @@ class DownloadablePackage(Package):
 	def getURL(cls):
 		return urljoin(cls.downloadURL + '/', cls.getTarballName())
 
-class ALSA(DownloadablePackage):
-	downloadURL = 'ftp://ftp.alsa-project.org/pub/lib/'
+class ALSA(Package):
 	niceName = 'ALSA'
 	sourceName = 'alsa-lib'
-	version = '1.1.0'
-	fileLength = 929874
-	checksums = {
-		'sha256':
-			'dfde65d11e82b68f82e562ab6228c1fb7c78854345d3c57e2c68a9dd3dae1f15',
-		}
-
-	@classmethod
-	def getTarballName(cls):
-		return '%s-%s.tar.bz2' % (cls.sourceName, cls.version)
 
 	@classmethod
 	def getMakeName(cls):
@@ -57,22 +46,22 @@ class FreeType(DownloadablePackage):
 	downloadURL = 'http://downloads.sourceforge.net/freetype'
 	niceName = 'FreeType'
 	sourceName = 'freetype'
-	version = '2.4.12'
-	fileLength = 2117909
+	version = '2.11.1'
+	fileLength = 3451359
 	checksums = {
 		'sha256':
-			'9755806ff72cba095aad47dce6f0ad66bd60fee2a90323707d2cac5c526066f0',
+			'f8db94d307e9c54961b39a1cc799a67d46681480696ed72ecf78d4473770f09b',
 		}
 
 class GLEW(DownloadablePackage):
 	downloadURL = 'http://downloads.sourceforge.net/glew'
 	niceName = 'GLEW'
 	sourceName = 'glew'
-	version = '1.9.0'
-	fileLength = 544440
+	version = '2.2.0'
+	fileLength = 835861
 	checksums = {
 		'sha256':
-			'9b36530e414c95d6624be9d6815a5be1531d1986300ae5903f16977ab8aeb787',
+			'd4fc82893cfb00109578d0a1a2337fb8ca335b3ceccf97b97e5cc7f08e4353e1',
 		}
 
 	@classmethod
@@ -83,11 +72,11 @@ class LibPNG(DownloadablePackage):
 	downloadURL = 'http://downloads.sourceforge.net/libpng'
 	niceName = 'libpng'
 	sourceName = 'libpng'
-	version = '1.6.20'
-	fileLength = 1417478
+	version = '1.6.39'
+	fileLength = 1507328
 	checksums = {
 		'sha256':
-			'3d3bdc16f973a62fb1d26464fe2fe19f51dde9b883feff3e059d18ec1457b199',
+			'af4fb7f260f839919e5958e5ab01a275d4fe436d45442a36ee62f73e5beb75ba',
 		}
 
 	@classmethod
@@ -98,11 +87,11 @@ class OGG(DownloadablePackage):
 	downloadURL = 'http://downloads.xiph.org/releases/ogg'
 	niceName = 'libogg'
 	sourceName = 'libogg'
-	version = '1.3.0'
-	fileLength = 425144
+	version = '1.3.5'
+	fileLength = 593071
 	checksums = {
 		'sha256':
-			'a8de807631014615549d2356fd36641833b8288221cea214f8a72750efe93780',
+			'0eb4b4b9420a0f51db142ba3f9c64b333f826532dc0f48c6410ae51f4799b664',
 		}
 
 	@classmethod
@@ -113,60 +102,48 @@ class OpenGL(Package):
 	niceName = 'OpenGL'
 	sourceName = 'gl'
 
-class SDL(DownloadablePackage):
-	downloadURL = 'http://www.libsdl.org/release'
-	niceName = 'SDL'
-	sourceName = 'SDL'
-	version = '1.2.15'
-	fileLength = 3920622
+class PkgConfig(DownloadablePackage):
+	downloadURL = 'https://pkg-config.freedesktop.org/releases'
+	niceName = 'pkg-config'
+	sourceName = 'pkg-config'
+	version = '0.29.2'
+	fileLength = 2016830
 	checksums = {
 		'sha256':
-			'd6d316a793e5e348155f0dd93b979798933fb98aa1edebcc108829d6474aad00',
+			'6fc69c01688c9458a57eb9a1664c9aba372ccda420a02bf4429fe610e7e7d591',
 		}
 
-class SDL_ttf(DownloadablePackage):
+class SDL2(DownloadablePackage):
+	downloadURL = 'https://www.libsdl.org/release'
+	niceName = 'SDL2'
+	sourceName = 'SDL2'
+	version = '2.30.1'
+	fileLength = 7428023
+	checksums = {
+		'sha256':
+			'01215ffbc8cfc4ad165ba7573750f15ddda1f971d5a66e9dcaffd37c587f473a',
+		}
+
+class SDL2_ttf(DownloadablePackage):
 	downloadURL = 'http://www.libsdl.org/projects/SDL_ttf/release'
-	niceName = 'SDL_ttf'
-	sourceName = 'SDL_ttf'
-	version = '2.0.11'
-	fileLength = 4053686
+	niceName = 'SDL2_ttf'
+	sourceName = 'SDL2_ttf'
+	version = '2.22.0'
+	fileLength = 14314901
 	checksums = {
 		'sha256':
-			'724cd895ecf4da319a3ef164892b72078bd92632a5d812111261cde248ebcdb7',
+			'd48cbd1ce475b9e178206bf3b72d56b66d84d44f64ac05803328396234d67723',
 		}
-
-class TCL_ANDROID(DownloadablePackage):
-	downloadURL = 'http://downloads.sourceforge.net/tcl'
-	niceName = 'Tcl'
-	sourceName = 'tcl'
-	version = '8.5.11'
-	fileLength = 4484001
-	checksums = {
-		'sha256':
-			'8addc385fa6b5be4605e6d68fbdc4c0e674c5af1dc1c95ec5420390c4b08042a',
-		}
-
-	@classmethod
-	def getMakeName(cls):
-		return 'TCL_ANDROID'
-
-	@classmethod
-	def getSourceDirName(cls):
-		return '%s%s' % (cls.sourceName, cls.version)
-
-	@classmethod
-	def getTarballName(cls):
-		return '%s%s-src.tar.gz' % (cls.sourceName, cls.version)
 
 class TCL(DownloadablePackage):
 	downloadURL = 'http://downloads.sourceforge.net/tcl'
 	niceName = 'Tcl'
 	sourceName = 'tcl'
-	version = '8.5.18'
-	fileLength = 4534628
+	version = '8.6.13'
+	fileLength = 10834396
 	checksums = {
 		'sha256':
-			'032be57a607bdf252135b52fac9e3a7016e526242374ac7637b083ecc4c5d3c9',
+			'43a1fae7412f61ff11de2cfd05d28cfc3a73762f354a417c62370a54e2caf066',
 		}
 
 	@classmethod
@@ -196,11 +173,11 @@ class Vorbis(DownloadablePackage):
 	downloadURL = 'http://downloads.xiph.org/releases/vorbis'
 	niceName = 'libvorbis'
 	sourceName = 'libvorbis'
-	version = '1.3.3'
-	fileLength = 1592663
+	version = '1.3.7'
+	fileLength = 1658963
 	checksums = {
 		'sha256':
-			'6d747efe7ac4ad249bf711527882cef79fb61d9194c45b5ca5498aa60f290762',
+			'0e982409a9c3fc82ee06e08205b1355e5c6aa4c36bca58146ef399621b0ce5ab',
 		}
 
 	@classmethod
@@ -211,25 +188,27 @@ class ZLib(DownloadablePackage):
 	downloadURL = 'http://downloads.sourceforge.net/libpng'
 	niceName = 'zlib'
 	sourceName = 'zlib'
-	version = '1.2.8'
-	fileLength = 571091
+	version = '1.2.11'
+	fileLength = 607698
 	checksums = {
 		'sha256':
-			'36658cb768a54c1d4dec43c3116c27ed893e88b02ecfcb44f2166f9c0b7f2a0d',
+			'c3e5e9fdd5004dcb542feda5ee4f0ff0744628baf8ed2dd5d66f8ca1197cb1a1',
 		}
 
 # Build a dictionary of packages using introspection.
-def _discoverPackages(localObjects):
-	for obj in localObjects:
-		if isinstance(obj, type) and issubclass(obj, Package):
-			if not (obj is Package or obj is DownloadablePackage):
-				yield obj.getMakeName(), obj
-_packagesByName = dict(_discoverPackages(locals().itervalues()))
+_packagesByName = {
+	obj.getMakeName(): obj
+	for obj in locals().values()
+	if isinstance(obj, type)
+		and issubclass(obj, Package)
+		and obj is not Package
+		and obj is not DownloadablePackage
+	}
 
 def getPackage(makeName):
 	return _packagesByName[makeName]
 
 def iterDownloadablePackages():
-	for package in _packagesByName.itervalues():
+	for package in _packagesByName.values():
 		if issubclass(package, DownloadablePackage):
 			yield package

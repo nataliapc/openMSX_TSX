@@ -5,6 +5,7 @@
 #include "SCC.hh"
 #include "AY8910.hh"
 #include "AmdFlash.hh"
+#include <array>
 
 namespace openmsx {
 
@@ -12,15 +13,15 @@ class MegaFlashRomSCCPlus final : public MSXRom
 {
 public:
 	MegaFlashRomSCCPlus(const DeviceConfig& config, Rom&& rom);
-	~MegaFlashRomSCCPlus();
+	~MegaFlashRomSCCPlus() override;
 
 	void powerUp(EmuTime::param time) override;
 	void reset(EmuTime::param time) override;
-	byte peekMem(word address, EmuTime::param time) const override;
-	byte readMem(word address, EmuTime::param time) override;
-	const byte* getReadCacheLine(word address) const override;
+	[[nodiscard]] byte peekMem(word address, EmuTime::param time) const override;
+	[[nodiscard]] byte readMem(word address, EmuTime::param time) override;
+	[[nodiscard]] const byte* getReadCacheLine(word address) const override;
 	void writeMem(word address, byte value, EmuTime::param time) override;
-	byte* getWriteCacheLine(word address) const override;
+	[[nodiscard]] byte* getWriteCacheLine(word address) const override;
 
 	void writeIO(word port, byte value, EmuTime::param time) override;
 
@@ -28,14 +29,15 @@ public:
 	void serialize(Archive& ar, unsigned version);
 
 private:
-	byte readMem2(word addr, EmuTime::param time);
+	[[nodiscard]] byte readMem2(word addr, EmuTime::param time);
 
 	enum SCCEnable { EN_NONE, EN_SCC, EN_SCCPLUS };
-	SCCEnable getSCCEnable() const;
+	[[nodiscard]] SCCEnable getSCCEnable() const;
 
-	unsigned getSubslot(unsigned address) const;
-	unsigned getFlashAddr(unsigned addr) const;
+	[[nodiscard]] unsigned getSubslot(unsigned address) const;
+	[[nodiscard]] unsigned getFlashAddr(unsigned addr) const;
 
+private:
 	SCC scc;
 	AY8910 psg;
 	AmdFlash flash;
@@ -43,10 +45,10 @@ private:
 	byte configReg;
 	byte offsetReg;
 	byte subslotReg;
-	byte bankRegs[4][4];
+	std::array<std::array<byte, 4>, 4> bankRegs;
 	byte psgLatch;
 	byte sccMode;
-	byte sccBanks[4];
+	std::array<byte, 4> sccBanks;
 };
 
 } // namespace openmsx

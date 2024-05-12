@@ -14,6 +14,7 @@
 #include "SCSI.hh"
 #include "SCSIDevice.hh"
 #include "AlignedBuffer.hh"
+#include <array>
 #include <memory>
 
 namespace openmsx {
@@ -25,34 +26,35 @@ class WD33C93
 public:
 	explicit WD33C93(const DeviceConfig& config);
 
-	void reset(bool scsireset);
+	void reset(bool scsiReset);
 
-	byte readAuxStatus();
-	byte readCtrl();
-	byte peekAuxStatus() const;
-	byte peekCtrl() const;
-	void writeAdr(byte value);
-	void writeCtrl(byte value);
+	[[nodiscard]] uint8_t readAuxStatus();
+	[[nodiscard]] uint8_t readCtrl();
+	[[nodiscard]] uint8_t peekAuxStatus() const;
+	[[nodiscard]] uint8_t peekCtrl() const;
+	void writeAdr(uint8_t value);
+	void writeCtrl(uint8_t value);
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 private:
 	void disconnect();
-	void execCmd(byte value);
+	void execCmd(uint8_t value);
 
+private:
 	AlignedByteArray<SCSIDevice::BUFFER_SIZE> buffer;
-	std::unique_ptr<SCSIDevice> dev[8];
+	std::array<std::unique_ptr<SCSIDevice>, 8> dev;
 	unsigned bufIdx;
-	int counter;
-	unsigned blockCounter;
+	unsigned counter = 0;
+	unsigned blockCounter = 0;
 	int tc;
 	SCSI::Phase phase;
-	byte myId;
-	byte targetId;
-	byte regs[32];
-	byte latch;
-	bool devBusy;
+	uint8_t myId;
+	uint8_t targetId = 0;
+	std::array<uint8_t, 32> regs;
+	uint8_t latch;
+	bool devBusy = false;
 };
 
 } // namespace openmsx

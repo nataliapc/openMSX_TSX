@@ -1,11 +1,15 @@
 #ifndef UNICODEKEYMAP_HH
 #define UNICODEKEYMAP_HH
 
-#include "openmsx.hh"
-#include "string_view.hh"
-#include <vector>
-#include <utility>
+#include "CommandException.hh"
+#include "MsxChar2Unicode.hh"
+#include "narrow.hh"
+#include <array>
 #include <cassert>
+#include <cstdint>
+#include <optional>
+#include <string_view>
+#include <vector>
 
 namespace openmsx {
 
@@ -25,23 +29,20 @@ public:
 	/** Creates an invalid key matrix position, which can be used when
 	  * a key does not exist on a particular keyboard.
 	  */
-	KeyMatrixPosition()
-		: rowCol(INVALID)
-	{
-	}
+	constexpr KeyMatrixPosition() = default;
 
-	/** Creates a key matrix position from a byte: the row is stored in
+	/** Creates a key matrix position from a uint8_t: the row is stored in
 	  * the high nibble, the column is stored in the low nibble.
 	  */
-	KeyMatrixPosition(byte rowCol_)
+	explicit constexpr KeyMatrixPosition(uint8_t rowCol_)
 		: KeyMatrixPosition(rowCol_ >> 4, rowCol_ & 0x0F)
 	{
 	}
 
 	/** Creates a key matrix position with a given row and column.
 	  */
-	KeyMatrixPosition(unsigned row, unsigned col)
-		: rowCol((row << 3) | col)
+	constexpr KeyMatrixPosition(unsigned row, unsigned col)
+		: rowCol(narrow<uint8_t>((row << 3) | col))
 	{
 		assert(row < NUM_ROWS);
 		assert(col < NUM_COLS);
@@ -50,14 +51,14 @@ public:
 
 	/** Returns true iff this position is valid.
 	  */
-	bool isValid() const {
+	[[nodiscard]] constexpr bool isValid() const {
 		return rowCol != INVALID;
 	}
 
 	/** Returns the matrix row.
 	  * Must only be called on valid positions.
 	  */
-	unsigned getRow() const {
+	[[nodiscard]] constexpr uint8_t getRow() const {
 		assert(isValid());
 		return rowCol >> 3;
 	}
@@ -65,16 +66,16 @@ public:
 	/** Returns the matrix column.
 	  * Must only be called on valid positions.
 	  */
-	unsigned getColumn() const {
+	[[nodiscard]] constexpr uint8_t getColumn() const {
 		assert(isValid());
 		return rowCol & 0x07;
 	}
 
-	/** Returns the matrix row and column combined in a single byte: the column
+	/** Returns the matrix row and column combined in a single uint8_t: the column
 	  * is stored in the lower 3 bits, the row is stored in the higher bits.
 	  * Must only be called on valid positions.
 	  */
-	byte getRowCol() const {
+	[[nodiscard]] constexpr uint8_t getRowCol() const {
 		assert(isValid());
 		return rowCol;
 	}
@@ -83,17 +84,15 @@ public:
 	  * column set, all other bits clear.
 	  * Must only be called on valid positions.
 	  */
-	unsigned getMask() const {
+	[[nodiscard]] constexpr uint8_t getMask() const {
 		assert(isValid());
-		return 1 << getColumn();
+		return uint8_t(1 << getColumn());
 	}
 
-	bool operator==(const KeyMatrixPosition& other) const {
-		return rowCol == other.rowCol;
-	}
+	[[nodiscard]] constexpr bool operator==(const KeyMatrixPosition&) const = default;
 
 private:
-	byte rowCol;
+	uint8_t rowCol = INVALID;
 };
 
 class UnicodeKeymap
@@ -102,32 +101,29 @@ public:
 	struct KeyInfo {
 		enum Modifier { SHIFT, CTRL, GRAPH, CAPS, CODE, NUM_MODIFIERS };
 		// Modifier masks:
-		static constexpr byte SHIFT_MASK = 1 << SHIFT;
-		static constexpr byte CTRL_MASK  = 1 << CTRL;
-		static constexpr byte GRAPH_MASK = 1 << GRAPH;
-		static constexpr byte CAPS_MASK  = 1 << CAPS;
-		static constexpr byte CODE_MASK  = 1 << CODE;
+		static constexpr uint8_t SHIFT_MASK = 1 << SHIFT;
+		static constexpr uint8_t CTRL_MASK  = 1 << CTRL;
+		static constexpr uint8_t GRAPH_MASK = 1 << GRAPH;
+		static constexpr uint8_t CAPS_MASK  = 1 << CAPS;
+		static constexpr uint8_t CODE_MASK  = 1 << CODE;
 
-		KeyInfo(KeyMatrixPosition pos_, byte modmask_)
-			: pos(pos_), modmask(modmask_)
+		constexpr KeyInfo() = default;
+		constexpr KeyInfo(KeyMatrixPosition pos_, uint8_t modMask_)
+			: pos(pos_), modMask(modMask_)
 		{
 			assert(pos.isValid());
 		}
-		KeyInfo()
-			: pos(), modmask(0)
-		{
-		}
-		bool isValid() const {
+		[[nodiscard]] constexpr bool isValid() const {
 			return pos.isValid();
 		}
 		KeyMatrixPosition pos;
-		byte modmask;
+		uint8_t modMask = 0;
 	};
 
-	explicit UnicodeKeymap(string_view keyboardType);
+	explicit UnicodeKeymap(std::string_view keyboardType);
 
-	KeyInfo get(unsigned unicode) const;
-	KeyInfo getDeadkey(unsigned n) const;
+	[[nodiscard]] KeyInfo get(unsigned unicode) const;
+	[[nodiscard]] KeyInfo getDeadKey(unsigned n) const;
 
 	/** Returns a mask in which a bit is set iff the corresponding modifier
 	  * is relevant for the given key. A modifier is considered relevant if
@@ -135,21 +131,34 @@ public:
 	  * modifier to be active.
 	  * Must only be called on valid KeyInfos.
 	  */
-	byte getRelevantMods(const KeyInfo& keyInfo) const {
+	[[nodiscard]] uint8_t getRelevantMods(const KeyInfo& keyInfo) const {
 		return relevantMods[keyInfo.pos.getRowCol()];
 	}
 
+	[[nodiscard]] const MsxChar2Unicode& getMsxChars() const {
+		if (!msxChars) throw CommandException("Missing MSX-Video-characterset file"); // TODO make this required for MSX/SVI machines
+		return *msxChars;
+	}
+
 private:
-	static const unsigned NUM_DEAD_KEYS = 3;
+	static constexpr unsigned NUM_DEAD_KEYS = 3;
 
-	void parseUnicodeKeymapfile(string_view data);
+	void parseUnicodeKeyMapFile(std::string_view data);
 
-	std::vector<std::pair<unsigned, KeyInfo>> mapdata;
+private:
+	struct Entry {
+		unsigned unicode;
+		KeyInfo keyInfo;
+	};
+	std::vector<Entry> mapData; // sorted on unicode
+
 	/** Contains a mask for each key matrix position, which for each modifier
 	  * has the corresponding bit set if that modifier that affects the key.
 	  */
-	byte relevantMods[KeyMatrixPosition::NUM_ROWCOL];
-	KeyInfo deadKeys[NUM_DEAD_KEYS];
+	std::array<uint8_t, KeyMatrixPosition::NUM_ROWCOL> relevantMods;
+	std::array<KeyInfo, NUM_DEAD_KEYS> deadKeys;
+
+	std::optional<MsxChar2Unicode> msxChars; // TODO should this be required for MSX/SVI machines?
 };
 
 } // namespace openmsx

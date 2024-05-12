@@ -6,8 +6,9 @@
     <manufacturer>National</manufacturer>
     <code>FS-4000</code>
     <release_year>1985</release_year>
-    <description/>
+    <description>Japanese MSX1 with built in printer, targeted for word processing, supported by built in software.</description>
     <type>MSX</type>
+    <region>jp</region>
   </info>
 
   <CassettePort/>
@@ -41,12 +42,13 @@
     </VDP>
 
     <PSG id="PSG">
+      <type>YM2149</type>
       <keyboardlayout>50on</keyboardlayout>
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <PrinterPort id="Printer Port">

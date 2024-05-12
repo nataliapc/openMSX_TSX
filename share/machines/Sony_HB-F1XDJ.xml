@@ -6,8 +6,9 @@
     <manufacturer>Sony</manufacturer>
     <code>HB-F1XDJ</code>
     <release_year>1988</release_year>
-    <description/>
+    <description>Japanese MSX2+ with built in disk drive, MSX-MUSIC, Ren-sha turbo slider and speed controller (not emulated).</description>
     <type>MSX2+</type>
+    <region>jp</region>
   </info>
 
   <RenShaTurbo>
@@ -15,11 +16,13 @@
     <max_ints>221</max_ints>
   </RenShaTurbo>
 
-  <MapperReadBackBits>largest</MapperReadBackBits>
-
   <CassettePort/>
 
   <devices>
+
+    <S1985 id="S1985"> <!-- includes 5 bits mapper-read-back, confirmed by Meits -->
+      <sramname>hb-f1xdj_s1985.sram</sramname>
+    </S1985>
 
     <Kanji id="Kanji ROM">
       <rom>
@@ -36,7 +39,7 @@
       <sound>
         <volume>16000</volume>
       </sound>
-      <io base="0xA8" num="4"/>
+      <io base="0xA8" num="8"/> <!-- S-1985 mirrors -->
       <keyboard_type>jp_jis</keyboard_type>
       <has_keypad>true</has_keypad>
       <key_ghosting_sgc_protected>false</key_ghosting_sgc_protected>
@@ -51,28 +54,25 @@
       <io base="0x98" num="8" type="I"/> <!-- S-1985 mirrors -->
     </VDP>
 
-    <S1985 id="S1985">
-      <sramname>hb-f1xdj_s1985.sram</sramname>
-    </S1985>
-
     <PSG id="PSG">
       <type>YM2149</type> <!-- in S-1985 MSX-ENGINE -->
       <keyboardlayout>JIS</keyboardlayout>
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="8" type="IO"/> <!-- S-1985 mirrors -->
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <RTC id="Real time clock">
       <sramname>hb-f1xdj.cmos</sramname>
-      <io base="0xB4" num="2" type="O"/>
-      <io base="0xB5" num="1" type="I"/>
+      <io base="0xB4" num="4" type="IO"/> <!-- S-1985 mirrors -->
     </RTC>
 
     <PrinterPort id="Printer Port">
-      <io base="0x90" num="2"/>
+      <io base="0x90" num="8" type="IO"/> <!-- S-1985 mirrors -->
+      <bidirectional>true</bidirectional> <!-- S-1985 feature (but not used, nor implemented) -->
+      <unused_bits>0x00</unused_bits>
     </PrinterPort>
 
     <ResetStatusRegister id="Reset Status register">
@@ -188,6 +188,7 @@
           <sound>
             <volume>9000</volume>
           </sound>
+          <ym2413-core>NukeYKT</ym2413-core>
           <io base="0x7C" num="2" type="O"/>
           <mem base="0x4000" size="0x4000"/>
         </MSX-MUSIC>

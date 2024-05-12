@@ -1,26 +1,28 @@
 #include "UnicodeKeymap.hh"
-#include "MSXException.hh"
+
 #include "File.hh"
 #include "FileContext.hh"
 #include "FileException.hh"
+#include "MSXException.hh"
+
+#include "narrow.hh"
+#include "one_of.hh"
+#include "ranges.hh"
 #include "stl.hh"
-#include <algorithm>
-#include <cstring>
+
+#include <bit>
+#include <optional>
+
+using std::string_view;
 
 namespace openmsx {
 
-const unsigned UnicodeKeymap::NUM_DEAD_KEYS;
-
-
-/** Parses the given string reference as a hexadecimal integer.
-  * If successful, returns the parsed value and sets "ok" to true.
-  * If unsuccessful, returns 0 and sets "ok" to false.
+/** Parses the given string as a hexadecimal integer.
   */
-static unsigned parseHex(string_view str, bool& ok)
+[[nodiscard]] static constexpr std::optional<unsigned> parseHex(string_view str)
 {
 	if (str.empty()) {
-		ok = false;
-		return 0;
+		return {};
 	}
 	unsigned value = 0;
 	for (const char c : str) {
@@ -32,11 +34,9 @@ static unsigned parseHex(string_view str, bool& ok)
 		} else if ('a' <= c && c <= 'f') {
 			value += c - 'a' + 10;
 		} else {
-			ok = false;
-			return 0;
+			return {};
 		}
 	}
-	ok = true;
 	return value;
 }
 
@@ -44,55 +44,60 @@ static unsigned parseHex(string_view str, bool& ok)
   * Separators are: comma, whitespace and hash mark.
   * Newline (\n) is not considered a separator.
   */
-static inline bool isSep(char c)
+[[nodiscard]] static constexpr bool isSep(char c)
 {
-	return c == ','                           // comma
-	    || c == ' ' || c == '\t' || c == '\r' // whitespace
-	    || c == '#';                          // comment
+	return c == one_of(',',             // comma
+	                   ' ', '\t', '\r', // whitespace
+	                   '#');            // comment
 }
 
 /** Removes separator characters at the start of the given string reference.
   * Characters between a hash mark and the following newline are also skipped.
   */
-static void skipSep(string_view& str)
+static constexpr void skipSep(string_view& str)
 {
 	while (!str.empty()) {
 		const char c = str.front();
 		if (!isSep(c)) break;
 		if (c == '#') {
 			// Skip till end of line.
-			while (!str.empty() && str.front() != '\n') str.pop_front();
+			while (!str.empty() && str.front() != '\n') str.remove_prefix(1);
 			break;
 		}
-		str.pop_front();
+		str.remove_prefix(1);
 	}
 }
 
 /** Returns the next token in the given string.
   * The token and any separators preceding it are removed from the string.
   */
-static string_view nextToken(string_view& str)
+[[nodiscard]] static constexpr string_view nextToken(string_view& str)
 {
 	skipSep(str);
-	auto tokenBegin = str.begin();
+	const auto* tokenBegin = str.data();
 	while (!str.empty() && str.front() != '\n' && !isSep(str.front())) {
 		// Pop non-separator character.
-		str.pop_front();
+		str.remove_prefix(1);
 	}
-	return string_view(tokenBegin, str.begin());
+	return {tokenBegin, size_t(str.data() - tokenBegin)};
 }
 
 
 UnicodeKeymap::UnicodeKeymap(string_view keyboardType)
 {
 	auto filename = systemFileContext().resolve(
-		strCat("unicodemaps/unicodemap.", keyboardType));
+		tmpStrCat("unicodemaps/unicodemap.", keyboardType));
 	try {
 		File file(filename);
-		size_t size;
-		const byte* buf = file.mmap(size);
-		parseUnicodeKeymapfile(
-			string_view(reinterpret_cast<const char*>(buf), size));
+		auto buf = file.mmap();
+		parseUnicodeKeyMapFile(
+			string_view(std::bit_cast<const char*>(buf.data()), buf.size()));
+		// TODO in the future we'll require the presence of
+		//      "MSX-Video-Characterset" in the keyboard information
+		//      file, then we don't need this fallback.
+		if (!msxChars.has_value()) {
+			msxChars.emplace("MSXVID.TXT");
+		}
 	} catch (FileException&) {
 		throw MSXException("Couldn't load unicode keymap file: ", filename);
 	}
@@ -100,31 +105,38 @@ UnicodeKeymap::UnicodeKeymap(string_view keyboardType)
 
 UnicodeKeymap::KeyInfo UnicodeKeymap::get(unsigned unicode) const
 {
-	auto it = lower_bound(begin(mapdata), end(mapdata), unicode,
-	                      LessTupleElement<0>());
-	return ((it != end(mapdata)) && (it->first == unicode))
-		? it->second : KeyInfo();
+	auto m = binary_find(mapData, unicode, {}, &Entry::unicode);
+	return m ? m->keyInfo : KeyInfo();
 }
 
-UnicodeKeymap::KeyInfo UnicodeKeymap::getDeadkey(unsigned n) const
+UnicodeKeymap::KeyInfo UnicodeKeymap::getDeadKey(unsigned n) const
 {
 	assert(n < NUM_DEAD_KEYS);
 	return deadKeys[n];
 }
 
-void UnicodeKeymap::parseUnicodeKeymapfile(string_view data)
+void UnicodeKeymap::parseUnicodeKeyMapFile(string_view data)
 {
-	memset(relevantMods, 0, sizeof(relevantMods));
+	ranges::fill(relevantMods, 0);
 
 	while (!data.empty()) {
 		if (data.front() == '\n') {
 			// Next line.
-			data.pop_front();
+			data.remove_prefix(1);
 		}
 
 		string_view token = nextToken(data);
 		if (token.empty()) {
 			// Skip empty line.
+			continue;
+		}
+
+		if (token == "MSX-Video-Characterset:") {
+			auto vidFileName = nextToken(data);
+			if (vidFileName.empty()) {
+				throw MSXException("Missing filename for MSX-Video-Characterset");
+			}
+			msxChars.emplace(vidFileName);
 			continue;
 		}
 
@@ -140,56 +152,58 @@ void UnicodeKeymap::parseUnicodeKeymapfile(string_view data)
 				// but for backwards compatibility also still recognize
 				//    DEADKEY
 			} else {
-				bool ok;
-				deadKeyIndex = parseHex(token, ok);
-				deadKeyIndex--; // Make index 0 based instead of 1 based
-				if (!ok || deadKeyIndex >= NUM_DEAD_KEYS) {
+				auto d = parseHex(token);
+				if (!d || *d > NUM_DEAD_KEYS) {
 					throw MSXException(
 						"Wrong deadkey number in keymap file. "
 						"It must be 1..", NUM_DEAD_KEYS);
 				}
+				deadKeyIndex = *d - 1; // Make index 0 based instead of 1 based
 			}
 		} else {
-			bool ok;
-			unicode = parseHex(token, ok);
-			if (!ok || unicode > 0xFFFF) {
+			auto u = parseHex(token);
+			if (!u || *u > 0x1FBFF) {
 				throw MSXException("Wrong unicode value in keymap file");
 			}
+			unicode = *u;
 		}
 
 		// Parse second token. It must be <ROW><COL>
 		token = nextToken(data);
-		bool ok;
-		unsigned rowcol = parseHex(token, ok);
-		if (!ok || rowcol >= 0x100) {
+		if (token == "--") {
+			// Skip -- for now, it means the character cannot be typed.
+			continue;
+		}
+		auto rowcol = parseHex(token);
+		if (!rowcol || *rowcol >= 0x100) {
 			throw MSXException(
 				(token.empty() ? "Missing" : "Wrong"),
 				" <ROW><COL> value in keymap file");
 		}
-		if ((rowcol >> 4) >= KeyMatrixPosition::NUM_ROWS) {
+		if ((*rowcol >> 4) >= KeyMatrixPosition::NUM_ROWS) {
 			throw MSXException("Too high row value in keymap file");
 		}
-		if ((rowcol & 0x0F) >= KeyMatrixPosition::NUM_COLS) {
+		if ((*rowcol & 0x0F) >= KeyMatrixPosition::NUM_COLS) {
 			throw MSXException("Too high column value in keymap file");
 		}
-		auto pos = KeyMatrixPosition(rowcol);
+		auto pos = KeyMatrixPosition(narrow_cast<uint8_t>(*rowcol));
 
 		// Parse remaining tokens. It is an optional list of modifier keywords.
-		byte modmask = 0;
+		uint8_t modMask = 0;
 		while (true) {
 			token = nextToken(data);
 			if (token.empty()) {
 				break;
 			} else if (token == "SHIFT") {
-				modmask |= KeyInfo::SHIFT_MASK;
+				modMask |= KeyInfo::SHIFT_MASK;
 			} else if (token == "CTRL") {
-				modmask |= KeyInfo::CTRL_MASK;
+				modMask |= KeyInfo::CTRL_MASK;
 			} else if (token == "GRAPH") {
-				modmask |= KeyInfo::GRAPH_MASK;
+				modMask |= KeyInfo::GRAPH_MASK;
 			} else if (token == "CAPSLOCK") {
-				modmask |= KeyInfo::CAPS_MASK;
+				modMask |= KeyInfo::CAPS_MASK;
 			} else if (token == "CODE") {
-				modmask |= KeyInfo::CODE_MASK;
+				modMask |= KeyInfo::CODE_MASK;
 			} else {
 				throw MSXException(
 					"Invalid modifier \"", token, "\" in keymap file");
@@ -197,19 +211,19 @@ void UnicodeKeymap::parseUnicodeKeymapfile(string_view data)
 		}
 
 		if (isDeadKey) {
-			if (modmask != 0) {
+			if (modMask != 0) {
 				throw MSXException(
 					"DEADKEY entry in keymap file cannot have modifiers");
 			}
 			deadKeys[deadKeyIndex] = KeyInfo(pos, 0);
 		} else {
-			mapdata.emplace_back(unicode, KeyInfo(pos, modmask));
+			mapData.emplace_back(Entry{unicode, KeyInfo(pos, modMask)});
 			// Note: getRowCol() uses 3 bits for column, rowcol uses 4.
-			relevantMods[pos.getRowCol()] |= modmask;
+			relevantMods[pos.getRowCol()] |= modMask;
 		}
 	}
 
-	sort(begin(mapdata), end(mapdata), LessTupleElement<0>());
+	ranges::sort(mapData, {}, &Entry::unicode);
 }
 
 } // namespace openmsx

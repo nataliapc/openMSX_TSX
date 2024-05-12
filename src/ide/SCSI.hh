@@ -10,109 +10,107 @@
 #ifndef SCSI_HH
 #define SCSI_HH
 
-#include "openmsx.hh"
+#include <cstdint>
 
-namespace openmsx {
-namespace SCSI {
+namespace openmsx::SCSI {
 
 // Group 0: 6bytes cdb
-static const byte OP_TEST_UNIT_READY       = 0x00;
-static const byte OP_REZERO_UNIT           = 0x01;
-static const byte OP_REQUEST_SENSE         = 0x03;
-static const byte OP_FORMAT_UNIT           = 0x04;
-static const byte OP_REASSIGN_BLOCKS       = 0x07;
-static const byte OP_READ6                 = 0x08;
-static const byte OP_WRITE6                = 0x0A;
-static const byte OP_SEEK6                 = 0x0B;
-static const byte OP_INQUIRY               = 0x12;
-static const byte OP_RESERVE_UNIT          = 0x16;
-static const byte OP_RELEASE_UNIT          = 0x17;
-static const byte OP_MODE_SENSE            = 0x1A;
-static const byte OP_START_STOP_UNIT       = 0x1B;
-static const byte OP_SEND_DIAGNOSTIC       = 0x1D;
+inline constexpr uint8_t OP_TEST_UNIT_READY       = 0x00;
+inline constexpr uint8_t OP_REZERO_UNIT           = 0x01;
+inline constexpr uint8_t OP_REQUEST_SENSE         = 0x03;
+inline constexpr uint8_t OP_FORMAT_UNIT           = 0x04;
+inline constexpr uint8_t OP_REASSIGN_BLOCKS       = 0x07;
+inline constexpr uint8_t OP_READ6                 = 0x08;
+inline constexpr uint8_t OP_WRITE6                = 0x0A;
+inline constexpr uint8_t OP_SEEK6                 = 0x0B;
+inline constexpr uint8_t OP_INQUIRY               = 0x12;
+inline constexpr uint8_t OP_RESERVE_UNIT          = 0x16;
+inline constexpr uint8_t OP_RELEASE_UNIT          = 0x17;
+inline constexpr uint8_t OP_MODE_SENSE            = 0x1A;
+inline constexpr uint8_t OP_START_STOP_UNIT       = 0x1B;
+inline constexpr uint8_t OP_SEND_DIAGNOSTIC       = 0x1D;
 
 // Group 1: 10bytes cdb
-static const byte OP_GROUP1                = 0x20;
-static const byte OP_READ_CAPACITY         = 0x25;
-static const byte OP_READ10                = 0x28;
-static const byte OP_WRITE10               = 0x2A;
-static const byte OP_SEEK10                = 0x2B;
+inline constexpr uint8_t OP_GROUP1                = 0x20;
+inline constexpr uint8_t OP_READ_CAPACITY         = 0x25;
+inline constexpr uint8_t OP_READ10                = 0x28;
+inline constexpr uint8_t OP_WRITE10               = 0x2A;
+inline constexpr uint8_t OP_SEEK10                = 0x2B;
 
-static const byte OP_GROUP2                = 0x40;
-static const byte OP_CHANGE_DEFINITION     = 0x40;
-static const byte OP_READ_SUB_CHANNEL      = 0x42;
-static const byte OP_READ_TOC              = 0x43;
-static const byte OP_READ_HEADER           = 0x44;
-static const byte OP_PLAY_AUDIO            = 0x45;
-static const byte OP_PLAY_AUDIO_MSF        = 0x47;
-static const byte OP_PLAY_TRACK_INDEX      = 0x48;
-static const byte OP_PLAY_TRACK_RELATIVE   = 0x49;
-static const byte OP_PAUSE_RESUME          = 0x4B;
+inline constexpr uint8_t OP_GROUP2                = 0x40;
+inline constexpr uint8_t OP_CHANGE_DEFINITION     = 0x40;
+inline constexpr uint8_t OP_READ_SUB_CHANNEL      = 0x42;
+inline constexpr uint8_t OP_READ_TOC              = 0x43;
+inline constexpr uint8_t OP_READ_HEADER           = 0x44;
+inline constexpr uint8_t OP_PLAY_AUDIO            = 0x45;
+inline constexpr uint8_t OP_PLAY_AUDIO_MSF        = 0x47;
+inline constexpr uint8_t OP_PLAY_TRACK_INDEX      = 0x48;
+inline constexpr uint8_t OP_PLAY_TRACK_RELATIVE   = 0x49;
+inline constexpr uint8_t OP_PAUSE_RESUME          = 0x4B;
 
-static const byte OP_PLAY_AUDIO12          = 0xA5;
-static const byte OP_READ12                = 0xA8;
-static const byte OP_PLAY_TRACK_RELATIVE12 = 0xA9;
-static const byte OP_READ_CD_MSF           = 0xB9;
-static const byte OP_READ_CD               = 0xBE;
+inline constexpr uint8_t OP_PLAY_AUDIO12          = 0xA5;
+inline constexpr uint8_t OP_READ12                = 0xA8;
+inline constexpr uint8_t OP_PLAY_TRACK_RELATIVE12 = 0xA9;
+inline constexpr uint8_t OP_READ_CD_MSF           = 0xB9;
+inline constexpr uint8_t OP_READ_CD               = 0xBE;
 
 // Sense data                               KEY | ASC | ASCQ
-static const unsigned SENSE_NO_SENSE               = 0x000000;
-static const unsigned SENSE_NOT_READY              = 0x020400;
-static const unsigned SENSE_MEDIUM_NOT_PRESENT     = 0x023a00;
-static const unsigned SENSE_UNRECOVERED_READ_ERROR = 0x031100;
-static const unsigned SENSE_WRITE_FAULT            = 0x040300;
-static const unsigned SENSE_INVALID_COMMAND_CODE   = 0x052000;
-static const unsigned SENSE_ILLEGAL_BLOCK_ADDRESS  = 0x052100;
-static const unsigned SENSE_INVALID_LUN            = 0x052500;
-static const unsigned SENSE_POWER_ON               = 0x062900;
-static const unsigned SENSE_WRITE_PROTECT          = 0x072700;
-static const unsigned SENSE_MESSAGE_REJECT_ERROR   = 0x0b4300;
-static const unsigned SENSE_INITIATOR_DETECTED_ERR = 0x0b4800;
-static const unsigned SENSE_ILLEGAL_MESSAGE        = 0x0b4900;
+inline constexpr uint32_t SENSE_NO_SENSE               = 0x000000;
+inline constexpr uint32_t SENSE_NOT_READY              = 0x020400;
+inline constexpr uint32_t SENSE_MEDIUM_NOT_PRESENT     = 0x023a00;
+inline constexpr uint32_t SENSE_UNRECOVERED_READ_ERROR = 0x031100;
+inline constexpr uint32_t SENSE_WRITE_FAULT            = 0x040300;
+inline constexpr uint32_t SENSE_INVALID_COMMAND_CODE   = 0x052000;
+inline constexpr uint32_t SENSE_ILLEGAL_BLOCK_ADDRESS  = 0x052100;
+inline constexpr uint32_t SENSE_INVALID_LUN            = 0x052500;
+inline constexpr uint32_t SENSE_POWER_ON               = 0x062900;
+inline constexpr uint32_t SENSE_WRITE_PROTECT          = 0x072700;
+inline constexpr uint32_t SENSE_MESSAGE_REJECT_ERROR   = 0x0b4300;
+inline constexpr uint32_t SENSE_INITIATOR_DETECTED_ERR = 0x0b4800;
+inline constexpr uint32_t SENSE_ILLEGAL_MESSAGE        = 0x0b4900;
 
 // Message
-static const byte MSG_COMMAND_COMPLETE       = 0x00;
-static const byte MSG_INITIATOR_DETECT_ERROR = 0x05;
-static const byte MSG_ABORT                  = 0x06;
-static const byte MSG_REJECT                 = 0x07;
-static const byte MSG_NO_OPERATION           = 0x08;
-static const byte MSG_PARITY_ERROR           = 0x09;
-static const byte MSG_BUS_DEVICE_RESET       = 0x0c;
+inline constexpr uint8_t MSG_COMMAND_COMPLETE       = 0x00;
+inline constexpr uint8_t MSG_INITIATOR_DETECT_ERROR = 0x05;
+inline constexpr uint8_t MSG_ABORT                  = 0x06;
+inline constexpr uint8_t MSG_REJECT                 = 0x07;
+inline constexpr uint8_t MSG_NO_OPERATION           = 0x08;
+inline constexpr uint8_t MSG_PARITY_ERROR           = 0x09;
+inline constexpr uint8_t MSG_BUS_DEVICE_RESET       = 0x0c;
 
 // Status
-static const byte ST_GOOD            = 0;
-static const byte ST_CHECK_CONDITION = 2;
-static const byte ST_BUSY            = 8;
+inline constexpr uint8_t ST_GOOD            = 0;
+inline constexpr uint8_t ST_CHECK_CONDITION = 2;
+inline constexpr uint8_t ST_BUSY            = 8;
 
 // Device type
-static const byte DT_DirectAccess     = 0x00;
-static const byte DT_SequencialAccess = 0x01;
-static const byte DT_Printer          = 0x02;
-static const byte DT_Processor        = 0x03;
-static const byte DT_WriteOnce        = 0x04;
-static const byte DT_CDROM            = 0x05;
-static const byte DT_Scanner          = 0x06;
-static const byte DT_OpticalMemory    = 0x07;
-static const byte DT_MediaChanger     = 0x08;
-static const byte DT_Communications   = 0x09;
-static const byte DT_Undefined        = 0x1f;
+inline constexpr uint8_t DT_DirectAccess     = 0x00;
+inline constexpr uint8_t DT_SequencialAccess = 0x01;
+inline constexpr uint8_t DT_Printer          = 0x02;
+inline constexpr uint8_t DT_Processor        = 0x03;
+inline constexpr uint8_t DT_WriteOnce        = 0x04;
+inline constexpr uint8_t DT_CDROM            = 0x05;
+inline constexpr uint8_t DT_Scanner          = 0x06;
+inline constexpr uint8_t DT_OpticalMemory    = 0x07;
+inline constexpr uint8_t DT_MediaChanger     = 0x08;
+inline constexpr uint8_t DT_Communications   = 0x09;
+inline constexpr uint8_t DT_Undefined        = 0x1f;
 
 enum Phase {
-    UNDEFINED, // used in MB89532
-    BUS_FREE,
-    ARBITRATION,
-    SELECTION,
-    RESELECTION,
-    COMMAND,
-    EXECUTE,
-    DATA_IN,
-    DATA_OUT,
-    STATUS,
-    MSG_OUT,
-    MSG_IN,
+	UNDEFINED, // used in MB89532
+	BUS_FREE,
+	ARBITRATION,
+	SELECTION,
+	RESELECTION,
+	COMMAND,
+	EXECUTE,
+	DATA_IN,
+	DATA_OUT,
+	STATUS,
+	MSG_OUT,
+	MSG_IN,
 };
 
-} // namespace SCSI
-} // namespace openmsx
+} // namespace openmsx::SCSI
 
 #endif

@@ -6,25 +6,24 @@
 namespace openmsx {
 
 /** Produces a video frame that has every line from the input frame twice
-  * plus a number of black lines at the top.
+  * plus a possibly repeated line at the top.
   * This class does not copy the data from the input FrameSource.
   */
 class DoubledFrame final : public FrameSource
 {
 public:
-	explicit DoubledFrame(const SDL_PixelFormat& format);
-	void init(FrameSource* field, unsigned skip);
+	void init(FrameSource* field, int skip);
 
 private:
-	unsigned getLineWidth(unsigned line) const override;
-	const void* getLineInfo(
-		unsigned line, unsigned& width,
-		void* buf, unsigned bufWidth) const override;
+	[[nodiscard]] unsigned getLineWidth(unsigned line) const override;
+	[[nodiscard]] std::span<const Pixel> getUnscaledLine(
+		unsigned line, std::span<Pixel> helpBuf) const override;
 
+private:
 	/** The original frame whose data will be doubled.
 	  */
 	FrameSource* field;
-	unsigned skip;
+	int skip;
 };
 
 } // namespace openmsx

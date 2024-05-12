@@ -4,10 +4,13 @@
 #include "File.hh"
 #include "MemBuffer.hh"
 #include "sha1.hh"
+#include "static_string_view.hh"
 #include "openmsx.hh"
-#include <string>
-#include <memory>
 #include <cassert>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
 
 namespace openmsx {
 
@@ -16,44 +19,53 @@ class XMLElement;
 class DeviceConfig;
 class FileContext;
 class RomDebuggable;
+class TclObject;
 
 class Rom final
 {
 public:
-	Rom(std::string name, std::string description,
+	Rom(std::string name, static_string_view description,
 	    const DeviceConfig& config, const std::string& id = {});
 	Rom(Rom&& other) noexcept;
 	~Rom();
 
-	const byte& operator[](unsigned address) const {
-		assert(address < size);
+	[[nodiscard]] const byte& operator[](size_t address) const {
+		assert(address < rom.size());
 		return rom[address];
 	}
-	unsigned getSize() const { return size; }
+	[[nodiscard]] auto size()  const { return rom.size(); }
+	[[nodiscard]] auto begin() const { return rom.begin(); }
+	[[nodiscard]] auto end()   const { return rom.end(); }
 
-	std::string getFilename() const;
-	const std::string& getName() const { return name; }
-	const std::string& getDescription() const { return description; }
-	const Sha1Sum& getOriginalSHA1() const;
+	[[nodiscard]] std::string_view getFilename() const;
+	[[nodiscard]] const std::string& getName() const { return name; }
+	[[nodiscard]] std::string_view getDescription() const { return description; }
+	[[nodiscard]] const Sha1Sum& getOriginalSHA1() const;
+	[[nodiscard]] const Sha1Sum& getSHA1() const;
 
-	void addPadding(unsigned newSize, byte filler = 0xff);
+	void addPadding(size_t newSize, byte filler = 0xff);
+
+	/**
+	 * Add dict values with info to result
+	 */
+	void getInfo(TclObject& result) const;
 
 private:
 	void init(MSXMotherBoard& motherBoard, const XMLElement& config,
 	          const FileContext& context);
-	bool checkSHA1(const XMLElement& config);
+	[[nodiscard]] bool checkSHA1(const XMLElement& config) const;
 
 private:
 	// !! update the move constructor when changing these members !!
-	const byte* rom;
+	std::span<const byte> rom;
 	MemBuffer<byte> extendedRom;
 
 	File file; // can be a closed file
 
 	mutable Sha1Sum originalSha1;
+	mutable Sha1Sum actualSha1;
 	std::string name;
-	const std::string description;
-	unsigned size;
+	/*const*/ static_string_view description; // not const to allow move
 
 	// This must come after 'name':
 	//   the destructor of RomDebuggable calls Rom::getName(), which still

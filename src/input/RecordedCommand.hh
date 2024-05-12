@@ -6,6 +6,7 @@
 #include "StateChange.hh"
 #include "TclObject.hh"
 #include "EmuTime.hh"
+#include "dynarray.hh"
 
 namespace openmsx {
 
@@ -20,15 +21,14 @@ class Scheduler;
 class MSXCommandEvent final : public StateChange
 {
 public:
-	MSXCommandEvent() {} // for serialize
-	MSXCommandEvent(array_ref<std::string> tokens, EmuTime::param time);
-	MSXCommandEvent(array_ref<TclObject>   tokens, EmuTime::param time);
-	const std::vector<TclObject>& getTokens() const { return tokens; }
+	MSXCommandEvent() = default; // for serialize
+	MSXCommandEvent(EmuTime::param time, std::span<const TclObject> tokens);
+	[[nodiscard]] const auto& getTokens() const { return tokens; }
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 private:
-	std::vector<TclObject> tokens;
+	dynarray<TclObject> tokens;
 };
 
 
@@ -49,7 +49,7 @@ public:
 	  * has an extra time parameter.
 	  */
 	virtual void execute(
-		array_ref<TclObject> tokens, TclObject& result,
+		std::span<const TclObject> tokens, TclObject& result,
 		EmuTime::param time) = 0;
 
 	/** It's possible that in some cases the command doesn't need to be
@@ -57,23 +57,24 @@ public:
 	  * override this method. Return false iff the command doesn't need
 	  * to be recorded.
 	  */
-	virtual bool needRecord(array_ref<TclObject> tokens) const;
+	[[nodiscard]] virtual bool needRecord(std::span<const TclObject> tokens) const;
 
 protected:
 	RecordedCommand(CommandController& commandController,
 	                StateChangeDistributor& stateChangeDistributor,
 	                Scheduler& scheduler,
-	                string_view name);
+	                std::string_view name);
 	~RecordedCommand();
 
 private:
 	// Command
-	void execute(array_ref<TclObject> tokens, TclObject& result) override;
+	void execute(std::span<const TclObject> tokens, TclObject& result) override;
 
 	// StateChangeListener
-	void signalStateChange(const std::shared_ptr<StateChange>& event) override;
-	void stopReplay(EmuTime::param time) override;
+	void signalStateChange(const StateChange& event) override;
+	void stopReplay(EmuTime::param time) noexcept override;
 
+private:
 	StateChangeDistributor& stateChangeDistributor;
 	Scheduler& scheduler;
 	TclObject dummyResultObject;

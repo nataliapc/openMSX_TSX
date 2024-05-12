@@ -5,9 +5,10 @@
   <info>
     <manufacturer>Pioneer</manufacturer>
     <code>PX-7</code>
-    <release_year>1984?</release_year>
-    <description/>
+    <release_year>1984</release_year>
+    <description>Japanese MSX1 with LaserDisc controller support, 32kB RAM, stereo PSG, superimpose (not emulated outside LaserDisc support).</description>
     <type>MSX</type>
+    <region>jp</region>
   </info>
 
   <!--
@@ -27,7 +28,7 @@
         <volume>16000</volume>
       </sound>
       <io base="0xA8" num="4"/>
-      <keyboard_type>jp_ansi</keyboard_type>
+      <keyboard_type>jp_jis</keyboard_type>
       <has_keypad>false</has_keypad>
       <key_ghosting_sgc_protected>true</key_ghosting_sgc_protected>
       <code_kana_locks>true</code_kana_locks>
@@ -51,8 +52,8 @@
         <balance channel="2">-100</balance>
         <balance channel="3">100</balance>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <PrinterPort id="Printer Port">

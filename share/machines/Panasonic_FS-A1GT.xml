@@ -6,8 +6,9 @@
     <manufacturer>Panasonic</manufacturer>
     <code>FS-A1GT</code>
     <release_year>1992</release_year>
-    <description>The last officially released MSX machine.</description>
+    <description>The last officially released MSX machine. With built in disk drive, MIDI interface, sampler, Ren-sha turbo, MSX-MUSIC, MSX-DOS2 and software (MSX View amongst others).</description>
     <type>MSXturboR</type>
+    <region>jp</region>
   </info>
 
   <RenShaTurbo>
@@ -51,6 +52,7 @@
           <sound>
             <volume>9000</volume>
           </sound>
+          <ym2413-core>NukeYKT</ym2413-core>
         </MSX-MUSIC>
       </secondary>
 
@@ -74,6 +76,7 @@
 
       <secondary slot="0">
         <PanasonicRAM id="Main RAM">
+          <initialContent encoding="hex">FF00FF0000FF00FF</initialContent> <!-- At least for QBee's GT... -->
           <mem base="0x0000" size="0x10000"/>
           <size>512</size>
         </PanasonicRAM>
@@ -163,13 +166,14 @@
       <vram>128</vram>
     </VDP>
 
-    <PSG id="psg">
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+    <PSG id="PSG">
+      <io base="0xA0" num="4" type="IO"/>
       <sound>
         <volume>21000</volume>
       </sound>
       <keyboardlayout>JIS</keyboardlayout>
+      <mirrored_registers>false</mirrored_registers>
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <RTC id="Real time clock">

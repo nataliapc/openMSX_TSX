@@ -15,12 +15,14 @@
 #include "XMLException.hh"
 #include "StringOp.hh"
 #include "xrange.hh"
-#include "GLUtil.hh"
 #include "Reactor.hh"
 #include "RomInfo.hh"
 #include "hash_map.hh"
+#include "one_of.hh"
 #include "outer.hh"
+#include "ranges.hh"
 #include "stl.hh"
+#include "view.hh"
 #include "xxhash.hh"
 #include "build-info.hh"
 #include <cassert>
@@ -28,16 +30,12 @@
 #include <memory>
 
 using std::cout;
-using std::endl;
 using std::string;
-using std::vector;
+using std::string_view;
 
 namespace openmsx {
 
 // class CommandLineParser
-
-using CmpOptions = LessTupleElement<0>;
-using CmpFileTypes = CmpTupleElement<0, StringOp::caseless>;
 
 CommandLineParser::CommandLineParser(Reactor& reactor_)
 	: reactor(reactor_)
@@ -52,11 +50,7 @@ CommandLineParser::CommandLineParser(Reactor& reactor_)
 	, diskImageCLI(*this)
 	, hdImageCLI(*this)
 	, cdImageCLI(*this)
-	, parseStatus(UNPARSED)
 {
-	haveConfig = false;
-	haveSettings = false;
-
 	registerOption("-h",          helpOption,    PHASE_BEFORE_INIT, 1);
 	registerOption("--help",      helpOption,    PHASE_BEFORE_INIT, 1);
 	registerOption("-v",          versionOption, PHASE_BEFORE_INIT, 1);
@@ -66,43 +60,39 @@ CommandLineParser::CommandLineParser(Reactor& reactor_)
 	registerOption("-setting",    settingOption, PHASE_BEFORE_SETTINGS);
 	registerOption("-control",    controlOption, PHASE_BEFORE_SETTINGS, 1);
 	registerOption("-script",     scriptOption,  PHASE_BEFORE_SETTINGS, 1); // correct phase?
-	#if COMPONENT_GL
-	registerOption("-nopbo",      noPBOOption,   PHASE_BEFORE_SETTINGS, 1);
-	#endif
+	registerOption("-command",    commandOption, PHASE_BEFORE_SETTINGS, 1); // same phase as -script
 	registerOption("-testconfig", testConfigOption, PHASE_BEFORE_SETTINGS, 1);
 
 	registerOption("-machine",    machineOption, PHASE_LOAD_MACHINE);
 
-	registerFileType("tcl", scriptOption);
+	registerFileType(std::array<std::string_view, 1>{"tcl"}, scriptOption);
 
 	// At this point all options and file-types must be registered
-	sort(begin(options),   end(options),   CmpOptions());
-	sort(begin(fileTypes), end(fileTypes), CmpFileTypes());
+	ranges::sort(options, {}, &OptionData::name);
+	ranges::sort(fileTypes, StringOp::caseless{}, &FileTypeData::extension);
 }
 
 void CommandLineParser::registerOption(
 	const char* str, CLIOption& cliOption, ParsePhase phase, unsigned length)
 {
-	options.emplace_back(str, OptionData{&cliOption, phase, length});
+	options.emplace_back(str, &cliOption, phase, length);
 }
 
 void CommandLineParser::registerFileType(
-	string_view extensions, CLIFileType& cliFileType)
+	std::span<const string_view> extensions, CLIFileType& cliFileType)
 {
-	for (auto& ext: StringOp::split(extensions, ',')) {
-		fileTypes.emplace_back(ext, &cliFileType);
-	}
+	append(fileTypes, view::transform(extensions,
+		[&](auto& ext) { return FileTypeData{ext, &cliFileType}; }));
 }
 
 bool CommandLineParser::parseOption(
-	const string& arg, array_ref<string>& cmdLine, ParsePhase phase)
+	const string& arg, std::span<string>& cmdLine, ParsePhase phase)
 {
-	auto it = lower_bound(begin(options), end(options), arg, CmpOptions());
-	if ((it != end(options)) && (it->first == arg)) {
+	if (auto o = binary_find(options, arg, {}, &OptionData::name)) {
 		// parse option
-		if (it->second.phase <= phase) {
+		if (o->phase <= phase) {
 			try {
-				it->second.option->parseOption(arg, cmdLine);
+				o->option->parseOption(arg, cmdLine);
 				return true;
 			} catch (MSXException& e) {
 				throw FatalError(std::move(e).getMessage());
@@ -112,59 +102,60 @@ bool CommandLineParser::parseOption(
 	return false; // unknown
 }
 
-bool CommandLineParser::parseFileName(const string& arg, array_ref<string>& cmdLine)
+bool CommandLineParser::parseFileName(const string& arg, std::span<string>& cmdLine)
 {
-	// First try the fileName as we get it from the commandline. This may
+	if (auto* handler = getFileTypeHandlerForFileName(arg)) {
+		try {
+			// parse filetype
+			handler->parseFileType(arg, cmdLine);
+			return true; // file processed
+		} catch (MSXException& e) {
+			throw FatalError(std::move(e).getMessage());
+		}
+	}
+	return false;
+}
+
+CLIFileType* CommandLineParser::getFileTypeHandlerForFileName(string_view filename) const
+{
+	auto inner = [&](string_view arg) -> CLIFileType* {
+		string_view extension = FileOperations::getExtension(arg); // includes leading '.' (if any)
+		if (extension.size() <= 1) {
+			return nullptr; // no extension -> no handler
+		}
+		extension.remove_prefix(1);
+
+		auto f = binary_find(fileTypes, extension, StringOp::caseless{},
+		                     &FileTypeData::extension);
+		return f ? f->fileType : nullptr;
+	};
+
+	// First try the fileName as we get it from the command line. This may
 	// be more interesting than the original fileName of a (g)zipped file:
 	// in case of an OMR file for instance, we want to select on the
-	// original extension, and not on the extension inside the gzipped
+	// original extension, and not on the extension inside the (g)zipped
 	// file.
-	bool processed = parseFileNameInner(arg, arg, cmdLine);
-	if (!processed) {
+	auto* result = inner(filename);
+	if (!result) {
 		try {
-			File file(userFileContext().resolve(arg));
-			string originalName = file.getOriginalName();
-			processed = parseFileNameInner(originalName, arg, cmdLine);
+			File file(userFileContext().resolve(filename));
+			result = inner(file.getOriginalName());
 		} catch (FileException&) {
 			// ignore
 		}
 	}
-	return processed;
+	return result;
 }
 
-bool CommandLineParser::parseFileNameInner(const string& arg, const string& originalPath, array_ref<string>& cmdLine)
-{
-	string_view extension = FileOperations::getExtension(arg).substr(1);
-	if (extension.empty()) {
-		return false; // no extension
-	}
-
-	auto it = lower_bound(begin(fileTypes), end(fileTypes), extension,
-	                      CmpFileTypes());
-	StringOp::casecmp cmp;
-	if ((it == end(fileTypes)) || !cmp(it->first, extension)) {
-		return false; // unknown extension
-	}
-
-	try {
-		// parse filetype
-		it->second->parseFileType(originalPath, cmdLine);
-		return true; // file processed
-	} catch (MSXException& e) {
-		throw FatalError(std::move(e).getMessage());
-	}
-}
-
-void CommandLineParser::parse(int argc, char** argv)
+void CommandLineParser::parse(std::span<char*> argv)
 {
 	parseStatus = RUN;
 
-	vector<string> cmdLineBuf;
-	for (auto i : xrange(1, argc)) {
-		cmdLineBuf.push_back(FileOperations::getConventionalPath(argv[i]));
-	}
-	array_ref<string> cmdLine(cmdLineBuf);
-	vector<string> backupCmdLine;
+	auto cmdLineBuf = to_vector(view::transform(view::drop(argv, 1), [](const char* a) {
+		return FileOperations::getConventionalPath(a);
+	}));
+	std::span<string> cmdLine(cmdLineBuf);
+	std::vector<string> backupCmdLine;
 
 	for (ParsePhase phase = PHASE_BEFORE_INIT;
 	     (phase <= PHASE_LAST) && (parseStatus != EXIT);
@@ -172,6 +163,8 @@ void CommandLineParser::parse(int argc, char** argv)
 		switch (phase) {
 		case PHASE_INIT:
 			reactor.init();
+			fileTypeCategoryInfo.emplace(
+				reactor.getOpenMSXInfoCommand(), *this);
 			getInterpreter().init(argv[0]);
 			break;
 		case PHASE_LOAD_SETTINGS:
@@ -187,7 +180,7 @@ void CommandLineParser::parse(int argc, char** argv)
 					reactor.getGlobalCommandController().getSettingsConfig();
 				// Load default settings file in case the user
 				// didn't specify one.
-				auto context = systemFileContext();
+				const auto& context = systemFileContext();
 				string filename = "settings.xml";
 				try {
 					settingsConfig.loadSetting(context, filename);
@@ -215,18 +208,18 @@ void CommandLineParser::parse(int argc, char** argv)
 				const auto& machine =
 					reactor.getMachineSetting().getString();
 				try {
-					reactor.switchMachine(machine.str());
+					reactor.switchMachine(string(machine));
 				} catch (MSXException& e) {
 					reactor.getCliComm().printInfo(
 						"Failed to initialize default machine: ",
 						e.getMessage());
 					// Default machine is broken; fall back to C-BIOS config.
 					const auto& fallbackMachine =
-						reactor.getMachineSetting().getRestoreValue().getString();
+						reactor.getMachineSetting().getDefaultValue().getString();
 					reactor.getCliComm().printInfo(
 						"Using fallback machine: ", fallbackMachine);
 					try {
-						reactor.switchMachine(fallbackMachine.str());
+						reactor.switchMachine(string(fallbackMachine));
 					} catch (MSXException& e2) {
 						// Fallback machine failed as well; we're out of options.
 						throw FatalError(std::move(e2).getMessage());
@@ -240,7 +233,7 @@ void CommandLineParser::parse(int argc, char** argv)
 			// iterate over all arguments
 			while (!cmdLine.empty()) {
 				string arg = std::move(cmdLine.front());
-				cmdLine.pop_front();
+				cmdLine = cmdLine.subspan(1);
 				// first try options
 				if (!parseOption(arg, cmdLine, phase)) {
 					// next try the registered filetypes (xml)
@@ -248,13 +241,11 @@ void CommandLineParser::parse(int argc, char** argv)
 					    !parseFileName(arg, cmdLine)) {
 						// no option or known file
 						backupCmdLine.push_back(arg);
-						auto it = lower_bound(begin(options), end(options), arg, CmpOptions());
-						if ((it != end(options)) && (it->first == arg)) {
-							for (unsigned i = 0; i < it->second.length - 1; ++i) {
-								if (!cmdLine.empty()) {
-									backupCmdLine.push_back(std::move(cmdLine.front()));
-									cmdLine.pop_front();
-								}
+						if (auto o = binary_find(options, arg, {}, &OptionData::name)) {
+							for (unsigned i = 0; i < o->length - 1; ++i) {
+								if (cmdLine.empty()) break;
+								backupCmdLine.push_back(std::move(cmdLine.front()));
+								cmdLine = cmdLine.subspan(1);
 							}
 						}
 					}
@@ -266,8 +257,8 @@ void CommandLineParser::parse(int argc, char** argv)
 			break;
 		}
 	}
-	for (auto& p : options) {
-		p.second.option->parseDone();
+	for (const auto& option : options) {
+		option.option->parseDone();
 	}
 	if (!cmdLine.empty() && (parseStatus != EXIT)) {
 		throw FatalError(
@@ -278,18 +269,13 @@ void CommandLineParser::parse(int argc, char** argv)
 
 bool CommandLineParser::isHiddenStartup() const
 {
-	return (parseStatus == CONTROL) || (parseStatus == TEST);
+	return parseStatus == one_of(CONTROL, TEST);
 }
 
 CommandLineParser::ParseStatus CommandLineParser::getParseStatus() const
 {
 	assert(parseStatus != UNPARSED);
 	return parseStatus;
-}
-
-const CommandLineParser::Scripts& CommandLineParser::getStartupScripts() const
-{
-	return scriptOption.scripts;
 }
 
 MSXMotherBoard* CommandLineParser::getMotherBoard() const
@@ -311,11 +297,10 @@ Interpreter& CommandLineParser::getInterpreter() const
 // Control option
 
 void CommandLineParser::ControlOption::parseOption(
-	const string& option, array_ref<string>& cmdLine)
+	const string& option, std::span<string>& cmdLine)
 {
 	const auto& fullType = getArgument(option, cmdLine);
-	string_view type, arguments;
-	StringOp::splitOnFirst(fullType, ':', type, arguments);
+	auto [type, arguments] = StringOp::splitOnFirst(fullType, ':');
 
 	auto& parser = OUTER(CommandLineParser, controlOption);
 	auto& controller  = parser.getGlobalCommandController();
@@ -347,7 +332,7 @@ string_view CommandLineParser::ControlOption::optionHelp() const
 // Script option
 
 void CommandLineParser::ScriptOption::parseOption(
-	const string& option, array_ref<string>& cmdLine)
+	const string& option, std::span<string>& cmdLine)
 {
 	parseFileType(getArgument(option, cmdLine), cmdLine);
 }
@@ -358,7 +343,7 @@ string_view CommandLineParser::ScriptOption::optionHelp() const
 }
 
 void CommandLineParser::ScriptOption::parseFileType(
-	const string& filename, array_ref<std::string>& /*cmdLine*/)
+	const string& filename, std::span<std::string>& /*cmdLine*/)
 {
 	scripts.push_back(filename);
 }
@@ -368,14 +353,32 @@ string_view CommandLineParser::ScriptOption::fileTypeHelp() const
 	return "Extra Tcl script to run at startup";
 }
 
+string_view CommandLineParser::ScriptOption::fileTypeCategoryName() const
+{
+	return "script";
+}
+
+
+// Command option
+void CommandLineParser::CommandOption::parseOption(
+	const std::string& option, std::span<std::string>& cmdLine)
+{
+	commands.push_back(getArgument(option, cmdLine));
+}
+
+std::string_view CommandLineParser::CommandOption::optionHelp() const
+{
+	return "Run Tcl command at startup (see also -script)";
+}
+
 
 // Help option
 
-static string formatSet(const vector<string_view>& inputSet, string::size_type columns)
+static string formatSet(std::span<const string_view> inputSet, string::size_type columns)
 {
 	string outString;
 	string::size_type totalLength = 0; // ignore the starting spaces for now
-	for (auto& temp : inputSet) {
+	for (const auto& temp : inputSet) {
 		if (totalLength == 0) {
 			// first element ?
 			strAppend(outString, "    ", temp);
@@ -397,7 +400,7 @@ static string formatSet(const vector<string_view>& inputSet, string::size_type c
 	return outString;
 }
 
-static string formatHelptext(string_view helpText,
+static string formatHelpText(string_view helpText,
 	                     unsigned maxLength, unsigned indent)
 {
 	string outText;
@@ -411,7 +414,7 @@ static string formatHelptext(string_view helpText,
 			}
 		}
 		strAppend(outText, helpText.substr(index, index + pos), '\n',
-		          string(indent, ' '));
+		          spaces(indent));
 		index = pos + 1;
 	}
 	strAppend(outText, helpText.substr(index));
@@ -419,17 +422,16 @@ static string formatHelptext(string_view helpText,
 }
 
 // items grouped per common help-text
-using GroupedItems = hash_map<string_view, vector<string_view>, XXHasher>;
+using GroupedItems = hash_map<string_view, std::vector<string_view>, XXHasher>;
 static void printItemMap(const GroupedItems& itemMap)
 {
-	vector<string> printSet;
-	for (auto& p : itemMap) {
-		printSet.push_back(strCat(formatSet(p.second, 15), ' ',
-		                          formatHelptext(p.first, 50, 20)));
-	}
-	sort(begin(printSet), end(printSet));
+	auto printSet = to_vector(view::transform(itemMap, [](auto& p) {
+		return strCat(formatSet(p.second, 15), ' ',
+		              formatHelpText(p.first, 50, 20));
+	}));
+	ranges::sort(printSet);
 	for (auto& s : printSet) {
-		cout << s << endl;
+		cout << s << '\n';
 	}
 }
 
@@ -437,33 +439,33 @@ static void printItemMap(const GroupedItems& itemMap)
 // class HelpOption
 
 void CommandLineParser::HelpOption::parseOption(
-	const string& /*option*/, array_ref<string>& /*cmdLine*/)
+	const string& /*option*/, std::span<string>& /*cmdLine*/)
 {
 	auto& parser = OUTER(CommandLineParser, helpOption);
 	const auto& fullVersion = Version::full();
-	cout << fullVersion << endl;
-	cout << string(fullVersion.size(), '=') << endl;
-	cout << endl;
-	cout << "usage: openmsx [arguments]" << endl;
-	cout << "  an argument is either an option or a filename" << endl;
-	cout << endl;
-	cout << "  this is the list of supported options:" << endl;
+	cout << fullVersion << '\n'
+	     << string(fullVersion.size(), '=') << "\n"
+	        "\n"
+	        "usage: openmsx [arguments]\n"
+	        "  an argument is either an option or a filename\n"
+	        "\n"
+	        "  this is the list of supported options:\n";
 
 	GroupedItems itemMap;
-	for (auto& p : parser.options) {
-		const auto& helpText = p.second.option->optionHelp();
+	for (const auto& option : parser.options) {
+		const auto& helpText = option.option->optionHelp();
 		if (!helpText.empty()) {
-			itemMap[helpText].push_back(p.first);
+			itemMap[helpText].push_back(option.name);
 		}
 	}
 	printItemMap(itemMap);
 
-	cout << endl;
-	cout << "  this is the list of supported file types:" << endl;
+	cout << "\n"
+	        "  this is the list of supported file types:\n";
 
 	itemMap.clear();
-	for (auto& p : parser.fileTypes) {
-		itemMap[p.second->fileTypeHelp()].push_back(p.first);
+	for (const auto& [extension, fileType] : parser.fileTypes) {
+		itemMap[fileType->fileTypeHelp()].push_back(extension);
 	}
 	printItemMap(itemMap);
 
@@ -479,11 +481,11 @@ string_view CommandLineParser::HelpOption::optionHelp() const
 // class VersionOption
 
 void CommandLineParser::VersionOption::parseOption(
-	const string& /*option*/, array_ref<string>& /*cmdLine*/)
+	const string& /*option*/, std::span<string>& /*cmdLine*/)
 {
-	cout << Version::full() << endl;
-	cout << "flavour: " << BUILD_FLAVOUR << endl;
-	cout << "components: " << BUILD_COMPONENTS << endl;
+	cout << Version::full() << "\n"
+	        "flavour: " << BUILD_FLAVOUR << "\n"
+	        "components: " << BUILD_COMPONENTS << '\n';
 	auto& parser = OUTER(CommandLineParser, versionOption);
 	parser.parseStatus = CommandLineParser::EXIT;
 }
@@ -497,7 +499,7 @@ string_view CommandLineParser::VersionOption::optionHelp() const
 // Machine option
 
 void CommandLineParser::MachineOption::parseOption(
-	const string& option, array_ref<string>& cmdLine)
+	const string& option, std::span<string>& cmdLine)
 {
 	auto& parser = OUTER(CommandLineParser, machineOption);
 	if (parser.haveConfig) {
@@ -520,7 +522,7 @@ string_view CommandLineParser::MachineOption::optionHelp() const
 // class SettingOption
 
 void CommandLineParser::SettingOption::parseOption(
-	const string& option, array_ref<string>& cmdLine)
+	const string& option, std::span<string>& cmdLine)
 {
 	auto& parser = OUTER(CommandLineParser, settingOption);
 	if (parser.haveSettings) {
@@ -544,27 +546,10 @@ string_view CommandLineParser::SettingOption::optionHelp() const
 }
 
 
-// class NoPBOOption
-
-void CommandLineParser::NoPBOOption::parseOption(
-	const string& /*option*/, array_ref<string>& /*cmdLine*/)
-{
-	#if COMPONENT_GL
-	cout << "Disabling PBO" << endl;
-	gl::PixelBuffers::enabled = false;
-	#endif
-}
-
-string_view CommandLineParser::NoPBOOption::optionHelp() const
-{
-	return "Disables usage of openGL PBO (for debugging)";
-}
-
-
 // class TestConfigOption
 
 void CommandLineParser::TestConfigOption::parseOption(
-	const string& /*option*/, array_ref<string>& /*cmdLine*/)
+	const string& /*option*/, std::span<string>& /*cmdLine*/)
 {
 	auto& parser = OUTER(CommandLineParser, testConfigOption);
 	parser.parseStatus = CommandLineParser::TEST;
@@ -578,27 +563,27 @@ string_view CommandLineParser::TestConfigOption::optionHelp() const
 // class BashOption
 
 void CommandLineParser::BashOption::parseOption(
-	const string& /*option*/, array_ref<string>& cmdLine)
+	const string& /*option*/, std::span<string>& cmdLine)
 {
 	auto& parser = OUTER(CommandLineParser, bashOption);
 	string_view last = cmdLine.empty() ? string_view{} : cmdLine.front();
-	cmdLine.clear(); // eat all remaining parameters
+	cmdLine = cmdLine.subspan(0, 0); // eat all remaining parameters
 
 	if (last == "-machine") {
 		for (auto& s : Reactor::getHwConfigs("machines")) {
 			cout << s << '\n';
 		}
-	} else if (StringOp::startsWith(last, "-ext")) {
+	} else if (last.starts_with("-ext")) {
 		for (auto& s : Reactor::getHwConfigs("extensions")) {
 			cout << s << '\n';
 		}
 	} else if (last == "-romtype") {
-		for (auto& s : RomInfo::getAllRomTypes()) {
+		for (const auto& s : RomInfo::getAllRomTypes()) {
 			cout << s << '\n';
 		}
 	} else {
-		for (auto& p : parser.options) {
-			cout << p.first << '\n';
+		for (const auto& option : parser.options) {
+			cout << option.name << '\n';
 		}
 	}
 	parser.parseStatus = CommandLineParser::EXIT;
@@ -607,6 +592,35 @@ void CommandLineParser::BashOption::parseOption(
 string_view CommandLineParser::BashOption::optionHelp() const
 {
 	return {}; // don't include this option in --help
+}
+
+// class FileTypeCategoryInfoTopic
+
+CommandLineParser::FileTypeCategoryInfoTopic::FileTypeCategoryInfoTopic(
+		InfoCommand& openMSXInfoCommand, const CommandLineParser& parser_)
+	: InfoTopic(openMSXInfoCommand, "file_type_category")
+	, parser(parser_)
+{
+}
+
+void CommandLineParser::FileTypeCategoryInfoTopic::execute(
+	std::span<const TclObject> tokens, TclObject& result) const
+{
+	checkNumArgs(tokens, 3, "filename");
+	assert(tokens.size() == 3);
+
+	// get the category and add it to result
+	std::string_view fileName = tokens[2].getString();
+	if (const auto* handler = parser.getFileTypeHandlerForFileName(fileName)) {
+		result.addListElement(handler->fileTypeCategoryName());
+	} else {
+		result.addListElement("unknown");
+	}
+}
+
+string CommandLineParser::FileTypeCategoryInfoTopic::help(std::span<const TclObject> /*tokens*/) const
+{
+	return "Returns the file type category for the given file.";
 }
 
 } // namespace openmsx

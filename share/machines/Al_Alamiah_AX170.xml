@@ -3,11 +3,12 @@
 <msxconfig>
 
   <info>
-    <manufacturer>Al-Alamiah</manufacturer>
+    <manufacturer>Al Alamiah</manufacturer>
     <code>AX170</code>
     <release_year>1986</release_year>
-    <description>Arabic MSX1 machine.</description>
+    <description>Very common Arabic MSX1 machine.</description>
     <type>MSX</type>
+    <region>me</region>
   </info>
 
   <!-- Thanks to Werner Kai for his information
@@ -24,12 +25,16 @@
 
   <devices>
 
+    <T7937 id="T7937">
+      <subtype>A</subtype>
+    </T7937>
+
     <PPI id="ppi">
       <sound>
         <volume>16000</volume>
       </sound>
       <io base="0xA8" num="4"/>
-      <keyboard_type>int</keyboard_type> <!-- Is actually Arabic... -->
+      <keyboard_type>ar_eu</keyboard_type>
       <has_keypad>false</has_keypad>
       <key_ghosting_sgc_protected>true</key_ghosting_sgc_protected>
       <code_kana_locks>false</code_kana_locks>
@@ -46,8 +51,8 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <PrinterPort id="Printer Port">

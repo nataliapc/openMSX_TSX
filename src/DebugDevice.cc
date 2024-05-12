@@ -1,11 +1,10 @@
 #include "DebugDevice.hh"
 #include "Clock.hh"
 #include "FileOperations.hh"
+#include "narrow.hh"
 #include "serialize.hh"
 #include <iostream>
 #include <iomanip>
-
-using std::string;
 
 namespace openmsx {
 
@@ -28,8 +27,8 @@ void DebugDevice::reset(EmuTime::param /*time*/)
 
 void DebugDevice::writeIO(word port, byte value, EmuTime::param time)
 {
-	const auto& newName = fileNameSetting.getString();
-	if (newName != fileNameString) {
+	if (const auto& newName = fileNameSetting.getString();
+	    newName != fileNameString) {
 		openOutput(newName);
 	}
 
@@ -51,7 +50,7 @@ void DebugDevice::writeIO(word port, byte value, EmuTime::param time)
 			break;
 		}
 		if (!(value & 0x40)){
-			(*outputstrm) << std::endl;
+			(*outputStrm) << '\n' << std::flush;
 		}
 		break;
 	case 1:
@@ -63,7 +62,7 @@ void DebugDevice::writeIO(word port, byte value, EmuTime::param time)
 			break;
 		case MULTIBYTE:
 			outputMultiByte(value);
-                        break;
+			break;
 		default:
 			break;
 		}
@@ -83,37 +82,30 @@ void DebugDevice::outputSingleByte(byte value, EmuTime::param time)
 		displayByte(value, DEC);
 	}
 	if (modeParameter & 0x08) {
-		(*outputstrm) << '\'';
+		(*outputStrm) << '\'';
 		byte tmp = ((value >= ' ') && (value != 127)) ? value : '.';
 		displayByte(tmp, ASC);
-		(*outputstrm) << "' ";
+		(*outputStrm) << "' ";
 	}
-	Clock<3579545> zero(EmuTime::zero);
-	(*outputstrm) << "emutime: " << std::dec << zero.getTicksTill(time);
+	Clock<3579545> zero(EmuTime::zero());
+	(*outputStrm) << "emutime: " << std::dec << zero.getTicksTill(time);
 	if ((modeParameter & 0x08) && ((value < ' ') || (value == 127))) {
 		displayByte(value, ASC); // do special effects
 	}
-	(*outputstrm) << std::endl;
+	(*outputStrm) << '\n' << std::flush;
 }
 
 void DebugDevice::outputMultiByte(byte value)
 {
-	DisplayType dispType;
-	switch (modeParameter) {
-	case 0:
-		dispType = HEX;
-		break;
-	case 1:
-		dispType = BIN;
-		break;
-	case 2:
-		dispType = DEC;
-		break;
-	case 3:
-	default:
-		dispType = ASC;
-		break;
-	}
+	DisplayType dispType = [&] {
+		switch (modeParameter) {
+			case 0:  return HEX;
+			case 1:  return BIN;
+			case 2:  return DEC;
+			case 3:
+			default: return ASC;
+		}
+	}();
 	displayByte(value, dispType);
 }
 
@@ -121,45 +113,45 @@ void DebugDevice::displayByte(byte value, DisplayType type)
 {
 	switch (type) {
 	case HEX:
-		(*outputstrm) << std::hex << std::setw(2)
+		(*outputStrm) << std::hex << std::setw(2)
 		              << std::setfill('0')
 		              << int(value) << "h " << std::flush;
 		break;
 	case BIN: {
 		for (byte mask = 0x80; mask; mask >>= 1) {
-			(*outputstrm) << ((value & mask) ? '1' : '0');
+			(*outputStrm) << ((value & mask) ? '1' : '0');
 		}
-		(*outputstrm) << "b " << std::flush;
+		(*outputStrm) << "b " << std::flush;
 		break;
 	}
 	case DEC:
-		(*outputstrm) << std::dec << std::setw(3)
+		(*outputStrm) << std::dec << std::setw(3)
 		              << std::setfill('0')
 		              << int(value) << ' ' << std::flush;
 		break;
 	case ASC:
-		(*outputstrm).put(value);
-		(*outputstrm) << std::flush;
+		(*outputStrm).put(narrow_cast<char>(value));
+		(*outputStrm) << std::flush;
 		break;
 	}
 }
 
-void DebugDevice::openOutput(string_view name)
+void DebugDevice::openOutput(std::string_view name)
 {
-	fileNameString = name.str();
+	fileNameString = name;
 	debugOut.close();
 	if (name == "stdout") {
-		outputstrm = &std::cout;
+		outputStrm = &std::cout;
 	} else if (name == "stderr") {
-		outputstrm = &std::cerr;
+		outputStrm = &std::cerr;
 	} else {
-		string realName = FileOperations::expandTilde(name);
-		FileOperations::openofstream(debugOut, realName, std::ios::app);
-		outputstrm = &debugOut;
+		auto realName = FileOperations::expandTilde(fileNameString);
+		FileOperations::openOfStream(debugOut, realName, std::ios::app);
+		outputStrm = &debugOut;
 	}
 }
 
-static std::initializer_list<enum_string<DebugDevice::DebugMode>> debugModeInfo = {
+static constexpr std::initializer_list<enum_string<DebugDevice::DebugMode>> debugModeInfo = {
 	{ "OFF",        DebugDevice::OFF },
 	{ "SINGLEBYTE", DebugDevice::SINGLEBYTE },
 	{ "MULTIBYTE",  DebugDevice::MULTIBYTE },
@@ -171,8 +163,8 @@ template<typename Archive>
 void DebugDevice::serialize(Archive& ar, unsigned /*version*/)
 {
 	ar.template serializeBase<MSXDevice>(*this);
-	ar.serialize("mode", mode);
-	ar.serialize("modeParameter", modeParameter);
+	ar.serialize("mode",          mode,
+	             "modeParameter", modeParameter);
 }
 INSTANTIATE_SERIALIZE_METHODS(DebugDevice);
 REGISTER_MSXDEVICE(DebugDevice, "DebugDevice");

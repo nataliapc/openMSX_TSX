@@ -5,21 +5,18 @@
 #include "CommandController.hh"
 #include "CliComm.hh"
 #include "MSXException.hh"
+#include "one_of.hh"
 #include "stl.hh"
 #include "unreachable.hh"
-#include "components.hh"
-#include "build-info.hh"
 #include <cassert>
 #include <memory>
 
 namespace openmsx {
 
 #if defined(_WIN32)
-static const int defaultsamples = 2048;
-#elif PLATFORM_ANDROID
-static const int defaultsamples = 2560;
+static constexpr int defaultSamples = 2048;
 #else
-static const int defaultsamples = 1024;
+static constexpr int defaultSamples = 1024;
 #endif
 
 static EnumSetting<Mixer::SoundDriverType>::Map getSoundDriverMap()
@@ -48,8 +45,7 @@ Mixer::Mixer(Reactor& reactor_, CommandController& commandController_)
 		"mixer frequency", 44100, 11025, 48000)
 	, samplesSetting(
 		commandController, "samples",
-		"mixer samples", defaultsamples, 64, 8192)
-	, muteCount(0)
+		"mixer samples", defaultSamples, 64, 8192)
 {
 	muteSetting       .attach(*this);
 	frequencySetting  .attach(*this);
@@ -147,15 +143,15 @@ void Mixer::muteHelper()
 	}
 }
 
-void Mixer::uploadBuffer(MSXMixer& /*msxMixer*/, int16_t* buffer, unsigned len)
+void Mixer::uploadBuffer(MSXMixer& /*msxMixer*/, std::span<const StereoFloat> buffer)
 {
 	// can only handle one MSXMixer ATM
 	assert(!msxMixers.empty());
 
-	driver->uploadBuffer(buffer, len);
+	driver->uploadBuffer(buffer);
 }
 
-void Mixer::update(const Setting& setting)
+void Mixer::update(const Setting& setting) noexcept
 {
 	if (&setting == &muteSetting) {
 		if (muteSetting.getBoolean()) {
@@ -163,9 +159,7 @@ void Mixer::update(const Setting& setting)
 		} else {
 			unmute();
 		}
-	} else if ((&setting == &samplesSetting) ||
-	           (&setting == &soundDriverSetting) ||
-	           (&setting == &frequencySetting)) {
+	} else if (&setting == one_of(&samplesSetting, &soundDriverSetting, &frequencySetting)) {
 		reloadDriver();
 	} else {
 		UNREACHABLE;

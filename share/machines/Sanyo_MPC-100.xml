@@ -5,9 +5,10 @@
   <info>
     <manufacturer>Sanyo</manufacturer>
     <code>MPC-100</code>
-    <release_year>1984?</release_year>
-    <description/>
+    <release_year>1985</release_year>
+    <description>Basic 64kB MSX1, popular in the UK. Brittish version of the MPC-6.</description>
     <type>MSX</type>
+    <region>uk</region>
   </info>
 
   <CassettePort/>
@@ -35,8 +36,8 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>false</ignorePortDirections> <!-- not sure, but guess based on discrete PSG chip -->
     </PSG>
 
     <PrinterPort id="Printer Port">

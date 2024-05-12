@@ -1,10 +1,11 @@
 #ifndef PADDLE_HH
 #define PADDLE_HH
 
+#include "EmuTime.hh"
 #include "JoystickDevice.hh"
 #include "MSXEventListener.hh"
 #include "StateChangeListener.hh"
-#include "Clock.hh"
+#include <cstdint>
 
 namespace openmsx {
 
@@ -17,35 +18,36 @@ class Paddle final : public JoystickDevice, private MSXEventListener
 public:
 	Paddle(MSXEventDistributor& eventDistributor,
 	       StateChangeDistributor& stateChangeDistributor);
-	~Paddle();
+	~Paddle() override;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 private:
 	// Pluggable
-	const std::string& getName() const override;
-	string_view getDescription() const override;
+	[[nodiscard]] std::string_view getName() const override;
+	[[nodiscard]] std::string_view getDescription() const override;
 	void plugHelper(Connector& connector, EmuTime::param time) override;
 	void unplugHelper(EmuTime::param time) override;
 
 	// JoystickDevice
-	byte read(EmuTime::param time) override;
-	void write(byte value, EmuTime::param time) override;
+	[[nodiscard]] uint8_t read(EmuTime::param time) override;
+	void write(uint8_t value, EmuTime::param time) override;
 
 	// MSXEventListener
-	void signalEvent(const std::shared_ptr<const Event>& event,
-	                 EmuTime::param time) override;
+	void signalMSXEvent(const Event& event,
+	                    EmuTime::param time) noexcept override;
 	// StateChangeListener
-	void signalStateChange(const std::shared_ptr<StateChange>& event) override;
-	void stopReplay(EmuTime::param time) override;
+	void signalStateChange(const StateChange& event) override;
+	void stopReplay(EmuTime::param time) noexcept override;
 
+private:
 	MSXEventDistributor& eventDistributor;
 	StateChangeDistributor& stateChangeDistributor;
 
-	EmuTime lastPulse;
-	byte analogValue;
-	byte lastInput;
+	EmuTime lastPulse = EmuTime::zero();
+	uint8_t analogValue = 128;
+	uint8_t lastInput = 0;
 };
 
 } // namespace openmsx

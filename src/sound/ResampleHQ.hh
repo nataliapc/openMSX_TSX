@@ -2,41 +2,47 @@
 #define RESAMPLEHQ_HH
 
 #include "ResampleAlgo.hh"
-#include "DynamicClock.hh"
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace openmsx {
 
+class DynamicClock;
 class ResampledSoundDevice;
 
-template <unsigned CHANNELS>
+template<unsigned CHANNELS>
 class ResampleHQ final : public ResampleAlgo
 {
 public:
-	ResampleHQ(ResampledSoundDevice& input,
-	           const DynamicClock& hostClock, unsigned emuSampleRate);
-	~ResampleHQ();
+	static constexpr size_t TAB_LEN = 4096;
+	static constexpr size_t HALF_TAB_LEN = TAB_LEN / 2;
 
-	bool generateOutput(int* dataOut, unsigned num,
-	                    EmuTime::param time) override;
+public:
+	ResampleHQ(ResampledSoundDevice& input, const DynamicClock& hostClock);
+	ResampleHQ(const ResampleHQ&) = delete;
+	ResampleHQ(ResampleHQ&&) = delete;
+	ResampleHQ& operator=(const ResampleHQ&) = delete;
+	ResampleHQ& operator=(ResampleHQ&&) = delete;
+	~ResampleHQ() override;
+
+	bool generateOutputImpl(float* dataOut, size_t num,
+	                        EmuTime::param time) override;
 
 private:
-	void calcOutput(float pos, int* output);
+	void calcOutput(float pos, float* output);
 	void prepareData(unsigned emuNum);
 
-	ResampledSoundDevice& input;
+private:
 	const DynamicClock& hostClock;
-	DynamicClock emuClock;
-
 	const float ratio;
 	unsigned bufStart;
 	unsigned bufEnd;
-	unsigned nonzeroSamples;
+	unsigned nonzeroSamples = 0;
 	unsigned filterLen;
 	std::vector<float> buffer;
 	float* table;
-	int16_t* permute;
+	std::span<const int16_t, HALF_TAB_LEN> permute;
 };
 
 } // namespace openmsx

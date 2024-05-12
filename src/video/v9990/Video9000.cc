@@ -5,11 +5,10 @@
 #include "Display.hh"
 #include "PostProcessor.hh"
 #include "EventDistributor.hh"
-#include "FinishFrameEvent.hh"
+#include "Event.hh"
 #include "MSXMotherBoard.hh"
 #include "VideoSourceSetting.hh"
 #include "CommandException.hh"
-#include "checked_cast.hh"
 #include "serialize.hh"
 
 namespace openmsx {
@@ -19,14 +18,10 @@ Video9000::Video9000(const DeviceConfig& config)
 	, VideoLayer(getMotherBoard(), getName())
 	, videoSourceSetting(getMotherBoard().getVideoSource())
 {
+	// we can't set activeLayer yet
 	EventDistributor& distributor = getReactor().getEventDistributor();
-	distributor.registerEventListener(OPENMSX_FINISH_FRAME_EVENT, *this);
+	distributor.registerEventListener(EventType::FINISH_FRAME, *this);
 	getReactor().getDisplay().attach(*this);
-
-	activeLayer = nullptr; // we can't set activeLayer yet
-	v99x8Layer = nullptr;
-	v9990Layer = nullptr;
-	value = 0x10;
 }
 
 void Video9000::init()
@@ -50,7 +45,7 @@ void Video9000::init()
 Video9000::~Video9000()
 {
 	EventDistributor& distributor = getReactor().getEventDistributor();
-	distributor.unregisterEventListener(OPENMSX_FINISH_FRAME_EVENT, *this);
+	distributor.unregisterEventListener(EventType::FINISH_FRAME, *this);
 	getReactor().getDisplay().detach(*this);
 }
 
@@ -63,10 +58,10 @@ void Video9000::writeIO(word /*port*/, byte newValue, EmuTime::param /*time*/)
 {
 	if (newValue == value) return;
 	value = newValue;
-	recalc();
+	recalculate();
 }
 
-void Video9000::recalc()
+void Video9000::recalculate()
 {
 	int video9000id = getVideoSource();
 	v99x8Layer = vdp  ->getPostProcessor();
@@ -89,10 +84,10 @@ void Video9000::recalc()
 		showV9990 ? VideoLayer::ACTIVE_FRONT : VideoLayer::INACTIVE);
 	activeLayer = showV9990 ? v9990Layer : v99x8Layer;
 	// activeLayer==nullptr is possible for renderer=none
-	recalcVideoSource();
+	recalculateVideoSource();
 }
 
-void Video9000::recalcVideoSource()
+void Video9000::recalculateVideoSource()
 {
 	// Disable superimpose when gfx9000 layer is selected. That way you
 	// can look at the gfx9000-only output even when the video9000 software
@@ -102,12 +97,12 @@ void Video9000::recalcVideoSource()
 		superimpose && (videoSourceSetting.getSource() == getVideoSource()));
 }
 
-void Video9000::preVideoSystemChange()
+void Video9000::preVideoSystemChange() noexcept
 {
 	activeLayer = nullptr; // will be recalculated on next paint()
 }
 
-void Video9000::postVideoSystemChange()
+void Video9000::postVideoSystemChange() noexcept
 {
 	// We can't yet re-initialize 'activeLayer' here because the
 	// new v99x8/v9990 layer may not be created yet.
@@ -116,7 +111,7 @@ void Video9000::postVideoSystemChange()
 void Video9000::paint(OutputSurface& output)
 {
 	if (!activeLayer) {
-		recalc();
+		recalculate();
 	}
 	// activeLayer==nullptr is possible for renderer=none, but in that case
 	// the paint() method will never be called.
@@ -132,12 +127,12 @@ void Video9000::takeRawScreenShot(unsigned height, const std::string& filename)
 	layer->takeRawScreenShot(height, filename);
 }
 
-int Video9000::signalEvent(const std::shared_ptr<const Event>& event)
+int Video9000::signalEvent(const Event& event)
 {
 	int video9000id = getVideoSource();
 
-	assert(event->getType() == OPENMSX_FINISH_FRAME_EVENT);
-	auto& ffe = checked_cast<const FinishFrameEvent&>(*event);
+	assert(getType(event) == EventType::FINISH_FRAME);
+	const auto& ffe = get_event<FinishFrameEvent>(event);
 	if (ffe.isSkipped()) return 0;
 	if (videoSourceSetting.getSource() != video9000id) return 0;
 
@@ -152,17 +147,16 @@ int Video9000::signalEvent(const std::shared_ptr<const Event>& event)
 	if (( showV9990 && v9990Layer && (ffe.getSource() == v9990Layer->getVideoSource())) ||
 	    (!showV9990 && v99x8Layer && (ffe.getSource() == v99x8Layer->getVideoSource()))) {
 		getReactor().getEventDistributor().distributeEvent(
-			std::make_shared<FinishFrameEvent>(
-				video9000id, video9000id, false));
+			FinishFrameEvent(video9000id, video9000id, false));
 	}
 	return 0;
 }
 
-void Video9000::update(const Setting& setting)
+void Video9000::update(const Setting& setting) noexcept
 {
 	VideoLayer::update(setting);
 	if (&setting == &videoSourceSetting) {
-		recalcVideoSource();
+		recalculateVideoSource();
 	}
 }
 
@@ -171,8 +165,8 @@ void Video9000::serialize(Archive& ar, unsigned /*version*/)
 {
 	ar.template serializeBase<MSXDevice>(*this);
 	ar.serialize("value", value);
-	if (ar.isLoader()) {
-		recalc();
+	if constexpr (Archive::IS_LOADER) {
+		recalculate();
 	}
 }
 INSTANTIATE_SERIALIZE_METHODS(Video9000);

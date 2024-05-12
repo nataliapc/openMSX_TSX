@@ -1,8 +1,8 @@
 #include "VideoSourceSetting.hh"
 #include "CommandException.hh"
 #include "Completer.hh"
-#include "KeyRange.hh"
 #include "StringOp.hh"
+#include "ranges.hh"
 #include "stl.hh"
 
 namespace openmsx {
@@ -14,15 +14,15 @@ VideoSourceSetting::VideoSourceSetting(CommandController& commandController_)
 {
 	sources = { { "none", 0 } };
 
-	setChecker([this](TclObject& newValue) {
+	setChecker([this](const TclObject& newValue) {
 		checkSetValue(newValue.getString()); // may throw
 	});
 	init();
 }
 
-void VideoSourceSetting::checkSetValue(string_view newValue) const
+void VideoSourceSetting::checkSetValue(std::string_view newValue) const
 {
-	// Special case: in case there are no videosources registered (yet),
+	// Special case: in case there are no video sources registered (yet),
 	// the only allowed value is "none". In case there is at least one
 	// registered source, this special value "none" should be hidden.
 	if (((newValue == "none") && (sources.size() >  1)) ||
@@ -31,11 +31,11 @@ void VideoSourceSetting::checkSetValue(string_view newValue) const
 	}
 }
 
-int VideoSourceSetting::getSource()
+int VideoSourceSetting::getSource() noexcept
 {
 	// Always try to find a better value than "none".
-	string_view str = getValue().getString();
-	if (str != "none") {
+	if (std::string_view str = getValue().getString();
+	    str != "none") {
 		// If current value is allowed, then keep it.
 		if (int id = has(str)) {
 			return id;
@@ -51,7 +51,7 @@ int VideoSourceSetting::getSource()
 		// This handles the "none" case, but also stuff like
 		// multiple V99x8/V9990 chips. Prefer the source with
 		// highest id (=newest).
-		for (auto& s : values(sources)) id = std::max(id, s);
+		id = max_value(sources, &Source::id);
 	}
 	setSource(id); // store new value
 	return id;
@@ -59,26 +59,25 @@ int VideoSourceSetting::getSource()
 
 void VideoSourceSetting::setSource(int id)
 {
-	auto it = find_if_unguarded(sources,
-		[&](const Sources::value_type& p) { return p.second == id; });
-	setValue(TclObject(it->first));
+	auto it = find_unguarded(sources, id, &Source::id);
+	setValue(TclObject(it->name));
 }
 
-string_view VideoSourceSetting::getTypeString() const
+std::string_view VideoSourceSetting::getTypeString() const
 {
 	return "enumeration";
 }
 
-std::vector<string_view> VideoSourceSetting::getPossibleValues() const
+std::vector<std::string_view> VideoSourceSetting::getPossibleValues() const
 {
-	std::vector<string_view> result;
+	std::vector<std::string_view> result;
 	if (sources.size() == 1) {
-		assert(sources.front().first == "none");
+		assert(sources.front().name == "none");
 		result.emplace_back("none");
 	} else {
-		for (auto& p : sources) {
-			if (p.second != 0) {
-				result.emplace_back(p.first);
+		for (const auto& [name, val] : sources) {
+			if (val != 0) {
+				result.emplace_back(name);
 			}
 		}
 	}
@@ -115,35 +114,34 @@ int VideoSourceSetting::registerVideoSource(const std::string& source)
 
 void VideoSourceSetting::unregisterVideoSource(int source)
 {
-	move_pop_back(sources, rfind_if_unguarded(sources,
-		[&](Sources::value_type& p) { return p.second == source; }));
+	move_pop_back(sources, rfind_unguarded(sources, source, &Source::id));
 
 	// First notify the (possibly) changed value before announcing the
-	// shrinked set of values.
+	// shrunken set of values.
 	setSource(getSource()); // via source to (possibly) adjust value
 	notifyPropertyChange();
 }
 
 bool VideoSourceSetting::has(int val) const
 {
-	return contains(values(sources), val);
+	return contains(sources, val, &Source::id);
 }
 
-int VideoSourceSetting::has(string_view val) const
+int VideoSourceSetting::has(std::string_view val) const
 {
-	auto it = find_if(begin(sources), end(sources),
-		[&](const Sources::value_type& p) {
-			StringOp::casecmp cmp;
-			return cmp(p.first, val); });
-	return (it != end(sources)) ? it->second : 0;
+	auto it = ranges::find_if(sources, [&](auto& p) {
+		StringOp::casecmp cmp;
+		return cmp(p.name, val);
+	});
+	return (it != end(sources)) ? it->id : 0;
 }
 
 
 VideoSourceActivator::VideoSourceActivator(
 	VideoSourceSetting& setting_, const std::string& name)
 	: setting(setting_)
+	, id(setting.registerVideoSource(name))
 {
-	id = setting.registerVideoSource(name);
 }
 
 VideoSourceActivator::~VideoSourceActivator()

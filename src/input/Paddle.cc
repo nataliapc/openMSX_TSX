@@ -1,9 +1,8 @@
 #include "Paddle.hh"
 #include "MSXEventDistributor.hh"
 #include "StateChangeDistributor.hh"
-#include "InputEvents.hh"
+#include "Event.hh"
 #include "StateChange.hh"
-#include "checked_cast.hh"
 #include "serialize.hh"
 #include "serialize_meta.hh"
 #include <algorithm>
@@ -16,7 +15,7 @@ public:
 	PaddleState() = default; // for serialize
 	PaddleState(EmuTime::param time_, int delta_)
 		: StateChange(time_), delta(delta_) {}
-	int getDelta() const { return delta; }
+	[[nodiscard]] int getDelta() const { return delta; }
 
 	template<typename Archive> void serialize(Archive& ar, unsigned /*version*/)
 	{
@@ -33,9 +32,6 @@ Paddle::Paddle(MSXEventDistributor& eventDistributor_,
                StateChangeDistributor& stateChangeDistributor_)
 	: eventDistributor(eventDistributor_)
 	, stateChangeDistributor(stateChangeDistributor_)
-	, lastPulse(EmuTime::zero)
-	, analogValue(128)
-	, lastInput(0)
 {
 }
 
@@ -48,13 +44,12 @@ Paddle::~Paddle()
 
 
 // Pluggable
-const std::string& Paddle::getName() const
+std::string_view Paddle::getName() const
 {
-	static const std::string name("paddle");
-	return name;
+	return "paddle";
 }
 
-string_view Paddle::getDescription() const
+std::string_view Paddle::getDescription() const
 {
 	return "MSX Paddle";
 }
@@ -72,11 +67,11 @@ void Paddle::unplugHelper(EmuTime::param /*time*/)
 }
 
 // JoystickDevice
-byte Paddle::read(EmuTime::param time)
+uint8_t Paddle::read(EmuTime::param time)
 {
 	// The loop in the BIOS routine that reads the paddle status takes
 	// 41 Z80 cycles per iteration.
-	static const EmuDuration TICK = EmuDuration::hz(3579545) * 41;
+	static constexpr auto TICK = EmuDuration::hz(3579545) * 41;
 
 	assert(time >= lastPulse);
 	bool before = (time - lastPulse) < (TICK * analogValue);
@@ -84,9 +79,9 @@ byte Paddle::read(EmuTime::param time)
 	return output ? 0x3F : 0x3E; // pin1 (up)
 }
 
-void Paddle::write(byte value, EmuTime::param time)
+void Paddle::write(uint8_t value, EmuTime::param time)
 {
-	byte diff = lastInput ^ value;
+	uint8_t diff = lastInput ^ value;
 	lastInput = value;
 	if ((diff & 4) && !(lastInput & 4)) { // high->low edge
 		lastPulse = time;
@@ -94,42 +89,44 @@ void Paddle::write(byte value, EmuTime::param time)
 }
 
 // MSXEventListener
-void Paddle::signalEvent(const std::shared_ptr<const Event>& event,
-                         EmuTime::param time)
+void Paddle::signalMSXEvent(const Event& event,
+                            EmuTime::param time) noexcept
 {
-	if (event->getType() != OPENMSX_MOUSE_MOTION_EVENT) return;
-
-	auto& mev = checked_cast<const MouseMotionEvent&>(*event);
-	static const int SCALE = 2;
-	int delta = mev.getX() / SCALE;
-	if (delta == 0) return;
-
-	stateChangeDistributor.distributeNew(
-		std::make_shared<PaddleState>(time, delta));
+	visit(overloaded{
+		[&](const MouseMotionEvent& e) {
+			constexpr int SCALE = 2;
+			if (int delta = e.getX() / SCALE) {
+				stateChangeDistributor.distributeNew<PaddleState>(
+					time, delta);
+			}
+		},
+		[](const EventBase&) { /*ignore*/ }
+	}, event);
 }
 
 // StateChangeListener
-void Paddle::signalStateChange(const std::shared_ptr<StateChange>& event)
+void Paddle::signalStateChange(const StateChange& event)
 {
-	auto ps = dynamic_cast<PaddleState*>(event.get());
+	const auto* ps = dynamic_cast<const PaddleState*>(&event);
 	if (!ps) return;
-	int newAnalog = analogValue + ps->getDelta();
-	analogValue = std::min(std::max(newAnalog, 0), 255);
+	analogValue = narrow_cast<uint8_t>(std::clamp(analogValue + ps->getDelta(), 0, 255));
 }
 
-void Paddle::stopReplay(EmuTime::param /*time*/)
+void Paddle::stopReplay(EmuTime::param /*time*/) noexcept
 {
 }
 
 template<typename Archive>
 void Paddle::serialize(Archive& ar, unsigned /*version*/)
 {
-	ar.serialize("lastPulse", lastPulse);
-	ar.serialize("analogValue", analogValue);
-	ar.serialize("lastInput", lastInput);
+	ar.serialize("lastPulse",   lastPulse,
+	             "analogValue", analogValue,
+	             "lastInput",   lastInput);
 
-	if (ar.isLoader() && isPluggedIn()) {
-		plugHelper(*getConnector(), EmuTime::dummy());
+	if constexpr (Archive::IS_LOADER) {
+		if (isPluggedIn()) {
+			plugHelper(*getConnector(), EmuTime::dummy());
+		}
 	}
 }
 INSTANTIATE_SERIALIZE_METHODS(Paddle);

@@ -2,9 +2,13 @@
 #define USERSETTINGS_HH
 
 #include "Command.hh"
-#include "string_view.hh"
-#include <vector>
+
+#include "outer.hh"
+#include "view.hh"
+
 #include <memory>
+#include <string_view>
+#include <vector>
 
 namespace openmsx {
 
@@ -13,35 +17,43 @@ class Setting;
 class UserSettings
 {
 public:
-	using Settings = std::vector<std::unique_ptr<Setting>>;
+	struct Info {
+		std::unique_ptr<Setting> setting;
+		StringStorage description; // because setting doesn't take ownership
+	};
+	using Settings = std::vector<Info>;
 
 	explicit UserSettings(CommandController& commandController);
 
-	void addSetting(std::unique_ptr<Setting> setting);
+	void addSetting(Info&& info);
 	void deleteSetting(Setting& setting);
-	Setting* findSetting(string_view name) const;
-	const Settings& getSettings() const { return settings; }
+	[[nodiscard]] Setting* findSetting(std::string_view name) const;
 
 private:
 	class Cmd final : public Command {
 	public:
 		explicit Cmd(CommandController& commandController);
-		void execute(array_ref<TclObject> tokens,
+		void execute(std::span<const TclObject> tokens,
 			     TclObject& result) override;
-		std::string help(const std::vector<std::string>& tokens) const override;
+		[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override;
 		void tabCompletion(std::vector<std::string>& tokens) const override;
 
 	private:
-		void create (array_ref<TclObject> tokens, TclObject& result);
-		void destroy(array_ref<TclObject> tokens, TclObject& result);
-		void info   (array_ref<TclObject> tokens, TclObject& result);
+		void create (std::span<const TclObject> tokens, TclObject& result);
+		void destroy(std::span<const TclObject> tokens, TclObject& result);
+		void info   (std::span<const TclObject> tokens, TclObject& result) const;
 
-		std::unique_ptr<Setting> createString (array_ref<TclObject> tokens);
-		std::unique_ptr<Setting> createBoolean(array_ref<TclObject> tokens);
-		std::unique_ptr<Setting> createInteger(array_ref<TclObject> tokens);
-		std::unique_ptr<Setting> createFloat  (array_ref<TclObject> tokens);
+		[[nodiscard]] Info createString (std::span<const TclObject> tokens) const;
+		[[nodiscard]] Info createBoolean(std::span<const TclObject> tokens) const;
+		[[nodiscard]] Info createInteger(std::span<const TclObject> tokens) const;
+		[[nodiscard]] Info createFloat  (std::span<const TclObject> tokens) const;
+		[[nodiscard]] Info createEnum   (std::span<const TclObject> tokens) const;
 
-		std::vector<string_view> getSettingNames() const;
+		[[nodiscard]] auto getSettingNames() const {
+			return view::transform(
+				OUTER(UserSettings, userSettingCommand).settings,
+				[](const auto& info) { return info.setting->getFullName(); });
+		}
 	} userSettingCommand;
 
 	Settings settings; // unordered

@@ -21,15 +21,18 @@
 
 #include "ESE_RAM.hh"
 #include "MSXException.hh"
+#include "narrow.hh"
+#include "one_of.hh"
 #include "serialize.hh"
+#include "xrange.hh"
 #include <cassert>
 
 namespace openmsx {
 
-unsigned ESE_RAM::getSramSize() const
+size_t ESE_RAM::getSramSize() const
 {
-	unsigned sramSize = getDeviceConfig().getChildDataAsInt("sramsize", 256); // size in kb
-	if (sramSize != 1024 && sramSize != 512 && sramSize != 256 && sramSize != 128) {
+	size_t sramSize = getDeviceConfig().getChildDataAsInt("sramsize", 256); // size in kb
+	if (sramSize != one_of(1024u, 512u, 256u, 128u)) {
 		throw MSXException(
 			"SRAM size for ", getName(),
 			" should be 128, 256, 512 or 1024kB and not ",
@@ -42,29 +45,27 @@ ESE_RAM::ESE_RAM(const DeviceConfig& config)
 	: MSXDevice(config)
 	, sram(getName() + " SRAM", getSramSize(), config)
 	, romBlockDebug(*this, mapped, 0x4000, 0x8000, 13)
-	, blockMask((sram.getSize() / 8192) - 1)
+	, blockMask(narrow<byte>((sram.size() / 0x2000) - 1))
 {
 	reset(EmuTime::dummy());
 }
 
 void ESE_RAM::reset(EmuTime::param /*time*/)
 {
-	for (int i = 0; i < 4; ++i) {
+	for (auto i : xrange(4)) {
 		setSRAM(i, 0);
 	}
 }
 
 byte ESE_RAM::readMem(word address, EmuTime::param /*time*/)
 {
-	byte result;
 	if ((0x4000 <= address) && (address < 0xC000)) {
 		unsigned page = (address / 8192) - 2;
 		word addr = address & 0x1FFF;
-		result = sram[8192 * mapped[page] + addr];
+		return sram[8192 * mapped[page] + addr];
 	} else {
-		result = 0xFF;
+		return 0xFF;
 	}
-	return result;
 }
 
 const byte* ESE_RAM::getReadCacheLine(word address) const
@@ -74,7 +75,7 @@ const byte* ESE_RAM::getReadCacheLine(word address) const
 		address &= 0x1FFF;
 		return &sram[8192 * mapped[page] + address];
 	} else {
-		return unmappedRead;
+		return unmappedRead.data();
 	}
 }
 
@@ -102,12 +103,12 @@ byte* ESE_RAM::getWriteCacheLine(word address) const
 			return nullptr;
 		}
 	}
-	return unmappedWrite;
+	return unmappedWrite.data();
 }
 
 void ESE_RAM::setSRAM(unsigned region, byte block)
 {
-	invalidateMemCache(region * 0x2000 + 0x4000, 0x2000);
+	invalidateDeviceRWCache(region * 0x2000 + 0x4000, 0x2000);
 	assert(region < 4);
 	isWriteable[region] = (block & 0x80) != 0;
 	mapped[region] = block & blockMask;
@@ -117,9 +118,9 @@ template<typename Archive>
 void ESE_RAM::serialize(Archive& ar, unsigned /*version*/)
 {
 	ar.template serializeBase<MSXDevice>(*this);
-	ar.serialize("SRAM", sram);
-	ar.serialize("isWriteable", isWriteable);
-	ar.serialize("mapped", mapped);
+	ar.serialize("SRAM",        sram,
+	             "isWriteable", isWriteable,
+	             "mapped",      mapped);
 }
 INSTANTIATE_SERIALIZE_METHODS(ESE_RAM);
 REGISTER_MSXDEVICE(ESE_RAM, "ESE_RAM");

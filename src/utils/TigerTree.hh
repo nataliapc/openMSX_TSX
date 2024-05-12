@@ -28,14 +28,14 @@
 #ifndef TIGERTREE_HH
 #define TIGERTREE_HH
 
-#include "tiger.hh"
-#include "MemBuffer.hh"
 #include <string>
 #include <cstdint>
 #include <ctime>
 #include <functional>
 
 namespace openmsx {
+
+struct TigerHash;
 
 /** The TigerTree class will query the to-be-hashed data via this abstract
   * interface. This allows to e.g. fetch the data from a file.
@@ -47,20 +47,20 @@ public:
 	 * Special requirement: it should be allowed to temporarily overwrite
 	 * the byte one position before the returned pointer.
 	 */
-	virtual uint8_t* getData(size_t offset, size_t size) = 0;
+	[[nodiscard]] virtual uint8_t* getData(size_t offset, size_t size) = 0;
 
 	/** Because TTH calculation of a large file takes some time (a few
-	  * 1/10s for a harddisk image) we try to cache previous calculations.
+	  * 1/10s for a hard disk image) we try to cache previous calculations.
 	  * This method makes sure we don't wrongly reuse the data. E.g. after
 	  * it has been modified (by openmsx or even externally).
 	  *
 	  * Note that the current implementation of the caching is only
 	  * suited for files. Refactor this if we ever need some different.
 	  */
-	virtual bool isCacheStillValid(time_t& time) = 0;
+	[[nodiscard]] virtual bool isCacheStillValid(time_t& time) = 0;
 
 protected:
-	~TTData() {}
+	~TTData() = default;
 };
 
 struct TTCacheEntry;
@@ -72,6 +72,8 @@ struct TTCacheEntry;
 class TigerTree
 {
 public:
+	static constexpr size_t BLOCK_SIZE = 1024;
+
 	/** Create TigerTree calculator for the given (abstract) data block
 	 * of given size.
 	 */
@@ -79,7 +81,7 @@ public:
 
 	/** Calculate the hash value.
 	 */
-	const TigerHash& calcHash(const std::function<void(size_t, size_t)>& progressCallback);
+	[[nodiscard]] const TigerHash& calcHash(const std::function<void(size_t, size_t)>& progressCallback);
 
 	/** Inform this calculator about changes in the input data. This is
 	 * used to (not) skip re-calculations on future calcHash() calls. So
@@ -95,14 +97,15 @@ private:
 		size_t n; // node number
 		size_t l; // level number
 	};
-	Node getTop() const;
-	Node getLeaf(size_t block) const;
-	Node getParent(Node node) const;
-	Node getLeftChild(Node node) const;
-	Node getRightChild(Node node) const;
+	[[nodiscard]] Node getTop() const;
+	[[nodiscard]] Node getLeaf(size_t block) const;
+	[[nodiscard]] Node getParent(Node node) const;
+	[[nodiscard]] Node getLeftChild(Node node) const;
+	[[nodiscard]] Node getRightChild(Node node) const;
 
-	const TigerHash& calcHash(Node node, const std::function<void(size_t, size_t)>& progressCallback);
+	[[nodiscard]] const TigerHash& calcHash(Node node, const std::function<void(size_t, size_t)>& progressCallback);
 
+private:
 	TTData& data;
 	const size_t dataSize;
 	TTCacheEntry& entry;

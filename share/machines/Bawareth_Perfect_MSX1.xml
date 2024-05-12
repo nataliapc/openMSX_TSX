@@ -22,6 +22,7 @@
     <release_year>1986/1987</release_year>
     <description>A Daewoo CPC-200 based Arabic MSX.</description>
     <type>MSX</type>
+    <region>me</region>
   </info>
 
   <CassettePort/>
@@ -33,7 +34,7 @@
         <volume>16000</volume>
       </sound>
       <io base="0xA8" num="4"/>
-      <keyboard_type>int</keyboard_type> <!-- it is actually Arabic... -->
+      <keyboard_type>ar</keyboard_type>
       <has_keypad>false</has_keypad>
       <key_ghosting_sgc_protected>true</key_ghosting_sgc_protected>
       <code_kana_locks>false</code_kana_locks>
@@ -50,8 +51,8 @@
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="4" type="IO"/>
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <PrinterPort id="Printer Port">

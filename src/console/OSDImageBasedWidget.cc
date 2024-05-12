@@ -1,84 +1,64 @@
 #include "OSDImageBasedWidget.hh"
 #include "OSDTopWidget.hh"
 #include "OSDGUI.hh"
-#include "BaseImage.hh"
 #include "Display.hh"
-#include "OutputSurface.hh"
+#include "GLImage.hh"
 #include "TclObject.hh"
 #include "CommandException.hh"
 #include "Timer.hh"
+#include "narrow.hh"
+#include "ranges.hh"
+#include "stl.hh"
+#include "view.hh"
 #include "xrange.hh"
 #include <algorithm>
 #include <cassert>
+#include <cstdint>
 
-using std::string;
-using std::vector;
 using namespace gl;
 
 namespace openmsx {
 
 OSDImageBasedWidget::OSDImageBasedWidget(Display& display_, const TclObject& name_)
 	: OSDWidget(display_, name_)
-	, startFadeTime(0)
-	, fadePeriod(0.0)
-	, fadeTarget(1.0)
-	, startFadeValue(1.0)
-	, error(false)
 {
-	for (auto i : xrange(4)) {
-		rgba[i] = 0x000000ff;
-	}
+	ranges::fill(rgba, 0x000000ff); // black, opaque
 }
 
 OSDImageBasedWidget::~OSDImageBasedWidget() = default;
 
-vector<string_view> OSDImageBasedWidget::getProperties() const
+[[nodiscard]] static std::array<uint32_t, 4> get4(Interpreter& interp, const TclObject& value)
 {
-	auto result = OSDWidget::getProperties();
-	static const char* const vals[] = {
-		"-rgba", "-rgb", "-alpha", "-fadePeriod", "-fadeTarget",
-		"-fadeCurrent",
-	};
-	result.insert(end(result), std::begin(vals), std::end(vals));
-	return result;
-}
-
-static void get4(Interpreter& interp, const TclObject& value, uint32_t* result)
-{
+	std::array<uint32_t, 4> result;
 	auto len = value.getListLength(interp);
 	if (len == 4) {
 		for (auto i : xrange(4)) {
 			result[i] = value.getListIndex(interp, i).getInt(interp);
 		}
 	} else if (len == 1) {
-		uint32_t val = value.getInt(interp);
-		for (auto i : xrange(4)) {
-			result[i] = val;
-		}
+		ranges::fill(result, value.getInt(interp));
 	} else {
 		throw CommandException("Expected either 1 or 4 values.");
 	}
+	return result;
 }
 void OSDImageBasedWidget::setProperty(
-	Interpreter& interp, string_view propName, const TclObject& value)
+	Interpreter& interp, std::string_view propName, const TclObject& value)
 {
 	if (propName == "-rgba") {
-		uint32_t newRGBA[4];
-		get4(interp, value, newRGBA);
+		std::array<uint32_t, 4> newRGBA = get4(interp, value);
 		setRGBA(newRGBA);
 	} else if (propName == "-rgb") {
-		uint32_t newRGB[4];
-		get4(interp, value, newRGB);
-		uint32_t newRGBA[4];
+		std::array<uint32_t, 4> newRGB = get4(interp, value);
+		std::array<uint32_t, 4> newRGBA;
 		for (auto i : xrange(4)) {
 			newRGBA[i] = (rgba[i]          & 0x000000ff) |
 			             ((newRGB[i] << 8) & 0xffffff00);
 		}
 		setRGBA(newRGBA);
 	} else if (propName == "-alpha") {
-		uint32_t newAlpha[4];
-		get4(interp, value, newAlpha);
-		uint32_t newRGBA[4];
+		std::array<uint32_t, 4> newAlpha = get4(interp, value);
+		std::array<uint32_t, 4> newRGBA;
 		for (auto i : xrange(4)) {
 			newRGBA[i] = (rgba[i]     & 0xffffff00) |
 			             (newAlpha[i] & 0x000000ff);
@@ -86,45 +66,47 @@ void OSDImageBasedWidget::setProperty(
 		setRGBA(newRGBA);
 	} else if (propName == "-fadePeriod") {
 		updateCurrentFadeValue();
-		fadePeriod = value.getDouble(interp);
+		fadePeriod = value.getFloat(interp);
 	} else if (propName == "-fadeTarget") {
 		updateCurrentFadeValue();
-		fadeTarget = std::max(0.0, std::min(1.0 , value.getDouble(interp)));
+		fadeTarget = std::clamp(value.getFloat(interp), 0.0f, 1.0f);
 	} else if (propName == "-fadeCurrent") {
-		startFadeValue = std::max(0.0, std::min(1.0, value.getDouble(interp)));
+		startFadeValue = std::clamp(value.getFloat(interp), 0.0f, 1.0f);
 		startFadeTime = Timer::getTime();
+	} else if (propName == "-scrollSpeed") {
+		scrollSpeed = std::max(0.0f, value.getFloat(interp));
+		startScrollTime = Timer::getTime();
+	} else if (propName == "-scrollPauseLeft") {
+		scrollPauseLeft = std::max(0.0f, value.getFloat(interp));
+	} else if (propName == "-scrollPauseRight") {
+		scrollPauseRight = std::max(0.0f, value.getFloat(interp));
+	} else if (propName == "-query-size") {
+		throw CommandException("-query-size property is readonly");
 	} else {
 		OSDWidget::setProperty(interp, propName, value);
 	}
 }
 
-void OSDImageBasedWidget::setRGBA(const uint32_t newRGBA[4])
+void OSDImageBasedWidget::setRGBA(std::span<const uint32_t, 4> newRGBA)
 {
-	if ((rgba[0] == newRGBA[0]) &&
-	    (rgba[1] == newRGBA[1]) &&
-	    (rgba[2] == newRGBA[2]) &&
-	    (rgba[3] == newRGBA[3])) {
-		// not changed
-		return;
+	if (ranges::equal(rgba, newRGBA)) {
+		return; // not changed
 	}
 	invalidateLocal();
-	for (auto i : xrange(4)) {
-		rgba[i] = newRGBA[i];
-	}
+	ranges::copy(newRGBA, rgba);
 }
 
-static void set4(const uint32_t rgba[4], uint32_t mask, unsigned shift, TclObject& result)
+static void set4(std::span<const uint32_t, 4> rgba, uint32_t mask, unsigned shift, TclObject& result)
 {
-	if ((rgba[0] == rgba[1]) && (rgba[0] == rgba[2]) && (rgba[0] == rgba[3])) {
-		result.setInt((rgba[0] & mask) >> shift);
+	if (ranges::all_equal(rgba)) {
+		result = (rgba[0] & mask) >> shift;
 	} else {
-
-		for (auto i : xrange(4)) {
-			result.addListElement(int((rgba[i] & mask) >> shift));
-		}
+		result.addListElements(view::transform(xrange(4), [&](auto i) {
+			return int((rgba[i] & mask) >> shift);
+		}));
 	}
 }
-void OSDImageBasedWidget::getProperty(string_view propName, TclObject& result) const
+void OSDImageBasedWidget::getProperty(std::string_view propName, TclObject& result) const
 {
 	if (propName == "-rgba") {
 		set4(rgba, 0xffffffff, 0, result);
@@ -133,25 +115,95 @@ void OSDImageBasedWidget::getProperty(string_view propName, TclObject& result) c
 	} else if (propName == "-alpha") {
 		set4(rgba, 0x000000ff, 0, result);
 	} else if (propName == "-fadePeriod") {
-		result.setDouble(fadePeriod);
+		result = fadePeriod;
 	} else if (propName == "-fadeTarget") {
-		result.setDouble(fadeTarget);
+		result = fadeTarget;
 	} else if (propName == "-fadeCurrent") {
-		result.setDouble(getCurrentFadeValue());
+		result = getCurrentFadeValue();
+	} else if (propName == "-scrollSpeed") {
+		result = scrollSpeed;
+	} else if (propName == "-scrollPauseLeft") {
+		result = scrollPauseLeft;
+	} else if (propName == "-scrollPauseRight") {
+		result = scrollPauseRight;
+	} else if (propName == "-query-size") {
+		auto [w, h] = getRenderedSize();
+		result.addListElement(w, h);
 	} else {
 		OSDWidget::getProperty(propName, result);
 	}
 }
 
-static bool constantAlpha(const uint32_t rgba[4])
+std::optional<float> OSDImageBasedWidget::getScrollWidth() const
 {
-	return ((rgba[0] & 0xff) == (rgba[1] & 0xff)) &&
-	       ((rgba[0] & 0xff) == (rgba[2] & 0xff)) &&
-	       ((rgba[0] & 0xff) == (rgba[3] & 0xff));
+        if (scrollSpeed == 0.0f) return {};
+
+        const auto* parentImage = dynamic_cast<const OSDImageBasedWidget*>(getParent());
+        if (!parentImage) return {};
+
+        auto* output = getDisplay().getOutputSurface();
+        if (!output) return {};
+
+        auto [parentPos, parentSize] = parentImage->getBoundingBox(*output);
+        auto parentWidth = parentSize.x / narrow<float>(getScaleFactor(*output));
+
+        auto thisWidth = getRenderedSize().x;
+        auto scrollWidth = thisWidth - parentWidth;
+        if (scrollWidth <= 0.0f) return {};
+
+        return scrollWidth;
 }
+
+bool OSDImageBasedWidget::isAnimating() const
+{
+	return static_cast<bool>(getScrollWidth());
+}
+
+[[nodiscard]] static float smootherStep(float x)
+{
+	// https://en.wikipedia.org/wiki/Smoothstep
+	//    6x^5 - 15x^4 + 10x^3
+	return ((6.0f * x - 15.0f) * x + 10.0f) * x * x * x;
+}
+
+gl::vec2 OSDImageBasedWidget::getPos() const
+{
+	// get the original position, possibly this gets modified because of scrolling
+	auto result = OSDWidget::getPos();
+
+	auto width = getScrollWidth();
+	if (!width) return result;
+
+	auto scrollTime = *width / scrollSpeed;
+	auto animationTime = 2.0f * scrollTime + scrollPauseLeft + scrollPauseRight;
+
+	// transform moment in time to animation-timestamp 't'
+	auto now = narrow_cast<float>(Timer::getTime() - startScrollTime) / 1'000'000.0f;
+	auto t = fmodf(now, animationTime);
+
+	// transform animation timestamp to position
+	float relOffsetX = [&]{
+		if (t < scrollPauseLeft) {
+			// no scrolling yet, pausing at the left
+			return 0.0f;
+		} else if (t < (scrollPauseLeft + scrollTime)) {
+			// scrolling to the left
+			return smootherStep((t - scrollPauseLeft) / scrollTime);
+		} else if (t < (scrollPauseLeft + scrollTime + scrollPauseRight)) {
+			// no scrolling yet, pausing at the right
+			return 1.0f;
+		} else {
+			// scrolling to the right
+			return smootherStep(1.0f - ((t - scrollPauseLeft - scrollTime - scrollPauseRight) / scrollTime));
+		}
+	}();
+	result.x -= *width * relOffsetX;
+	return result;
+}
+
 bool OSDImageBasedWidget::hasConstantAlpha() const
 {
-	return constantAlpha(rgba);
+	return ranges::all_equal(rgba, [](auto c) { return c & 0xff; });
 }
 
 float OSDImageBasedWidget::getRecursiveFadeValue() const
@@ -159,9 +211,20 @@ float OSDImageBasedWidget::getRecursiveFadeValue() const
 	return getParent()->getRecursiveFadeValue() * getCurrentFadeValue();
 }
 
+bool OSDImageBasedWidget::isVisible() const
+{
+	return (getFadedAlpha() != 0) || isRecursiveFading();
+}
+
 bool OSDImageBasedWidget::isFading() const
 {
 	return (startFadeValue != fadeTarget) && (fadePeriod != 0.0f);
+}
+
+bool OSDImageBasedWidget::isRecursiveFading() const
+{
+	if (isFading()) return true;
+	return getParent()->isRecursiveFading();
 }
 
 float OSDImageBasedWidget::getCurrentFadeValue() const
@@ -176,9 +239,9 @@ float OSDImageBasedWidget::getCurrentFadeValue(uint64_t now) const
 {
 	assert(now >= startFadeTime);
 
-	int diff = int(now - startFadeTime); // int should be big enough
+	auto diff = narrow<int>(now - startFadeTime); // int should be big enough
 	assert(fadePeriod != 0.0f);
-	float delta = diff / (1000000.0f * fadePeriod);
+	float delta = narrow_cast<float>(diff) / (1000000.0f * fadePeriod);
 	if (startFadeValue < fadeTarget) {
 		float tmp = startFadeValue + delta;
 		if (tmp >= fadeTarget) {
@@ -211,13 +274,13 @@ void OSDImageBasedWidget::invalidateLocal()
 	image.reset();
 }
 
-vec2 OSDImageBasedWidget::getTransformedPos(const OutputRectangle& output) const
+vec2 OSDImageBasedWidget::getTransformedPos(const OutputSurface& output) const
 {
 	return getParent()->transformPos(
 		output, float(getScaleFactor(output)) * getPos(), getRelPos());
 }
 
-void OSDImageBasedWidget::setError(string message)
+void OSDImageBasedWidget::setError(std::string message)
 {
 	error = true;
 
@@ -233,45 +296,52 @@ void OSDImageBasedWidget::setError(string message)
 	}
 }
 
-void OSDImageBasedWidget::paintSDL(OutputSurface& output)
-{
-	paint(output, false);
-}
-
-void OSDImageBasedWidget::paintGL(OutputSurface& output)
-{
-	paint(output, true);
-}
-
-void OSDImageBasedWidget::createImage(OutputRectangle& output)
+void OSDImageBasedWidget::createImage(OutputSurface& output)
 {
 	if (!image && !hasError()) {
 		try {
-			if (getDisplay().getOSDGUI().isOpenGL()) {
-				image = createGL(output);
-			} else {
-				image = createSDL(output);
-			}
+			image = create(output);
 		} catch (MSXException& e) {
 			setError(std::move(e).getMessage());
 		}
 	}
 }
 
-void OSDImageBasedWidget::paint(OutputSurface& output, bool openGL)
+vec2 OSDImageBasedWidget::getRenderedSize() const
+{
+	auto* output = getDisplay().getOutputSurface();
+	if (!output) {
+		throw CommandException(
+			"Can't query size: no window visible");
+	}
+	// force creating image (does not yet draw it on screen)
+	const_cast<OSDImageBasedWidget*>(this)->createImage(*output);
+
+	vec2 imageSize = [&] {
+		if (image) {
+			return vec2(image->getSize());
+		} else {
+			// Couldn't be rendered, maybe an (intentionally)
+			// invisible rectangle
+			return getBoundingBox(*output).size;
+		}
+	}();
+	return imageSize / float(getScaleFactor(*output));
+}
+
+void OSDImageBasedWidget::paint(OutputSurface& output)
 {
 	// Note: Even when alpha == 0 we still create the image:
 	//    It may be needed to get the dimensions to be able to position
 	//    child widgets.
-	assert(openGL == getDisplay().getOSDGUI().isOpenGL()); (void)openGL;
 	createImage(output);
 
-	auto fadedAlpha = getFadedAlpha();
-	if ((fadedAlpha != 0) && image) {
+	if (auto fadedAlpha = getFadedAlpha();
+	    (fadedAlpha != 0) && image) {
 		ivec2 drawPos = round(getTransformedPos(output));
-		image->draw(output, drawPos, fadedAlpha);
+		image->draw(drawPos, fadedAlpha);
 	}
-	if (isFading()) {
+	if (isRecursiveFading() || isAnimating()) {
 		getDisplay().getOSDGUI().refresh();
 	}
 }

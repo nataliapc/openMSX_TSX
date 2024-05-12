@@ -12,8 +12,8 @@ Connector::Connector(PluggingController& pluggingController_,
 	: pluggingController(pluggingController_)
 	, name(std::move(name_))
 	, dummy(std::move(dummy_))
+	, plugged(dummy.get())
 {
-	plugged = dummy.get();
 	pluggingController.registerConnector(*this);
 }
 
@@ -38,12 +38,14 @@ template<typename Archive>
 void Connector::serialize(Archive& ar, unsigned /*version*/)
 {
 	std::string plugName;
-	if (!ar.isLoader() && (plugged != dummy.get())) {
-		plugName = plugged->getName();
+	if constexpr (!Archive::IS_LOADER) {
+		if (plugged != dummy.get()) {
+			plugName = plugged->getName();
+		}
 	}
 	ar.serialize("plugName", plugName);
 
-	if (!ar.isLoader()) {
+	if constexpr (!Archive::IS_LOADER) {
 		if (!plugName.empty()) {
 			ar.beginSection();
 			ar.serializePolymorphic("pluggable", *plugged);
@@ -64,7 +66,7 @@ void Connector::serialize(Archive& ar, unsigned /*version*/)
 				ar.serializePolymorphic("pluggable", *plugged);
 			} catch (PlugException& e) {
 				pluggingController.getCliComm().printWarning(
-					"Pluggable \"", plugName, "\" failed to re-plug: ",
+					"Pluggable \"", plugName, "\" failed to replug: ",
 					e.getMessage());
 				pluggable->setConnector(nullptr);
 				plugged = dummy.get();

@@ -5,22 +5,25 @@
   <info>
     <manufacturer>Sony</manufacturer>
     <code>HB-F700P</code>
-    <release_year>1985</release_year>
-    <description>European MSX2 with a lot of RAM (256kB).</description>
+    <release_year>1986</release_year>
+    <description>European MSX2 with a lot of RAM (256kB) and double sided disk drive.</description>
     <type>MSX2</type>
+    <region>eu</region>
   </info>
-
-  <MapperReadBackBits>largest</MapperReadBackBits>
 
   <CassettePort/>
 
   <devices>
 
+    <S1985 id="S1985"> <!-- includes 5 bits mapper-read-back, confirmed by Manuel on HB-F700D-->
+      <sramname>hb-f700p_s1985.sram</sramname>
+    </S1985>
+
     <PPI id="ppi">
       <sound>
         <volume>16000</volume>
       </sound>
-      <io base="0xA8" num="4"/>
+      <io base="0xA8" num="8"/> <!-- S-1985 mirrors -->
       <keyboard_type>int</keyboard_type>
       <has_keypad>true</has_keypad>
       <key_ghosting_sgc_protected>true</key_ghosting_sgc_protected>
@@ -35,28 +38,25 @@
       <io base="0x98" num="8" type="I"/> <!-- S-1985 mirrors -->
     </VDP>
 
-    <S1985 id="S1985">
-      <sramname>hb-f700p_s1985.sram</sramname>
-    </S1985>
-
     <PSG id="PSG">
       <type>YM2149</type> <!-- in S-1985 MSX-ENGINE -->
       <sound>
         <volume>21000</volume>
       </sound>
-      <io base="0xa0" num="2" type="O"/>
-      <io base="0xa2" num="1" type="I"/>
+      <io base="0xA0" num="8" type="IO"/> <!-- S-1985 mirrors -->
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <RTC id="Real time clock">
       <sramname>hb-f700p.cmos</sramname>
-      <io base="0xb4" num="2" type="O"/>
-      <io base="0xb5" num="1" type="I"/>
+      <io base="0xB4" num="4" type="IO"/> <!-- S-1985 mirrors -->
     </RTC>
 
     <PrinterPort id="Printer Port">
-      <io base="0x90" num="2"/>
-     </PrinterPort>
+      <io base="0x90" num="8" type="IO"/> <!-- S-1985 mirrors -->
+      <bidirectional>true</bidirectional> <!-- S-1985 feature (but not used, nor implemented) -->
+      <unused_bits>0x00</unused_bits>
+    </PrinterPort>
 
     <primary slot="0">
 
@@ -93,7 +93,7 @@
           <drives>1</drives>
           <rom>
             <filename>hb-f700p_disk.rom</filename>
-            <sha1>3376cf9dd2b1ac9b41bf6bf6598b33136e86f9d5</sha1> <!-- According to team blueMSX -->
+            <sha1>3376cf9dd2b1ac9b41bf6bf6598b33136e86f9d5</sha1> <!-- According to team blueMSX, confirmed by Peter Hanraets -->
             <sha1>7dcd434d9a244e23afd212d3fea4c3bf3fe2a300</sha1> <!-- This is a fast diskROM, which is also in Meits' machine, certainly not original -->
           </rom>
           <mem base="0x4000" size="0x8000"/>

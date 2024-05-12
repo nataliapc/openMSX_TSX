@@ -1,9 +1,12 @@
-#ifndef SDLSURFACEPTR
-#define SDLSURFACEPTR
+#ifndef SDLSURFACEPTR_HH
+#define SDLSURFACEPTR_HH
 
 #include "MemBuffer.hh"
+#include "InitException.hh"
+#include "narrow.hh"
 #include <SDL.h>
 #include <algorithm>
+#include <memory>
 #include <new>
 #include <cassert>
 #include <cstdlib>
@@ -31,9 +34,6 @@
 class SDLSurfacePtr
 {
 public:
-	SDLSurfacePtr(const SDLSurfacePtr&) = delete;
-	SDLSurfacePtr& operator=(const SDLSurfacePtr&) = delete;
-
 	/** Create a (software) surface with uninitialized pixel content.
 	  * throws: bad_alloc (no need to check for nullptr). */
 	SDLSurfacePtr(unsigned width, unsigned height, unsigned depth,
@@ -44,7 +44,9 @@ public:
 		unsigned size = height * pitch;
 		buffer.resize(size);
 		surface = SDL_CreateRGBSurfaceFrom(
-			buffer.data(), width, height, depth, pitch,
+			buffer.data(),
+			narrow<int>(width), narrow<int>(height),
+			narrow<int>(depth), narrow<int>(pitch),
 			rMask, gMask, bMask, aMask);
 		if (!surface) throw std::bad_alloc();
 	}
@@ -61,6 +63,9 @@ public:
 		other.surface = nullptr;
 	}
 
+	SDLSurfacePtr(const SDLSurfacePtr&) = delete;
+	SDLSurfacePtr& operator=(const SDLSurfacePtr&) = delete;
+
 	~SDLSurfacePtr()
 	{
 		if (surface) SDL_FreeSurface(surface);
@@ -72,11 +77,11 @@ public:
 		temp.swap(*this);
 	}
 
-	SDL_Surface* get()
+	[[nodiscard]] SDL_Surface* get()
 	{
 		return surface;
 	}
-	const SDL_Surface* get() const
+	[[nodiscard]] const SDL_Surface* get() const
 	{
 		return surface;
 	}
@@ -94,35 +99,35 @@ public:
 		return *this;
 	}
 
-	SDL_Surface& operator*()
+	[[nodiscard]] SDL_Surface& operator*()
 	{
 		return *surface;
 	}
-	const SDL_Surface& operator*() const
+	[[nodiscard]] const SDL_Surface& operator*() const
 	{
 		return *surface;
 	}
 
-	SDL_Surface* operator->()
+	[[nodiscard]] SDL_Surface* operator->()
 	{
 		return surface;
 	}
-	const SDL_Surface* operator->() const
+	[[nodiscard]] const SDL_Surface* operator->() const
 	{
 		return surface;
 	}
 
-	explicit operator bool() const
+	[[nodiscard]] explicit operator bool() const
 	{
 		return get() != nullptr;
 	}
 
-	void* getLinePtr(unsigned y)
+	[[nodiscard]] void* getLinePtr(unsigned y)
 	{
 		assert(y < unsigned(surface->h));
 		return static_cast<Uint8*>(surface->pixels) + y * surface->pitch;
 	}
-	const void* getLinePtr(unsigned y) const
+	[[nodiscard]] const void* getLinePtr(unsigned y) const
 	{
 		return const_cast<SDLSurfacePtr*>(this)->getLinePtr(y);
 	}
@@ -130,6 +135,59 @@ public:
 private:
 	SDL_Surface* surface;
 	openmsx::MemBuffer<char> buffer;
+};
+
+
+struct SDLDestroyTexture {
+	void operator()(SDL_Texture* t) const { SDL_DestroyTexture(t); }
+};
+using SDLTexturePtr = std::unique_ptr<SDL_Texture, SDLDestroyTexture>;
+
+
+struct SDLDestroyRenderer {
+	void operator()(SDL_Renderer* r) const { SDL_DestroyRenderer(r); }
+};
+using SDLRendererPtr = std::unique_ptr<SDL_Renderer, SDLDestroyRenderer>;
+
+
+struct SDLDestroyWindow {
+	void operator()(SDL_Window* w) const { SDL_DestroyWindow(w); }
+};
+using SDLWindowPtr = std::unique_ptr<SDL_Window, SDLDestroyWindow>;
+
+
+struct SDLFreeFormat {
+	void operator()(SDL_PixelFormat* p) const { SDL_FreeFormat(p); }
+};
+using SDLAllocFormatPtr = std::unique_ptr<SDL_PixelFormat, SDLFreeFormat>;
+
+
+struct SDLFreeWav {
+	void operator()(Uint8* w) const { SDL_FreeWAV(w); }
+};
+using SDLWavPtr = std::unique_ptr<Uint8, SDLFreeWav>;
+
+
+template<Uint32 FLAGS>
+class SDLSubSystemInitializer
+{
+public:
+	SDLSubSystemInitializer(const SDLSubSystemInitializer&) = delete;
+	SDLSubSystemInitializer(SDLSubSystemInitializer&&) = delete;
+	SDLSubSystemInitializer& operator=(const SDLSubSystemInitializer&) = delete;
+	SDLSubSystemInitializer& operator=(SDLSubSystemInitializer&&) = delete;
+
+	SDLSubSystemInitializer() {
+		// SDL internally ref-counts sub-system initialization, so we
+		// don't need to worry about it here.
+		if (SDL_InitSubSystem(FLAGS) < 0) {
+			throw openmsx::InitException(
+				"SDL init failed (", FLAGS, "): ", SDL_GetError());
+		}
+	}
+	~SDLSubSystemInitializer() {
+		SDL_QuitSubSystem(FLAGS);
+	}
 };
 
 #endif

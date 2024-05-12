@@ -27,10 +27,11 @@ private:
 	void outputSingleByte(byte value, EmuTime::param time);
 	void outputMultiByte(byte value);
 	void displayByte(byte value, DisplayType type);
-	void openOutput(string_view name);
+	void openOutput(std::string_view name);
 
+private:
 	FilenameSetting fileNameSetting;
-	std::ostream* outputstrm;
+	std::ostream* outputStrm;
 	std::ofstream debugOut;
 	std::string fileNameString;
 	DebugMode mode;

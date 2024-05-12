@@ -6,8 +6,9 @@
     <manufacturer>Pioneer</manufacturer>
     <code>PX-V60</code>
     <release_year>1985?</release_year>
-    <description/>
+    <description>Japanese MSX1 with LaserDisc controller support, 32kB RAM, superimpose (not emulated outside LaserDisc support). Simpler version of PX-7, targeted for schools.</description>
     <type>MSX</type>
+    <region>jp</region>
   </info>
 
   <!--
@@ -25,8 +26,8 @@
       <sound>
         <volume>16000</volume>
       </sound>
-      <io base="0xA8" num="4"/>
-      <keyboard_type>jp_ansi</keyboard_type>
+      <io base="0xA8" num="8"/> <!-- S-3527 mirrors -->
+      <keyboard_type>jp_jis</keyboard_type>
       <has_keypad>false</has_keypad>
       <key_ghosting_sgc_protected>true</key_ghosting_sgc_protected>
       <code_kana_locks>true</code_kana_locks>
@@ -48,12 +49,13 @@
         <volume>21000</volume>
       </sound>
       <type>YM2149</type> <!-- in S3527 MSX-ENGINE -->
-      <io base="0xA0" num="2" type="O"/>
-      <io base="0xA2" num="1" type="I"/>
+      <io base="0xA0" num="8" type="IO"/> <!-- S-3527 mirrors -->
+      <ignorePortDirections>true</ignorePortDirections> <!-- not sure, but guess based on use of Engine IC -->
     </PSG>
 
     <PrinterPort id="Printer Port">
-      <io base="0x90" num="2"/>
+      <io base="0x90" num="8" type="IO"/> <!-- S-3527 mirrors -->
+      <status_readable_on_all_ports>true</status_readable_on_all_ports> <!-- S-3527 property -->
     </PrinterPort>
 
     <primary slot="0">
@@ -78,8 +80,8 @@
           <sha1>4f0102cdc27216fd9bcdb9663db728d2ccd8ca6d</sha1>
         </rom>
         <mem base="0x4000" size="0x4000"/>
-	<device idref="ppi"/>
-	<device idref="VDP"/>
+        <device idref="ppi"/>
+        <device idref="VDP"/>
       </PioneerLDControl>
     </primary>
 

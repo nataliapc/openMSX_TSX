@@ -1,19 +1,11 @@
 #include "catch.hpp"
 #include "StringOp.hh"
+#include "narrow.hh"
+#include <type_traits>
 
-using namespace std;
 using namespace StringOp;
-
-static void testStringToInt(const std::string& s, bool ok, int expected)
-{
-	int result;
-	bool success = stringToInt(s, result);
-	REQUIRE(success == ok);
-	if (ok) {
-		CHECK(result == expected);
-		CHECK(stringToInt(s) == expected);
-	}
-}
+using std::string;
+using std::string_view;
 
 static void checkTrimRight(const string& s, char c, const string& expected)
 {
@@ -59,9 +51,12 @@ static void checkTrimLeft(const string& s, const char* chars, const string& expe
 
 static void checkSplitOnFirst(const string& s, const string& first, const string& last)
 {
-	string_view f1, f2, l1, l2;
-	splitOnFirst(s, '-', f1, l1);
-	splitOnFirst(s, " -+", f2, l2);
+	auto [f1, l1] = splitOnFirst(s, '-');
+	auto [f2, l2] = splitOnFirst(s, " -+");
+	static_assert(std::is_same_v<decltype(f1), std::string_view>);
+	static_assert(std::is_same_v<decltype(f2), std::string_view>);
+	static_assert(std::is_same_v<decltype(l1), std::string_view>);
+	static_assert(std::is_same_v<decltype(l2), std::string_view>);
 	CHECK(f1 == first);
 	CHECK(f2 == first);
 	CHECK(l1 == last);
@@ -70,46 +65,149 @@ static void checkSplitOnFirst(const string& s, const string& first, const string
 
 static void checkSplitOnLast(const string& s, const string& first, const string& last)
 {
-	string_view f1, f2, l1, l2;
-	splitOnLast(s, '-', f1, l1);
-	splitOnLast(s, " -+", f2, l2);
+	auto [f1, l1] = splitOnLast(s, '-');
+	auto [f2, l2] = splitOnLast(s, " -+");
+	static_assert(std::is_same_v<decltype(f1), std::string_view>);
+	static_assert(std::is_same_v<decltype(f2), std::string_view>);
+	static_assert(std::is_same_v<decltype(l1), std::string_view>);
+	static_assert(std::is_same_v<decltype(l2), std::string_view>);
 	CHECK(f1 == first);
 	CHECK(f2 == first);
 	CHECK(l1 == last);
 	CHECK(l2 == last);
 }
 
-static void checkSplit(const string& s, const vector<string_view> expected)
+template<StringOp::KeepOrRemoveEmptyParts keepOrRemove, typename Separators>
+static void checkSplit(Separators separators, const string& s, const std::vector<string_view>& expected)
 {
-	CHECK(split(s, '-') == expected);
+	//CHECK(split(s, '-') == expected);
+
+	std::vector<string_view> result;
+	for (const auto& ss : StringOp::split_view<keepOrRemove>(s, separators)) {
+		result.push_back(ss);
+	}
+	CHECK(result == expected);
 }
 
-static void checkJoin(const vector<string_view>& v, const string& expected)
+static void checkParseRange(const string& s, const std::vector<unsigned>& expected)
 {
-	CHECK(join(v, '-') == expected);
+	auto parsed = parseRange(s, 0, 63);
+	std::vector<unsigned> result;
+	parsed.foreachSetBit([&](size_t i) { result.push_back(narrow<unsigned>(i)); });
+	CHECK(result == expected);
 }
 
-static void checkParseRange(const string& s, const set<unsigned>& expected)
-{
-	CHECK(parseRange(s, 0, 99) == expected);
-}
 
 TEST_CASE("StringOp")
 {
-	SECTION("stringToXXX") {
-		testStringToInt("", true, 0);
-		testStringToInt("0", true, 0);
-		testStringToInt("1234", true, 1234);
-		testStringToInt("-1234", true, -1234);
-		testStringToInt("0xabcd", true, 43981);
-		testStringToInt("0x7fffffff", true, 2147483647);
-		testStringToInt("-0x80000000", true, -2147483648);
-		testStringToInt("bla", false, 0);
-		//testStringToInt("0x80000000", true, 0); not detected correctly
+	SECTION("stringTo<int>") {
+		std::optional<int> NOK;
+		using OK = std::optional<int>;
 
-		// TODO stringToUint
-		// TODO stringToUint64
+		// empty string is invalid
+		CHECK(StringOp::stringTo<int>("") == NOK);
 
+		// valid decimal values, positive ..
+		CHECK(StringOp::stringTo<int>("0") == OK(0));
+		CHECK(StringOp::stringTo<int>("03") == OK(3));
+		CHECK(StringOp::stringTo<int>("097") == OK(97));
+		CHECK(StringOp::stringTo<int>("12") == OK(12));
+		// .. and negative
+		CHECK(StringOp::stringTo<int>("-0") == OK(0));
+		CHECK(StringOp::stringTo<int>("-11") == OK(-11));
+
+		// invalid
+		CHECK(StringOp::stringTo<int>("-") == NOK);
+		CHECK(StringOp::stringTo<int>("zz") == NOK);
+		CHECK(StringOp::stringTo<int>("+") == NOK);
+		CHECK(StringOp::stringTo<int>("+12") == NOK);
+
+		// leading whitespace is invalid, trailing stuff is invalid
+		CHECK(StringOp::stringTo<int>(" 14") == NOK);
+		CHECK(StringOp::stringTo<int>("15 ") == NOK);
+		CHECK(StringOp::stringTo<int>("15bar") == NOK);
+
+		// hexadecimal
+		CHECK(StringOp::stringTo<int>("0x1a") == OK(26));
+		CHECK(StringOp::stringTo<int>("0x1B") == OK(27));
+		CHECK(StringOp::stringTo<int>("0X1c") == OK(28));
+		CHECK(StringOp::stringTo<int>("0X1D") == OK(29));
+		CHECK(StringOp::stringTo<int>("-0x100") == OK(-256));
+		CHECK(StringOp::stringTo<int>("0x") == NOK);
+		CHECK(StringOp::stringTo<int>("0x12g") == NOK);
+		CHECK(StringOp::stringTo<int>("0x-123") == NOK);
+
+		// binary
+		CHECK(StringOp::stringTo<int>("0b") == NOK);
+		CHECK(StringOp::stringTo<int>("0b2") == NOK);
+		CHECK(StringOp::stringTo<int>("0b100") == OK(4));
+		CHECK(StringOp::stringTo<int>("-0B1001") == OK(-9));
+		CHECK(StringOp::stringTo<int>("0b-11") == NOK);
+
+		// overflow
+		CHECK(StringOp::stringTo<int>("-2147483649") == NOK);
+		CHECK(StringOp::stringTo<int>("2147483648") == NOK);
+		CHECK(StringOp::stringTo<int>("999999999999999") == NOK);
+		CHECK(StringOp::stringTo<int>("-999999999999999") == NOK);
+		// edge cases (no overflow)
+		CHECK(StringOp::stringTo<int>("-2147483648") == OK(-2147483648));
+		CHECK(StringOp::stringTo<int>("2147483647") == OK(2147483647));
+		CHECK(StringOp::stringTo<int>("-0x80000000") == OK(-2147483648));
+		CHECK(StringOp::stringTo<int>("0x7fffffff") == OK(2147483647));
+	}
+	SECTION("stringTo<unsigned>") {
+		std::optional<unsigned> NOK;
+		using OK = std::optional<unsigned>;
+
+		// empty string is invalid
+		CHECK(StringOp::stringTo<unsigned>("") == NOK);
+
+		// valid decimal values, only positive ..
+		CHECK(StringOp::stringTo<unsigned>("0") == OK(0));
+		CHECK(StringOp::stringTo<unsigned>("08") == OK(8));
+		CHECK(StringOp::stringTo<unsigned>("0123") == OK(123));
+		CHECK(StringOp::stringTo<unsigned>("13") == OK(13));
+		// negative is invalid
+		CHECK(StringOp::stringTo<unsigned>("-0") == NOK);
+		CHECK(StringOp::stringTo<unsigned>("-12") == NOK);
+
+		// invalid
+		CHECK(StringOp::stringTo<unsigned>("-") == NOK);
+		CHECK(StringOp::stringTo<unsigned>("zz") == NOK);
+		CHECK(StringOp::stringTo<unsigned>("+") == NOK);
+		CHECK(StringOp::stringTo<unsigned>("+12") == NOK);
+
+		// leading whitespace is invalid, trailing stuff is invalid
+		CHECK(StringOp::stringTo<unsigned>(" 16") == NOK);
+		CHECK(StringOp::stringTo<unsigned>("17 ") == NOK);
+		CHECK(StringOp::stringTo<unsigned>("17qux") == NOK);
+
+		// hexadecimal
+		CHECK(StringOp::stringTo<unsigned>("0x2a") == OK(42));
+		CHECK(StringOp::stringTo<unsigned>("0x2B") == OK(43));
+		CHECK(StringOp::stringTo<unsigned>("0X2c") == OK(44));
+		CHECK(StringOp::stringTo<unsigned>("0X2D") == OK(45));
+		CHECK(StringOp::stringTo<unsigned>("0x") == NOK);
+		CHECK(StringOp::stringTo<unsigned>("-0x456") == NOK);
+		CHECK(StringOp::stringTo<unsigned>("0x-123") == NOK);
+
+		// binary
+		CHECK(StringOp::stringTo<unsigned>("0b1100") == OK(12));
+		CHECK(StringOp::stringTo<unsigned>("0B1010") == OK(10));
+		CHECK(StringOp::stringTo<unsigned>("0b") == NOK);
+		CHECK(StringOp::stringTo<unsigned>("-0b101") == NOK);
+		CHECK(StringOp::stringTo<unsigned>("0b2") == NOK);
+		CHECK(StringOp::stringTo<unsigned>("0b-11") == NOK);
+
+		// overflow
+		CHECK(StringOp::stringTo<unsigned>("4294967296") == NOK);
+		CHECK(StringOp::stringTo<unsigned>("999999999999999") == NOK);
+		// edge case (no overflow)
+		CHECK(StringOp::stringTo<unsigned>("4294967295") == OK(4294967295));
+		CHECK(StringOp::stringTo<unsigned>("0xffffffff") == OK(4294967295));
+	}
+
+	SECTION("stringToBool") {
 		CHECK(stringToBool("0") == false);
 		CHECK(stringToBool("1") == true);
 		CHECK(stringToBool("Yes") == true);
@@ -127,41 +225,14 @@ TEST_CASE("StringOp")
 		// These two behave different as Tcl
 		CHECK(stringToBool("2") == false); // is true in Tcl
 		CHECK(stringToBool("foobar") == false); // is error in Tcl
-
-		// TODO stringToDouble
 	}
-	SECTION("toLower") {
+	/*SECTION("toLower") {
 		CHECK(toLower("") == "");
 		CHECK(toLower("foo") == "foo");
 		CHECK(toLower("FOO") == "foo");
 		CHECK(toLower("fOo") == "foo");
 		CHECK(toLower(string("FoO")) == "foo");
-	}
-	SECTION("startsWith") {
-		CHECK      (startsWith("foobar", "foo"));
-		CHECK_FALSE(startsWith("foobar", "bar"));
-		CHECK_FALSE(startsWith("ba", "bar"));
-		CHECK      (startsWith("", ""));
-		CHECK_FALSE(startsWith("", "bar"));
-		CHECK      (startsWith("foobar", ""));
-
-		CHECK      (startsWith("foobar", 'f'));
-		CHECK_FALSE(startsWith("foobar", 'b'));
-		CHECK_FALSE(startsWith("", 'b'));
-	}
-	SECTION("endsWith") {
-		CHECK      (endsWith("foobar", "bar"));
-		CHECK_FALSE(endsWith("foobar", "foo"));
-		CHECK_FALSE(endsWith("ba", "bar"));
-		CHECK_FALSE(endsWith("ba", "baba"));
-		CHECK      (endsWith("", ""));
-		CHECK_FALSE(endsWith("", "bar"));
-		CHECK      (endsWith("foobar", ""));
-
-		CHECK      (endsWith("foobar", 'r'));
-		CHECK_FALSE(endsWith("foobar", 'o'));
-		CHECK_FALSE(endsWith("", 'b'));
-	}
+	}*/
 	SECTION("trimRight") {
 		checkTrimRight("", ' ', "");
 		checkTrimRight("  ", ' ', "");
@@ -209,26 +280,29 @@ TEST_CASE("StringOp")
 		checkSplitOnLast("foo-bar-", "foo-bar", "");
 	}
 	SECTION("split") {
-		checkSplit("", {});
-		checkSplit("-", {""});
-		checkSplit("foo-", {"foo"});
-		checkSplit("-foo", {"", "foo"});
-		checkSplit("foo-bar", {"foo", "bar"});
-		checkSplit("foo-bar-qux", {"foo", "bar", "qux"});
-		checkSplit("-bar-qux", {"", "bar", "qux"});
-		checkSplit("foo-bar-", {"foo", "bar"});
-	}
-	SECTION("join") {
-		checkJoin({}, "");
-		checkJoin({""}, "");
-		checkJoin({"foo"}, "foo");
-		checkJoin({"", ""}, "-");
-		checkJoin({"foo", ""}, "foo-");
-		checkJoin({"", "foo"}, "-foo");
-		checkJoin({"foo", "bar"}, "foo-bar");
-		checkJoin({"foo", "bar", "qux"}, "foo-bar-qux");
-		checkJoin({"", "bar", "qux"}, "-bar-qux");
-		checkJoin({"foo", "bar", ""}, "foo-bar-");
+		checkSplit<StringOp::KEEP_EMPTY_PARTS>('-', "", {});
+		checkSplit<StringOp::KEEP_EMPTY_PARTS>('-', "-", {""});
+		checkSplit<StringOp::KEEP_EMPTY_PARTS>('-', "foo-", {"foo"});
+		checkSplit<StringOp::KEEP_EMPTY_PARTS>('-', "-foo", {"", "foo"});
+		checkSplit<StringOp::KEEP_EMPTY_PARTS>('-', "foo-bar", {"foo", "bar"});
+		checkSplit<StringOp::KEEP_EMPTY_PARTS>('-', "foo-bar-qux", {"foo", "bar", "qux"});
+		checkSplit<StringOp::KEEP_EMPTY_PARTS>('-', "-bar-qux", {"", "bar", "qux"});
+		checkSplit<StringOp::KEEP_EMPTY_PARTS>('-', "foo-bar-", {"foo", "bar"});
+		checkSplit<StringOp::KEEP_EMPTY_PARTS>('-', "foo--bar", {"foo", "", "bar"});
+		checkSplit<StringOp::KEEP_EMPTY_PARTS>('-', "--foo--bar--", {"", "", "foo", "", "bar", ""});
+		checkSplit<StringOp::KEEP_EMPTY_PARTS>(" \t", "foo\t\t  bar", {"foo", "", "", "", "bar"});
+
+		checkSplit<StringOp::REMOVE_EMPTY_PARTS>('-', "", {});
+		checkSplit<StringOp::REMOVE_EMPTY_PARTS>('-', "-", {});
+		checkSplit<StringOp::REMOVE_EMPTY_PARTS>('-', "foo-", {"foo"});
+		checkSplit<StringOp::REMOVE_EMPTY_PARTS>('-', "-foo", {"foo"});
+		checkSplit<StringOp::REMOVE_EMPTY_PARTS>('-', "foo-bar", {"foo", "bar"});
+		checkSplit<StringOp::REMOVE_EMPTY_PARTS>('-', "foo-bar-qux", {"foo", "bar", "qux"});
+		checkSplit<StringOp::REMOVE_EMPTY_PARTS>('-', "-bar-qux", {"bar", "qux"});
+		checkSplit<StringOp::REMOVE_EMPTY_PARTS>('-', "foo-bar-", {"foo", "bar"});
+		checkSplit<StringOp::REMOVE_EMPTY_PARTS>('-', "foo--bar", {"foo", "bar"});
+		checkSplit<StringOp::REMOVE_EMPTY_PARTS>('-', "--foo--bar--", {"foo", "bar"});
+		checkSplit<StringOp::REMOVE_EMPTY_PARTS>(" \t", "foo\t\t  bar", {"foo", "bar"});
 	}
 	SECTION("parseRange") {
 		checkParseRange("", {});
@@ -272,5 +346,19 @@ TEST_CASE("StringOp")
 		CHECK(!op("ab", "ABC"));
 		CHECK(!op("abc", "ab"));
 		CHECK(!op("abc", "AB"));
+	}
+	SECTION("containsCaseInsensitive") {
+		CHECK( StringOp::containsCaseInsensitive("abc def", "abc"));
+		CHECK( StringOp::containsCaseInsensitive("abc def", "def"));
+		CHECK(!StringOp::containsCaseInsensitive("abc def", "xyz"));
+		CHECK( StringOp::containsCaseInsensitive("ABC DEF", "abc"));
+		CHECK( StringOp::containsCaseInsensitive("ABC DEF", "def"));
+		CHECK(!StringOp::containsCaseInsensitive("ABC DEF", "xyz"));
+		CHECK( StringOp::containsCaseInsensitive("abc def", "ABC"));
+		CHECK( StringOp::containsCaseInsensitive("abc def", "DEF"));
+		CHECK(!StringOp::containsCaseInsensitive("abc def", "XYZ"));
+		CHECK( StringOp::containsCaseInsensitive("ABC DEF", "ABC"));
+		CHECK( StringOp::containsCaseInsensitive("ABC DEF", "DEF"));
+		CHECK(!StringOp::containsCaseInsensitive("ABC DEF", "XYZ"));
 	}
 }

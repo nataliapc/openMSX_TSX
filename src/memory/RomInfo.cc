@@ -1,231 +1,203 @@
+#include "MinimalPerfectHash.hh"
 #include "RomInfo.hh"
 #include "StringOp.hh"
-#include "hash_map.hh"
+#include "ranges.hh"
 #include "stl.hh"
 #include "unreachable.hh"
-#include "xxhash.hh"
-#include <algorithm>
+#include "view.hh"
+#include <array>
 #include <cassert>
-
-using std::vector;
-using std::string;
 
 namespace openmsx {
 
-static inline RomType makeAlias(RomType type)
-{
-	return static_cast<RomType>(ROM_ALIAS | type);
-}
-static inline RomType removeAlias(RomType type)
-{
-	return static_cast<RomType>(type & ~ROM_ALIAS);
-}
-static inline bool isAlias(RomType type)
-{
-	return (type & ROM_ALIAS) != 0;
-}
-
-
-static bool isInit = false;
-
-// This maps a name to a RomType. There can be multiple names (aliases) for the
-// same type.
-using RomTypeMap = hash_map<string_view, RomType, XXHasher_IgnoreCase, StringOp::casecmp>;
-static RomTypeMap romTypeMap(256); // initial hashtable size
-                                   // (big enough so that no rehash is needed)
-
-// This contains extra information for each RomType. This structure only
-// contains the primary (non-alias) romtypes.
-using RomTypeInfo = std::tuple<
-	RomType,    // rom type
-	string_view, // description
-	unsigned>;  // blockSize
-using RomTypeInfoMap = vector<RomTypeInfo>;
-using RomTypeInfoMapLess = LessTupleElement<0>;
-static RomTypeInfoMap romTypeInfoMap;
-
-static void init(RomType type, string_view name,
-                 unsigned blockSize, string_view description)
-{
-	romTypeMap.emplace_noCapacityCheck_noDuplicateCheck(name, type);
-	romTypeInfoMap.emplace_back(type, description, blockSize);
-}
-static void initAlias(RomType type, string_view name)
-{
-	romTypeMap.emplace_noCapacityCheck_noDuplicateCheck(name, makeAlias(type));
-}
-static void init()
-{
-	if (isInit) return;
-	isInit = true;
+static constexpr auto romTypeInfoArray = [] {
+	std::array<RomInfo::RomTypeInfo, RomType::ROM_LAST> r = {};
 
 	// Generic ROM types that don't exist in real ROMs
 	// (should not occur in any database!)
-	init(ROM_GENERIC_8KB,    "8kB",            0x2000, "Generic 8kB");
-	init(ROM_GENERIC_16KB,   "16kB",           0x4000, "Generic 16kB");
+	r[ROM_GENERIC_8KB]     = {0x2000, "8kB",             "Generic 8kB"};
+	r[ROM_GENERIC_16KB]    = {0x4000, "16kB",            "Generic 16kB"};
 
 	// ROM mapper types for normal software (mainly games)
-	init(ROM_KONAMI,         "Konami",         0x2000, "Konami MegaROM");
-	init(ROM_KONAMI_SCC,     "KonamiSCC",      0x2000, "Konami with SCC");
-	init(ROM_KBDMASTER,      "KeyboardMaster", 0x4000, "Konami Keyboard Master with VLM5030"); // officially plain 16K
-	init(ROM_ASCII8,         "ASCII8",         0x2000, "ASCII 8kB");
-	init(ROM_ASCII16,        "ASCII16",        0x4000, "ASCII 16kB");
-	init(ROM_R_TYPE,         "R-Type",         0x4000, "R-Type");
-	init(ROM_CROSS_BLAIM,    "CrossBlaim",     0x4000, "Cross Blaim");
-	init(ROM_HARRY_FOX,      "HarryFox",       0x4000, "Harry Fox");
-	init(ROM_HALNOTE,        "Halnote",        0x2000, "Halnote");
-	init(ROM_ZEMINA80IN1,    "Zemina80in1",    0x2000, "Zemina 80 in 1");
-	init(ROM_ZEMINA90IN1,    "Zemina90in1",    0x2000, "Zemina 90 in 1");
-	init(ROM_ZEMINA126IN1,   "Zemina126in1",   0x2000, "Zemina 126 in 1");
-	init(ROM_ASCII16_2,      "ASCII16SRAM2",   0x4000, "ASCII 16kB with 2kB SRAM");
-	init(ROM_ASCII16_8,      "ASCII16SRAM8",   0x4000, "ASCII 16kB with 8kB SRAM");
-	init(ROM_ASCII8_8,       "ASCII8SRAM8",    0x2000, "ASCII 8kB with 8kB SRAM");
-	init(ROM_ASCII8_32,      "ASCII8SRAM32",   0x2000, "ASCII 8kB with 32kB SRAM");
-	init(ROM_ASCII8_2,       "ASCII8SRAM2",    0x2000, "ASCII 8kB with 2kB SRAM");
-	init(ROM_KOEI_8,         "KoeiSRAM8",      0x2000, "Koei with 8kB SRAM");
-	init(ROM_KOEI_32,        "KoeiSRAM32",     0x2000, "Koei with 32kB SRAM");
-	init(ROM_WIZARDRY,       "Wizardry",       0x2000, "Wizardry");
-	init(ROM_GAME_MASTER2,   "GameMaster2",    0x1000, "Konami's Game Master 2");
-	init(ROM_MAJUTSUSHI,     "Majutsushi",     0x2000, "Hai no Majutsushi");
-	init(ROM_SYNTHESIZER,    "Synthesizer",    0x4000, "Konami's Synthesizer"); // officially plain 32K
-	init(ROM_PLAYBALL,       "PlayBall",       0x4000, "Sony's PlayBall"); // officially plain 32K
-	init(ROM_NETTOU_YAKYUU,  "NettouYakyuu",   0x2000, "Nettou Yakuu");
-	init(ROM_HOLY_QURAN,     "AlQuranDecoded", 0x2000, "Holy Qu'ran (pre-decrypted)");
-	init(ROM_HOLY_QURAN2,    "AlQuran",        0x2000, "Holy Qu'ran");
-	init(ROM_PADIAL8,        "Padial8",        0x2000, "Padial 8kB");
-	init(ROM_PADIAL16,       "Padial16",       0x4000, "Padial 16kB");
-	init(ROM_SUPERLODERUNNER,"SuperLodeRunner",0x4000, "Super Lode Runner");
-	init(ROM_SUPERSWANGI,    "SuperSwangi"    ,0x4000, "Super Swangi");
-	init(ROM_MSXDOS2,        "MSXDOS2",        0x4000, "MSX-DOS2");
-	init(ROM_MITSUBISHIMLTS2,"MitsubishiMLTS2",0x2000, "Mitsubishi ML-TS2 firmware");
-	init(ROM_MANBOW2,        "Manbow2",        0x2000, "Manbow2");
-	init(ROM_MANBOW2_2,      "Manbow2_2",      0x2000, "Manbow2 - Second Release");
-	init(ROM_HAMARAJANIGHT,  "HamarajaNight",  0x2000, "Best of Hamaraja Night");
-	init(ROM_MEGAFLASHROMSCC,"MegaFlashRomScc",0x2000, "Mega Flash ROM SCC");
-	init(ROM_MATRAINK,       "MatraInk",       0x0000, "Matra Ink");
-	init(ROM_ARC,            "Arc",            0x4000, "Parallax' ARC"); // officially plain 32K
-	init(ROM_DOOLY,          "Dooly",          0x4000, "Baby Dinosaur Dooly"); // officially 32K blocksize, but spread over 2 pages
-	init(ROM_MSXTRA,         "MSXtra",         0x0000, "PTC MSXtra");
-	init(ROM_MSXWRITE,       "MSXWrite",       0x4000, "Japanese MSX Write");
-	init(ROM_MULTIROM,       "MultiRom",       0x0000, "MultiRom Collection");
-	init(ROM_RAMFILE,        "RAMFILE",        0x0000, "Tecall MSX RAMFILE");
-	init(ROM_COLECOMEGACART, "ColecoMegaCart", 0x4000, "ColecoVision MegaCart");
-	init(ROM_MEGAFLASHROMSCCPLUS,"MegaFlashRomSccPlus",0x0000, "Mega Flash ROM SCC Plus");
-	init(ROM_KONAMI_ULTIMATE_COLLECTION,"KonamiUltimateCollection",0x0000, "Konami Ultimate Collection");
+	r[ROM_KONAMI]          = {0x2000, "Konami",          "Konami MegaROM"};
+	r[ROM_KONAMI_SCC]      = {0x2000, "KonamiSCC",       "Konami with SCC"};
+	r[ROM_KBDMASTER]       = {0x4000, "KeyboardMaster",  "Konami Keyboard Master with VLM5030"}; // officially plain 16K
+	r[ROM_ASCII8]          = {0x2000, "ASCII8",          "ASCII 8kB"};
+	r[ROM_ASCII16]         = {0x4000, "ASCII16",         "ASCII 16kB"};
+	r[ROM_R_TYPE]          = {0x4000, "R-Type",          "R-Type"};
+	r[ROM_CROSS_BLAIM]     = {0x4000, "CrossBlaim",      "Cross Blaim"};
+	r[ROM_HARRY_FOX]       = {0x4000, "HarryFox",        "Harry Fox"};
+	r[ROM_HALNOTE]         = {0x2000, "Halnote",         "Halnote"};
+	r[ROM_ZEMINA25IN1]     = {0x2000, "Zemina25in1",     "Zemina 25 in 1"};
+	r[ROM_ZEMINA80IN1]     = {0x2000, "Zemina80in1",     "Zemina 80 in 1"};
+	r[ROM_ZEMINA90IN1]     = {0x2000, "Zemina90in1",     "Zemina 90 in 1"};
+	r[ROM_ZEMINA126IN1]    = {0x2000, "Zemina126in1",    "Zemina 126 in 1"};
+	r[ROM_ASCII16_2]       = {0x4000, "ASCII16SRAM2",    "ASCII 16kB with 2kB SRAM"};
+	r[ROM_ASCII16_8]       = {0x4000, "ASCII16SRAM8",    "ASCII 16kB with 8kB SRAM"};
+	r[ROM_ASCII8_8]        = {0x2000, "ASCII8SRAM8",     "ASCII 8kB with 8kB SRAM"};
+	r[ROM_ASCII8_32]       = {0x2000, "ASCII8SRAM32",    "ASCII 8kB with 32kB SRAM"};
+	r[ROM_ASCII8_2]        = {0x2000, "ASCII8SRAM2",     "ASCII 8kB with 2kB SRAM"};
+	r[ROM_KOEI_8]          = {0x2000, "KoeiSRAM8",       "Koei with 8kB SRAM"};
+	r[ROM_KOEI_32]         = {0x2000, "KoeiSRAM32",      "Koei with 32kB SRAM"};
+	r[ROM_WIZARDRY]        = {0x2000, "Wizardry",        "Wizardry"};
+	r[ROM_GAME_MASTER2]    = {0x1000, "GameMaster2",     "Konami's Game Master 2"};
+	r[ROM_MAJUTSUSHI]      = {0x2000, "Majutsushi",      "Hai no Majutsushi"};
+	r[ROM_SYNTHESIZER]     = {0     , "Synthesizer",     "Konami's Synthesizer"}; // plain 32K
+	r[ROM_PLAYBALL]        = {0     , "PlayBall",        "Sony's PlayBall"}; // plain 32K
+	r[ROM_NETTOU_YAKYUU]   = {0x2000, "NettouYakyuu",    "Nettou Yakuu"};
+	r[ROM_HOLY_QURAN]      = {0x2000, "AlQuranDecoded",  "Holy Qu'ran (pre-decrypted)"};
+	r[ROM_HOLY_QURAN2]     = {0x2000, "AlQuran",         "Holy Qu'ran"};
+	r[ROM_PADIAL8]         = {0x2000, "Padial8",         "Padial 8kB"};
+	r[ROM_PADIAL16]        = {0x4000, "Padial16",        "Padial 16kB"};
+	r[ROM_SUPERLODERUNNER] = {0x4000, "SuperLodeRunner", "Super Lode Runner"};
+	r[ROM_SUPERSWANGI]     = {0x4000, "SuperSwangi",     "Super Swangi"};
+	r[ROM_MSXDOS2]         = {0x4000, "MSXDOS2",         "MSX-DOS2"};
+	r[ROM_MITSUBISHIMLTS2] = {0x2000, "MitsubishiMLTS2", "Mitsubishi ML-TS2 firmware"};
+	r[ROM_MANBOW2]         = {0x2000, "Manbow2",         "Manbow2"};
+	r[ROM_MANBOW2_2]       = {0x2000, "Manbow2_2",       "Manbow2 - Second Release"};
+	r[ROM_RBSC_FLASH_KONAMI_SCC]={0x2000,"RBSC_Flash_KonamiSCC","RBSC 2MB flash, Konami SCC mapper"};
+	r[ROM_HAMARAJANIGHT]   = {0x2000, "HamarajaNight",   "Best of Hamaraja Night"};
+	r[ROM_MEGAFLASHROMSCC] = {0x2000, "MegaFlashRomScc", "Mega Flash ROM SCC"};
+	r[ROM_MATRAINK]        = {0     , "MatraInk",        "Matra Ink"};
+	r[ROM_MATRACOMPILATION]= {0x2000, "MatraCompilation","Matra Compilation"};
+	r[ROM_ARC]             = {0     , "Arc",             "Parallax' ARC"}; // plain 32K
+	r[ROM_ROMHUNTERMK2]    = {0x2000, "ROMHunterMk2",    "ROM Hunter Mk2"}; // variable block size, 8kB smallest
+	r[ROM_DOOLY]           = {0x4000, "Dooly",           "Baby Dinosaur Dooly"}; // officially 32K blocksize, but spread over 2 pages
+	r[ROM_MSXTRA]          = {0     , "MSXtra",          "PTC MSXtra"};
+	r[ROM_MSXWRITE]        = {0x4000, "MSXWrite",        "Japanese MSX Write"};
+	r[ROM_MULTIROM]        = {0x4000, "MultiRom",        "MultiRom Collection"};
+	r[ROM_RAMFILE]         = {0     , "RAMFILE",         "Tecall MSX RAMFILE"};
+	r[ROM_RETROHARD31IN1]  = {0x2000, "RetroHardMultiCart31in1", "RetroHard MultiCart 31 in 1"};
+	r[ROM_ALALAMIAH30IN1]  = {0x8000, "AlAlamiah30-in-1", "Al Alamiah 30-in-1"};
+	r[ROM_COLECOMEGACART]  = {0x4000, "ColecoMegaCart",  "ColecoVision MegaCart"};
+	r[ROM_MEGAFLASHROMSCCPLUS]={0     ,"MegaFlashRomSccPlus","Mega Flash ROM SCC Plus"}; // variable block size
+	r[ROM_REPRO_CARTRIDGE1]= {0x2000, "ReproCartridgeV1","Repro Cartridge V1"};
+	r[ROM_REPRO_CARTRIDGE2]= {0x2000, "ReproCartridgeV2","Repro Cartridge V2"};
+	r[ROM_KONAMI_ULTIMATE_COLLECTION]={0x2000,"KonamiUltimateCollection","Konami Ultimate Collection"};
+	r[ROM_NEO8]            = {0x2000, "NEO-8",           "NEO-8 mapper"};
+	r[ROM_NEO16]           = {0x4000, "NEO-16",          "NEO-16 mapper"};
 
 	// ROM mapper types used for system ROMs in machines
-	init(ROM_PANASONIC, "Panasonic", 0x2000, "Panasonic internal mapper");
-	init(ROM_NATIONAL,  "National",  0x4000, "National internal mapper");
-	init(ROM_FSA1FM1,   "FSA1FM1",   0x0000, "Panasonic FS-A1FM internal mapper 1"); // TODO: romblocks debuggable?
-	init(ROM_FSA1FM2,   "FSA1FM2",   0x2000, "Panasonic FS-A1FM internal mapper 2");
-	init(ROM_DRAM,      "DRAM",      0x2000, "MSXturboR DRAM");
+	r[ROM_PANASONIC]       = {0x2000, "Panasonic",       "Panasonic internal mapper"};
+	r[ROM_NATIONAL]        = {0x4000, "National",        "National internal mapper"};
+	r[ROM_FSA1FM1]         = {0     , "FSA1FM1",         "Panasonic FS-A1FM internal mapper 1"}; // TODO: romblocks debuggable?
+	r[ROM_FSA1FM2]         = {0x2000, "FSA1FM2",         "Panasonic FS-A1FM internal mapper 2"};
+	r[ROM_DRAM]            = {0x2000, "DRAM",            "MSXturboR DRAM"};
 
 	// Non-mapper ROM types
-	init(ROM_MIRRORED,    "Mirrored",    0x2000, "Plain rom, mirrored (any size)");
-	init(ROM_MIRRORED0000,"Mirrored0000",0x2000, "Plain rom, mirrored start at 0x0000");
-	init(ROM_MIRRORED4000,"Mirrored4000",0x2000, "Plain rom, mirrored start at 0x4000");
-	init(ROM_MIRRORED8000,"Mirrored8000",0x2000, "Plain rom, mirrored start at 0x8000");
-	init(ROM_MIRROREDC000,"MirroredC000",0x2000, "Plain rom, mirrored start at 0xC000");
-	init(ROM_NORMAL,      "Normal",      0x2000, "Plain rom (any size)");
-	init(ROM_NORMAL0000,  "Normal0000",  0x2000, "Plain rom start at 0x0000");
-	init(ROM_NORMAL4000,  "Normal4000",  0x2000, "Plain rom start at 0x4000");
-	init(ROM_NORMAL8000,  "Normal8000",  0x2000, "Plain rom start at 0x8000");
-	init(ROM_NORMALC000,  "NormalC000",  0x2000, "Plain rom start at 0xC000");
-	init(ROM_PAGE0,       "Page0",       0x2000, "Plain 16kB page 0");
-	init(ROM_PAGE1,       "Page1",       0x2000, "Plain 16kB page 1");
-	init(ROM_PAGE2,       "Page2",       0x2000, "Plain 16kB page 2 (BASIC)");
-	init(ROM_PAGE3,       "Page3",       0x2000, "Plain 16kB page 3");
-	init(ROM_PAGE01,      "Page01",      0x2000, "Plain 32kB page 0-1");
-	init(ROM_PAGE12,      "Page12",      0x2000, "Plain 32kB page 1-2");
-	init(ROM_PAGE23,      "Page23",      0x2000, "Plain 32kB page 2-3");
-	init(ROM_PAGE012,     "Page012",     0x2000, "Plain 48kB page 0-2");
-	init(ROM_PAGE123,     "Page123",     0x2000, "Plain 48kB page 1-3");
-	init(ROM_PAGE0123,    "Page0123",    0x2000, "Plain 64kB");
-
-	// Alternative names for rom types, mainly for backwards compatibility
-	initAlias(ROM_GENERIC_8KB, "0");
-	initAlias(ROM_GENERIC_8KB, "GenericKonami"); // probably actually used in a Zemina Box
-	initAlias(ROM_GENERIC_16KB,"1");
-	initAlias(ROM_KONAMI_SCC,  "2");
-	initAlias(ROM_KONAMI_SCC,  "SCC");
-	initAlias(ROM_KONAMI_SCC,  "KONAMI5");
-	initAlias(ROM_KONAMI,      "KONAMI4");
-	initAlias(ROM_KONAMI,      "3");
-	initAlias(ROM_ASCII8,      "4");
-	initAlias(ROM_ASCII16,     "5");
-	initAlias(ROM_MIRRORED,    "64kB");
-	initAlias(ROM_MIRRORED,    "Plain");
-	initAlias(ROM_NORMAL0000,  "0x0000");
-	initAlias(ROM_NORMAL4000,  "0x4000");
-	initAlias(ROM_NORMAL8000,  "0x8000");
-	initAlias(ROM_NORMALC000,  "0xC000");
-	initAlias(ROM_ASCII16_2,   "HYDLIDE2");
-	initAlias(ROM_GAME_MASTER2,"RC755");
-	initAlias(ROM_NORMAL8000,  "ROMBAS");
-	initAlias(ROM_R_TYPE,      "RTYPE");
-	initAlias(ROM_ZEMINA80IN1, "KOREAN80IN1");
-	initAlias(ROM_ZEMINA90IN1, "KOREAN90IN1");
-	initAlias(ROM_ZEMINA126IN1,"KOREAN126IN1");
-	initAlias(ROM_HOLY_QURAN,  "HolyQuran");
-
-	sort(begin(romTypeInfoMap), end(romTypeInfoMap), RomTypeInfoMapLess());
-}
-static const RomTypeMap& getRomTypeMap()
+	r[ROM_MIRRORED]        = {0,      "Mirrored",        "Plain rom, mirrored (any size)"};
+	r[ROM_MIRRORED0000]    = {0,      "Mirrored0000",    "Plain rom, mirrored start at 0x0000"};
+	r[ROM_MIRRORED4000]    = {0,      "Mirrored4000",    "Plain rom, mirrored start at 0x4000"};
+	r[ROM_MIRRORED8000]    = {0,      "Mirrored8000",    "Plain rom, mirrored start at 0x8000"};
+	r[ROM_MIRROREDC000]    = {0,      "MirroredC000",    "Plain rom, mirrored start at 0xC000"};
+	r[ROM_NORMAL]          = {0,      "Normal",          "Plain rom (any size)"};
+	r[ROM_NORMAL0000]      = {0,      "Normal0000",      "Plain rom start at 0x0000"};
+	r[ROM_NORMAL4000]      = {0,      "Normal4000",      "Plain rom start at 0x4000"};
+	r[ROM_NORMAL8000]      = {0,      "Normal8000",      "Plain rom start at 0x8000"};
+	r[ROM_NORMALC000]      = {0,      "NormalC000",      "Plain rom start at 0xC000"};
+	r[ROM_PAGE0]           = {0,      "Page0",           "Plain 16kB page 0"};
+	r[ROM_PAGE1]           = {0,      "Page1",           "Plain 16kB page 1"};
+	r[ROM_PAGE2]           = {0,      "Page2",           "Plain 16kB page 2 (BASIC)"};
+	r[ROM_PAGE3]           = {0,      "Page3",           "Plain 16kB page 3"};
+	r[ROM_PAGE01]          = {0,      "Page01",          "Plain 32kB page 0-1"};
+	r[ROM_PAGE12]          = {0,      "Page12",          "Plain 32kB page 1-2"};
+	r[ROM_PAGE23]          = {0,      "Page23",          "Plain 32kB page 2-3"};
+	r[ROM_PAGE012]         = {0,      "Page012",         "Plain 48kB page 0-2"};
+	r[ROM_PAGE123]         = {0,      "Page123",         "Plain 48kB page 1-3"};
+	r[ROM_PAGE0123]        = {0,      "Page0123",        "Plain 64kB"};
+	return r;
+}();
+const std::array<RomInfo::RomTypeInfo, RomType::ROM_LAST>& RomInfo::getRomTypeInfo()
 {
-	init();
-	return romTypeMap;
-}
-static const RomTypeInfoMap& getRomTypeInfoMap()
-{
-	init();
-	return romTypeInfoMap;
+	return romTypeInfoArray;
 }
 
-RomType RomInfo::nameToRomType(string_view name)
-{
-	auto& m = getRomTypeMap();
-	auto it = m.find(name);
-	return (it != end(m)) ? removeAlias(it->second) : ROM_UNKNOWN;
-}
+struct RomTypeAndName {
+	RomType romType;
+	std::string_view name;
+};
+static constexpr std::array aliasTable = {
+	RomTypeAndName{ROM_GENERIC_8KB, "0"},
+	RomTypeAndName{ROM_GENERIC_8KB, "GenericKonami"}, // probably actually used in a Zemina Box
+	RomTypeAndName{ROM_GENERIC_16KB,"1"},
+	RomTypeAndName{ROM_KONAMI_SCC,  "2"},
+	RomTypeAndName{ROM_KONAMI_SCC,  "SCC"},
+	RomTypeAndName{ROM_KONAMI_SCC,  "KONAMI5"},
+	RomTypeAndName{ROM_KONAMI,      "KONAMI4"},
+	RomTypeAndName{ROM_KONAMI,      "3"},
+	RomTypeAndName{ROM_ASCII8,      "4"},
+	RomTypeAndName{ROM_ASCII16,     "5"},
+	RomTypeAndName{ROM_MIRRORED,    "64kB"},
+	RomTypeAndName{ROM_MIRRORED,    "Plain"},
+	RomTypeAndName{ROM_NORMAL0000,  "0x0000"},
+	RomTypeAndName{ROM_NORMAL4000,  "0x4000"},
+	RomTypeAndName{ROM_NORMAL8000,  "0x8000"},
+	RomTypeAndName{ROM_NORMALC000,  "0xC000"},
+	RomTypeAndName{ROM_ASCII16_2,   "HYDLIDE2"},
+	RomTypeAndName{ROM_GAME_MASTER2,"RC755"},
+	RomTypeAndName{ROM_NORMAL8000,  "ROMBAS"},
+	RomTypeAndName{ROM_R_TYPE,      "RTYPE"},
+	RomTypeAndName{ROM_ZEMINA80IN1, "KOREAN80IN1"},
+	RomTypeAndName{ROM_ZEMINA90IN1, "KOREAN90IN1"},
+	RomTypeAndName{ROM_ZEMINA126IN1,"KOREAN126IN1"},
+	RomTypeAndName{ROM_HOLY_QURAN,  "HolyQuran"},
+};
 
-string_view RomInfo::romTypeToName(RomType type)
-{
-	assert(!isAlias(type));
-	for (auto& p : getRomTypeMap()) {
-		if (p.second == type) {
-			return p.first;
-		}
+static constexpr auto combinedRomTable = [] {
+	constexpr auto N = std::size(romTypeInfoArray) + std::size(aliasTable);
+	std::array<RomTypeAndName, N> result = {};
+	size_t i = 0;
+	for (const auto& e : romTypeInfoArray) {
+		result[i].romType = static_cast<RomType>(i);
+		result[i].name = e.name;
+		++i;
 	}
-	UNREACHABLE; return {};
-}
-
-vector<string_view> RomInfo::getAllRomTypes()
-{
-	vector<string_view> result;
-	for (auto& p : getRomTypeMap()) {
-		if (!isAlias(p.second)) {
-			result.push_back(p.first);
-		}
+	for (const auto& e : aliasTable) {
+		result[i++] = e;
 	}
 	return result;
+}();
+
+struct RomTypeNameHash {
+	[[nodiscard]] constexpr uint32_t operator()(std::string_view str) const {
+		constexpr auto MASK = uint8_t(~('a' - 'A')); // case insensitive
+		uint32_t d = 0;
+		for (char c : str) {
+			d = (d ^ (c & MASK)) * 0x01000193;
+		}
+		return d;
+	}
+};
+
+// Construct perfect hash function to lookup RomType by name.
+static constexpr auto pmh = [] {
+	auto getKey = [](size_t i) { return combinedRomTable[i].name; };
+	return PerfectMinimalHash::create<std::size(combinedRomTable)>(RomTypeNameHash{}, getKey);
+}();
+
+RomType RomInfo::nameToRomType(std::string_view name)
+{
+	auto idx = pmh.lookupIndex(name);
+	assert(idx < std::size(combinedRomTable));
+	if (StringOp::casecmp cmp; cmp(combinedRomTable[idx].name, name)) {
+		return combinedRomTable[idx].romType;
+	}
+	return ROM_UNKNOWN;
 }
 
-string_view RomInfo::getDescription(RomType type)
+std::string_view RomInfo::romTypeToName(RomType type)
 {
-	auto& m = getRomTypeInfoMap();
-	auto it = lower_bound(begin(m), end(m), type, RomTypeInfoMapLess());
-	assert(it != end(m));
-	assert(std::get<0>(*it) == type);
-	return std::get<1>(*it);
+	return romTypeInfoArray[type].name;
+}
+
+std::string_view RomInfo::getDescription(RomType type)
+{
+	return romTypeInfoArray[type].description;
 }
 
 unsigned RomInfo::getBlockSize(RomType type)
 {
-	auto& m = getRomTypeInfoMap();
-	auto it = lower_bound(begin(m), end(m), type, RomTypeInfoMapLess());
-	assert(it != end(m));
-	assert(std::get<0>(*it) == type);
-	return std::get<2>(*it);
+	return romTypeInfoArray[type].blockSize;
 }
 
 } // namespace openmsx

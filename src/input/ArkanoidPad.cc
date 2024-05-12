@@ -1,9 +1,8 @@
 #include "ArkanoidPad.hh"
 #include "MSXEventDistributor.hh"
 #include "StateChangeDistributor.hh"
-#include "InputEvents.hh"
+#include "Event.hh"
 #include "StateChange.hh"
-#include "checked_cast.hh"
 #include "serialize.hh"
 #include "serialize_meta.hh"
 #include <algorithm>
@@ -17,16 +16,12 @@
 // will cause garbage reads, and too long delays at shifting will eventually
 // cause the shift register bits to return to 0.
 
-using std::string;
-using std::shared_ptr;
-using std::make_shared;
-
 namespace openmsx {
 
-static const int POS_MIN = 55; // measured by hap
-static const int POS_MAX = 325; // measured by hap
-static const int POS_CENTER = 236; // approx. middle used by games
-static const int SCALE = 2;
+static constexpr int POS_MIN = 55; // measured by hap
+static constexpr int POS_MAX = 325; // measured by hap
+static constexpr int POS_CENTER = 236; // approx. middle used by games
+static constexpr int SCALE = 2;
 
 
 class ArkanoidState final : public StateChange
@@ -36,16 +31,16 @@ public:
 	ArkanoidState(EmuTime::param time_, int delta_, bool press_, bool release_)
 		: StateChange(time_)
 		, delta(delta_), press(press_), release(release_) {}
-	int  getDelta()   const { return delta; }
-	bool getPress()   const { return press; }
-	bool getRelease() const { return release; }
+	[[nodiscard]] int  getDelta()   const { return delta; }
+	[[nodiscard]] bool getPress()   const { return press; }
+	[[nodiscard]] bool getRelease() const { return release; }
 
 	template<typename Archive> void serialize(Archive& ar, unsigned /*version*/)
 	{
 		ar.template serializeBase<StateChange>(*this);
-		ar.serialize("delta", delta);
-		ar.serialize("press", press);
-		ar.serialize("release", release);
+		ar.serialize("delta",   delta,
+		             "press",   press,
+		             "release", release);
 	}
 private:
 	int delta;
@@ -57,10 +52,7 @@ ArkanoidPad::ArkanoidPad(MSXEventDistributor& eventDistributor_,
                          StateChangeDistributor& stateChangeDistributor_)
 	: eventDistributor(eventDistributor_)
 	, stateChangeDistributor(stateChangeDistributor_)
-	, shiftreg(0) // the 9 bit shift degrades to 0
-	, dialpos(POS_CENTER)
-	, buttonStatus(0x3E)
-	, lastValue(0)
+	, dialPos(POS_CENTER)
 {
 }
 
@@ -73,13 +65,12 @@ ArkanoidPad::~ArkanoidPad()
 
 
 // Pluggable
-const string& ArkanoidPad::getName() const
+std::string_view ArkanoidPad::getName() const
 {
-	static const string name("arkanoidpad");
-	return name;
+	return "arkanoidpad";
 }
 
-string_view ArkanoidPad::getDescription() const
+std::string_view ArkanoidPad::getDescription() const
 {
 	return "Arkanoid pad";
 }
@@ -97,104 +88,99 @@ void ArkanoidPad::unplugHelper(EmuTime::param /*time*/)
 }
 
 // JoystickDevice
-byte ArkanoidPad::read(EmuTime::param /*time*/)
+uint8_t ArkanoidPad::read(EmuTime::param /*time*/)
 {
-	return buttonStatus | ((shiftreg & 0x100) >> 8);
+	return buttonStatus | ((shiftReg & 0x100) >> 8);
 }
 
-void ArkanoidPad::write(byte value, EmuTime::param /*time*/)
+void ArkanoidPad::write(uint8_t value, EmuTime::param /*time*/)
 {
-	byte diff = lastValue ^ value;
+	uint8_t diff = lastValue ^ value;
 	lastValue = value;
 
 	if (diff & value & 0x4) {
 		// pin 8 from low to high: copy dial position into shift reg
-		shiftreg = dialpos;
+		shiftReg = dialPos;
 	}
 	if (diff & value & 0x1) {
 		// pin 6 from low to high: shift the shift reg
-		shiftreg = (shiftreg << 1) | (shiftreg & 1); // bit 0's value is 'shifted in'
+		shiftReg = (shiftReg << 1) | (shiftReg & 1); // bit 0's value is 'shifted in'
 	}
 }
 
 // MSXEventListener
-void ArkanoidPad::signalEvent(const shared_ptr<const Event>& event,
-                              EmuTime::param time)
+void ArkanoidPad::signalMSXEvent(const Event& event,
+                                 EmuTime::param time) noexcept
 {
-	switch (event->getType()) {
-	case OPENMSX_MOUSE_MOTION_EVENT: {
-		auto& mEvent = checked_cast<const MouseMotionEvent&>(*event);
-		int newPos = std::min(POS_MAX,
-		                      std::max(POS_MIN,
-		                               dialpos + mEvent.getX() / SCALE));
-		int delta = newPos - dialpos;
-		if (delta != 0) {
-			stateChangeDistributor.distributeNew(
-				make_shared<ArkanoidState>(
-					time, delta, false, false));
-		}
-		break;
-	}
-	case OPENMSX_MOUSE_BUTTON_DOWN_EVENT:
-		// any button will press the Arkanoid Pad button
-		if (buttonStatus & 2) {
-			stateChangeDistributor.distributeNew(
-				make_shared<ArkanoidState>(
-					time, 0, true, false));
-		}
-		break;
-	case OPENMSX_MOUSE_BUTTON_UP_EVENT:
-		// any button will unpress the Arkanoid Pad button
-		if (!(buttonStatus & 2)) {
-			stateChangeDistributor.distributeNew(
-				make_shared<ArkanoidState>(
-					time, 0, false, true));
-		}
-		break;
-	default:
-		// ignore
-		break;
-	}
+	visit(overloaded{
+		[&](const MouseMotionEvent& e) {
+			int newPos = std::min(POS_MAX,
+					std::max(POS_MIN,
+						dialPos + e.getX() / SCALE));
+			int delta = newPos - dialPos;
+			if (delta != 0) {
+				stateChangeDistributor.distributeNew<ArkanoidState>(
+					time, delta, false, false);
+			}
+		},
+		[&](const MouseButtonDownEvent& /*e*/) {
+			// any button will press the Arkanoid Pad button
+			if (buttonStatus & 2) {
+				stateChangeDistributor.distributeNew<ArkanoidState>(
+					time, 0, true, false);
+			}
+		},
+		[&](const MouseButtonUpEvent& /*e*/) {
+			// any button will unpress the Arkanoid Pad button
+			if (!(buttonStatus & 2)) {
+				stateChangeDistributor.distributeNew<ArkanoidState>(
+					time, 0, false, true);
+			}
+		},
+		[](const EventBase&) { /*ignore */}
+	}, event);
 }
 
 // StateChangeListener
-void ArkanoidPad::signalStateChange(const shared_ptr<StateChange>& event)
+void ArkanoidPad::signalStateChange(const StateChange& event)
 {
-	auto as = dynamic_cast<ArkanoidState*>(event.get());
+	const auto* as = dynamic_cast<const ArkanoidState*>(&event);
 	if (!as) return;
 
-	dialpos += as->getDelta();
+	dialPos += as->getDelta();
 	if (as->getPress())   buttonStatus &= ~2;
 	if (as->getRelease()) buttonStatus |=  2;
 }
 
-void ArkanoidPad::stopReplay(EmuTime::param time)
+void ArkanoidPad::stopReplay(EmuTime::param time) noexcept
 {
 	// TODO Get actual mouse button(s) state. Is it worth the trouble?
-	int delta = POS_CENTER - dialpos;
+	int delta = POS_CENTER - dialPos;
 	bool release = (buttonStatus & 2) == 0;
 	if ((delta != 0) || release) {
-		stateChangeDistributor.distributeNew(make_shared<ArkanoidState>(
-			time, delta, false, release));
+		stateChangeDistributor.distributeNew<ArkanoidState>(
+			time, delta, false, release);
 	}
 }
 
 
-// version 1: Initial version, the variables dialpos and buttonStatus were not
+// version 1: Initial version, the variables dialPos and buttonStatus were not
 //            serialized.
 // version 2: Also serialize the above variables, this is required for
 //            record/replay, see comment in Keyboard.cc for more details.
 template<typename Archive>
 void ArkanoidPad::serialize(Archive& ar, unsigned version)
 {
-	ar.serialize("shiftreg", shiftreg);
-	ar.serialize("lastValue", lastValue);
+	ar.serialize("shiftreg",  shiftReg,
+	             "lastValue", lastValue);
 	if (ar.versionAtLeast(version, 2)) {
-		ar.serialize("dialpos", dialpos);
-		ar.serialize("buttonStatus", buttonStatus);
+		ar.serialize("dialpos",      dialPos,
+		             "buttonStatus", buttonStatus);
 	}
-	if (ar.isLoader() && isPluggedIn()) {
-		plugHelper(*getConnector(), EmuTime::dummy());
+	if constexpr (Archive::IS_LOADER) {
+		if (isPluggedIn()) {
+			plugHelper(*getConnector(), EmuTime::dummy());
+		}
 	}
 }
 INSTANTIATE_SERIALIZE_METHODS(ArkanoidPad);

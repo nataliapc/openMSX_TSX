@@ -8,7 +8,6 @@
 #include "Ram.hh"
 #include "Math.hh"
 #include "openmsx.hh"
-#include "likely.hh"
 #include <cassert>
 
 namespace openmsx {
@@ -103,7 +102,7 @@ precalculate overlaps.
 Not necessarily though, because even if two windows overlap, a single write
 may not be inside the other window. So precalculated overlaps only speeds up
 in the case there is no overlap.
-Maybe it's not necessary to know exactly which windows overlap with cmdwrite,
+Maybe it's not necessary to know exactly which windows overlap with cmdWrite,
 only to know whether there are any. If not, sync can be skipped.
 
 Is it possible to read multiple bytes at the same time?
@@ -115,7 +114,7 @@ can decide for itself how many bytes to read.
 
 */
 
-class DummyVRAMOBserver final : public VRAMObserver
+class DummyVRAMObserver final : public VRAMObserver
 {
 public:
 	void updateVRAM(unsigned /*offset*/, EmuTime::param /*time*/) override {}
@@ -136,14 +135,16 @@ class VRAMWindow
 {
 public:
 	VRAMWindow(const VRAMWindow&) = delete;
+	VRAMWindow(VRAMWindow&&) = delete;
 	VRAMWindow& operator=(const VRAMWindow&) = delete;
+	VRAMWindow& operator=(VRAMWindow&&) = delete;
 
 	/** Gets the mask for this window.
 	  * Should only be called if the window is enabled.
 	  * TODO: Only used by dirty checking. Maybe a new dirty checking
 	  *       approach can obsolete this method?
 	  */
-	inline int getMask() const {
+	[[nodiscard]] inline unsigned getMask() const {
 		assert(isEnabled());
 		return effectiveBaseMask;
 	}
@@ -153,6 +154,7 @@ public:
 	  *     with the unused bits all ones.
 	  * @param newIndexMask The table index mask,
 	  *     with the unused bits all ones.
+	  * @param newSizeMask
 	  * @param time The moment in emulated time this change occurs.
 	  * TODO: In planar mode, the index bits are rotated one to the right.
 	  *       Solution: have the caller pass index mask instead of the
@@ -160,10 +162,10 @@ public:
 	  *       For many tables the number of index bits depends on the
 	  *       display mode anyway.
 	  */
-	inline void setMask(int newBaseMask, int newIndexMask,
-	                    EmuTime::param time) {
+	inline void setMask(unsigned newBaseMask, unsigned newIndexMask,
+	                    unsigned newSizeMask, EmuTime::param time) {
 		origBaseMask = newBaseMask;
-		newBaseMask &= sizeMask;
+		newBaseMask &= newSizeMask;
 		if (isEnabled() &&
 		    (newBaseMask  == effectiveBaseMask) &&
 		    (newIndexMask == indexMask)) {
@@ -176,18 +178,26 @@ public:
 		combiMask = ~effectiveBaseMask | indexMask;
 	}
 
+	/** Same as above, but 'sizeMask' doesn't change.
+	 * This is a useful shortcut, because 'sizeMask' rarely changes.
+	 */
+	inline void setMask(unsigned newBaseMask, unsigned newIndexMask,
+	                    EmuTime::param time) {
+		setMask(newBaseMask, newIndexMask, sizeMask, time);
+	}
+
 	/** Disable this window: no address will be considered inside.
 	  * @param time The moment in emulated time this change occurs.
 	  */
 	inline void disable(EmuTime::param time) {
 		observer->updateWindow(false, time);
-		baseAddr = -1;
+		baseAddr = unsigned(-1);
 	}
 
 	/** Is the given index range continuous in VRAM (iow there's no mirroring)
 	  * Only if the range is continuous it's allowed to call getReadArea().
 	  */
-	inline bool isContinuous(unsigned index, unsigned size) const {
+	[[nodiscard]] inline bool isContinuous(unsigned index, unsigned size) const {
 		assert(isEnabled());
 		unsigned endIndex = index + size - 1;
 		unsigned areaBits = Math::floodRight(index ^ endIndex);
@@ -204,53 +214,55 @@ public:
 	  * 1-bits in the parameter correspond with 'X' in the pattern above.
 	  * Or IOW it tests an aligned-power-of-2-sized region.
 	  */
-	inline bool isContinuous(unsigned mask) const {
+	[[nodiscard]] inline bool isContinuous(unsigned mask) const {
 		assert(isEnabled());
 		assert((mask & ~indexMask)        == mask);
 		return (mask & effectiveBaseMask) == mask;
 	}
 
-	/** Gets a pointer to a contiguous part of the VRAM. The region is
+	/** Gets a span of a contiguous part of the VRAM. The region is
 	  * [index, index + size) inside the current window.
-	  * @param index Index in table
-	  * @param size Size of the block. This is only used to assert that
-	  *             requested block is not too large.
+	  * @param index Index in window
 	  */
-	inline const byte* getReadArea(unsigned index, unsigned size) const {
-		assert(isContinuous(index, size)); (void)size;
-		return &data[effectiveBaseMask & (indexMask | index)];
+	template<size_t size>
+	[[nodiscard]] inline std::span<const byte, size> getReadArea(unsigned index) const {
+		assert(isContinuous(index, size));
+		return std::span<const byte, size>{
+				&data[effectiveBaseMask & (indexMask | index)],
+				size};
 	}
 
 	/** Similar to getReadArea(), but now with planar addressing mode.
 	  * This means the region is split in two: one region for the even bytes
-	  * (ptr0) and another for the odd bytes (ptr1).
-	  * @param index Index in table
-	  * @param size Size of the block. This is only used to assert that
-	  *             requested block is not too large.
-	  * @param ptr0 out Pointer to the block of even numbered bytes.
-	  * @param ptr1 out Pointer to the block of odd  numbered bytes.
+	  * (span0) and another for the odd bytes (span1).
+	  * @param index Index in window
+	  * @return pair{span0, span1}
+	  *    span0: The block of even numbered bytes.
+	  *    span1: The block of odd  numbered bytes.
 	  */
-	inline void getReadAreaPlanar(
-			unsigned index, unsigned size,
-			const byte*& ptr0, const byte*& ptr1) const {
+	template<size_t size>
+	[[nodiscard]] inline std::pair<std::span<const byte, size / 2>, std::span<const byte, size / 2>>
+			getReadAreaPlanar(unsigned index) const {
 		assert((index & 1) == 0);
 		assert((size & 1) == 0);
 		unsigned endIndex = index + size - 1;
 		unsigned areaBits = Math::floodRight(index ^ endIndex);
-		areaBits = ((areaBits << 16) | (areaBits >> 1)) & 0x1FFFF;
+		areaBits = ((areaBits << 16) | (areaBits >> 1)) & 0x1FFFF & sizeMask;
 		(void)areaBits;
 		assert((areaBits & effectiveBaseMask) == areaBits);
 		assert((areaBits & ~indexMask)        == areaBits);
 		assert(isEnabled());
 		unsigned addr = effectiveBaseMask & (indexMask | (index >> 1));
-		ptr0 = &data[addr | 0x00000];
-		ptr1 = &data[addr | 0x10000];
+		const byte* ptr0 = &data[addr | 0x00000];
+		const byte* ptr1 = &data[addr | 0x10000];
+		return {std::span<const byte, size / 2>{ptr0, size / 2},
+		        std::span<const byte, size / 2>{ptr1, size / 2}};
 	}
 
 	/** Reads a byte from VRAM in its current state.
 	  * @param index Index in table, with unused bits set to 1.
 	  */
-	inline byte readNP(unsigned index) const {
+	[[nodiscard]] inline byte readNP(unsigned index) const {
 		assert(isEnabled());
 		return data[effectiveBaseMask & index];
 	}
@@ -258,7 +270,7 @@ public:
 	/** Similar to readNP, but now with planar addressing.
 	  * @param index Index in table, with unused bits set to 1.
 	  */
-	inline byte readPlanar(unsigned index) const {
+	[[nodiscard]] inline byte readPlanar(unsigned index) const {
 		assert(isEnabled());
 		index = ((index & 1) << 16) | ((index & 0x1FFFE) >> 1);
 		unsigned addr = effectiveBaseMask & index;
@@ -267,7 +279,7 @@ public:
 
 	/** Is there an observer registered for this window?
 	  */
-	inline bool hasObserver() const {
+	[[nodiscard]] inline bool hasObserver() const {
 		return observer != &dummyObserver;
 	}
 
@@ -293,8 +305,8 @@ public:
 	  * @param address The address to test.
 	  * @return true iff the address is inside this window.
 	  */
-	inline bool isInside(unsigned address) const {
-		return (address & combiMask) == unsigned(baseAddr);
+	[[nodiscard]] inline bool isInside(unsigned address) const {
+		return (address & combiMask) == baseAddr;
 	}
 
 	/** Notifies the observer of this window of a VRAM change,
@@ -313,20 +325,22 @@ public:
 	  * register 8 (in VR=0 mode only 32kB VRAM is addressable).
 	  */
 	void setSizeMask(unsigned newSizeMask, EmuTime::param time) {
-		sizeMask = newSizeMask;
 		if (isEnabled()) {
-			setMask(origBaseMask, indexMask, time);
+			setMask(origBaseMask, indexMask, newSizeMask, time);
 		}
+		// only apply sizeMask after observers have been notified
+		sizeMask = newSizeMask;
 	}
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 private:
-	inline bool isEnabled() const {
-		return baseAddr != -1;
+	[[nodiscard]] inline bool isEnabled() const {
+		return baseAddr != unsigned(-1);
 	}
 
+private:
 	/** Only VDPVRAM may construct VRAMWindow objects.
 	  */
 	friend class VDPVRAM;
@@ -344,40 +358,40 @@ private:
 	  * It will be called when changes occur within the window.
 	  * If there is no observer, this variable is &dummyObserver.
 	  */
-	VRAMObserver* observer;
+	VRAMObserver* observer = &dummyObserver;
 
 	/** Base mask as passed to the setMask() method.
 	 */
-	int origBaseMask;
+	unsigned origBaseMask = 0;
 
 	/** Effective mask of this window.
 	  * This is always equal to 'origBaseMask & sizeMask'.
 	  */
-	int effectiveBaseMask;
+	unsigned effectiveBaseMask = 0;
 
 	/** Index mask of this window.
 	  */
-	int indexMask;
+	unsigned indexMask = 0;
 
 	/** Lowest address in this window.
 	  * Or -1 when this window is disabled.
 	  */
-	int baseAddr;
+	unsigned baseAddr = unsigned(-1); // disable window
 
 	/** Combination of effectiveBaseMask and index mask used for "inside" checks.
 	  */
-	int combiMask;
+	unsigned combiMask = 0;
 
 	/** Mask to handle vram mirroring
 	  * Note: this only handles mirroring for power-of-2 sizes
 	  *       mirroring of extended VRAM is handled in a different way
 	  */
-	int sizeMask;
+	unsigned sizeMask;
 
-	static DummyVRAMOBserver dummyObserver;
+	static inline DummyVRAMObserver dummyObserver;
 };
 
-/** Manages VRAM contents and synchronises the various users of the VRAM.
+/** Manages VRAM contents and synchronizes the various users of the VRAM.
   * VDPVRAM does not apply planar remapping to addresses, this is the
   * responsibility of the caller.
   */
@@ -385,7 +399,9 @@ class VDPVRAM
 {
 public:
 	VDPVRAM(const VDPVRAM&) = delete;
+	VDPVRAM(VDPVRAM&&) = delete;
 	VDPVRAM& operator=(const VDPVRAM&) = delete;
+	VDPVRAM& operator=(VDPVRAM&&) = delete;
 
 	VDPVRAM(VDP& vdp, unsigned size, EmuTime::param time);
 
@@ -417,7 +433,7 @@ public:
 
 		// handle mirroring and non-present ram chips
 		address &= sizeMask;
-		if (unlikely(address >= actualSize)) {
+		if (address >= actualSize) [[unlikely]] {
 			// 192kb vram is mirroring is handled elsewhere
 			assert(address < 0x30000);
 			// only happens in case of 16kb vram while you write
@@ -442,7 +458,7 @@ public:
 
 		// handle mirroring and non-present ram chips
 		address &= sizeMask;
-		if (unlikely(address >= actualSize)) {
+		if (address >= actualSize) [[unlikely]] {
 			// 192kb vram is mirroring is handled elsewhere
 			assert(address < 0x30000);
 			// only happens in case of 16kb vram while you write
@@ -469,7 +485,7 @@ public:
 	  * @param time The moment in emulated time this read occurs.
 	  * @return The VRAM contents at the specified address.
 	  */
-	inline byte cpuRead(unsigned address, EmuTime::param time) {
+	[[nodiscard]] inline byte cpuRead(unsigned address, EmuTime::param time) {
 		#ifdef DEBUG
 		// VRAM should never get ahead of CPU.
 		assert(time >= vramTime);
@@ -522,7 +538,7 @@ public:
 
 	/** Returns the size of VRAM in bytes
 	  */
-	unsigned getSize() const {
+	[[nodiscard]] unsigned getSize() const {
 		return actualSize;
 	}
 
@@ -542,6 +558,12 @@ public:
 	  * See implementation for more details.
 	  */
 	void change4k8kMapping(bool mapping8k);
+
+	/** Only used by debugger
+	 */
+	[[nodiscard]] std::span<const uint8_t> getData() const {
+		return {data.data(), data.size()};
+	}
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
@@ -597,6 +619,7 @@ private:
 
 	void setSizeMask(EmuTime::param time);
 
+private:
 	/** VDP this VRAM belongs to.
 	  */
 	VDP& vdp;
@@ -605,15 +628,15 @@ private:
 	  */
 	Ram data;
 
-	/** Debuggable with mode dependend view on the vram
+	/** Debuggable with mode dependent view on the vram
 	  *   Screen7/8 are not interleaved in this mode.
 	  *   This debuggable is also at least 128kB in size (it possibly
 	  *   contains unmapped regions).
 	  */
 	class LogicalVRAMDebuggable final : public SimpleDebuggable {
 	public:
-		explicit LogicalVRAMDebuggable(VDP& vdp);
-		byte read(unsigned address, EmuTime::param time) override;
+		explicit LogicalVRAMDebuggable(const VDP& vdp);
+		[[nodiscard]] byte read(unsigned address, EmuTime::param time) override;
 		void write(unsigned address, byte value, EmuTime::param time) override;
 	private:
 		unsigned transform(unsigned address);
@@ -624,8 +647,8 @@ private:
 	  *   debuggable is the same as the actual VRAM size.
 	  */
 	struct PhysicalVRAMDebuggable final : SimpleDebuggable {
-		PhysicalVRAMDebuggable(VDP& vdp, unsigned actualSize);
-		byte read(unsigned address, EmuTime::param time) override;
+		PhysicalVRAMDebuggable(const VDP& vdp, unsigned actualSize);
+		[[nodiscard]] byte read(unsigned address, EmuTime::param time) override;
 		void write(unsigned address, byte value, EmuTime::param time) override;
 	} physicalVRAMDebug;
 
@@ -637,7 +660,7 @@ private:
 	VDPCmdEngine* cmdEngine;
 	SpriteChecker* spriteChecker;
 
-	/** The last time a CmdEngine write or a CPU read/write occured.
+	/** The last time a CmdEngine write or a CPU read/write occurred.
 	  * This is only used in a debug build to check if read/writes come
 	  * in the correct order.
 	  */

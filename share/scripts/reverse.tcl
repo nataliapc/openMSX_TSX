@@ -5,9 +5,9 @@ variable is_android [string match android "[openmsx_info platform]"]
 
 variable default_auto_enable_reverse
 if {$is_dingux || $is_android} {
-	set default_auto_enable_reverse "off"
+	set default_auto_enable_reverse "false"
 } else {
-	set default_auto_enable_reverse "gui"
+	set default_auto_enable_reverse "true"
 }
 
 proc after_switch {} {
@@ -15,10 +15,8 @@ proc after_switch {} {
 	# machine (e.g. because the last machine is removed or because
 	# you explictly switch to an empty machine)
 	catch {
-		if {$::auto_enable_reverse eq "on"} {
+		if {$::auto_enable_reverse} {
 			auto_enable
-		} elseif {$::auto_enable_reverse eq "gui"} {
-			reverse_widgets::enable_reversebar false
 		}
 	}
 	after machine_switch [namespace code after_switch]
@@ -27,20 +25,13 @@ proc after_switch {} {
 } ;# namespace reverse
 
 
-user_setting create string "auto_enable_reverse" \
-{Controls whether the reverse feature is automatically enabled on startup.
-Internally the reverse feature takes regular snapshots of the MSX state,
-this has a (small) cost in memory and in performance. On small systems you
-don't want this cost, so we don't enable the reverse feature by default.
-Possible values for this setting:
-  off   Reverse not enabled on startup
-  on    Reverse enabled on startup
-  gui   Reverse + reverse_bar enabled (see 'help toggle_reversebar')
+user_setting create boolean "auto_enable_reverse" \
+{Controls whether the reverse feature is automatically enabled on startup (or
+whenever a new machine is created). Internally the reverse feature takes
+regular snapshots of the MSX state, this has a (small) cost in memory and in
+performance. On small systems you may not want this cost, so for these the
+reverse feature can be disabled by default using this setting.
 } $reverse::default_auto_enable_reverse
-
-user_setting create float "reversebar_fadeout_time" \
-{Time it takes for the reverse bar to fade out when it's not in focus. Set to 0 for no fade out at all.
-} 5.0 0.0 100.0
 
 user_setting create boolean "auto_save_replay" \
 {Enables automatically saving the current replay to filename specified \

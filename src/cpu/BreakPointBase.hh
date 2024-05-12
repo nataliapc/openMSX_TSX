@@ -2,7 +2,7 @@
 #define BREAKPOINTBASE_HH
 
 #include "TclObject.hh"
-#include "string_view.hh"
+#include <string_view>
 
 namespace openmsx {
 
@@ -14,25 +14,31 @@ class GlobalCliComm;
 class BreakPointBase
 {
 public:
-	string_view getCondition() const { return condition.getString(); }
-	string_view getCommand()   const { return command  .getString(); }
-	TclObject getConditionObj() const { return condition; }
-	TclObject getCommandObj()   const { return command; }
+	[[nodiscard]] std::string_view getCondition() const { return condition.getString(); }
+	[[nodiscard]] std::string_view getCommand()   const { return command  .getString(); }
+	[[nodiscard]] TclObject getConditionObj() const { return condition; }
+	[[nodiscard]] TclObject getCommandObj()   const { return command; }
+	[[nodiscard]] bool onlyOnce() const { return once; }
 
-	void checkAndExecute(GlobalCliComm& cliComm, Interpreter& interp);
+	bool checkAndExecute(GlobalCliComm& cliComm, Interpreter& interp);
 
 protected:
 	// Note: we require GlobalCliComm here because breakpoint objects can
-	// be transfered to different MSX machines, and so the MSXCliComm
+	// be transferred to different MSX machines, and so the MSXCliComm
 	// object won't remain valid.
-	BreakPointBase(TclObject command, TclObject condition);
+	BreakPointBase(TclObject command_, TclObject condition_, bool once_)
+		: command(std::move(command_))
+		, condition(std::move(condition_))
+		, once(once_) {}
 
 private:
-	bool isTrue(GlobalCliComm& cliComm, Interpreter& interp) const;
+	[[nodiscard]] bool isTrue(GlobalCliComm& cliComm, Interpreter& interp) const;
 
+private:
 	TclObject command;
 	TclObject condition;
-	bool executing;
+	bool once;
+	bool executing = false;
 };
 
 } // namespace openmsx
