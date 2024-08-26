@@ -1,6 +1,9 @@
 name: Build Snapshots
 
 on:
+  workflow_dispatch:
+    branches:
+      - master
   push:
     branches:
       - master
