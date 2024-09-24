@@ -11,8 +11,7 @@ namespace openmsx {
 class ImGuiSpriteViewer final : public ImGuiPart
 {
 public:
-	explicit ImGuiSpriteViewer(ImGuiManager& manager_)
-		: ImGuiPart(manager_) {}
+	using ImGuiPart::ImGuiPart;
 
 	[[nodiscard]] zstring_view iniName() const override { return "sprite viewer"; }
 	void save(ImGuiTextBuffer& buf) override;
@@ -23,7 +22,15 @@ public:
 	bool show = false;
 
 private:
-	int manual = 0; // 0 -> use VDP settings, 1 -> use manual settings
+	bool overrideAll    = false;
+	bool overrideMode   = false;
+	bool overrideSize   = false;
+	bool overrideMag    = false;
+	bool overrideTrans  = false;
+	bool overridePat    = false;
+	bool overrideAtt    = false;
+	bool overrideScroll = false;
+	bool overrideLines  = false;
 	int manualMode = 1;
 	int manualSize = 8;
 	int manualMag = 0;
@@ -53,7 +60,15 @@ private:
 	static constexpr auto validSizes = {8, 16};
 	static constexpr auto persistentElements = std::tuple{
 		PersistentElement{"show",                &ImGuiSpriteViewer::show},
-		PersistentElementMax{"override",         &ImGuiSpriteViewer::manual, 2},
+		PersistentElement{"overrideAll",         &ImGuiSpriteViewer::overrideAll},
+		PersistentElement{"overrideMode",        &ImGuiSpriteViewer::overrideMode},
+		PersistentElement{"overrideSize",        &ImGuiSpriteViewer::overrideSize},
+		PersistentElement{"overrideMag",         &ImGuiSpriteViewer::overrideMag},
+		PersistentElement{"overrideTrans",       &ImGuiSpriteViewer::overrideTrans},
+		PersistentElement{"overridePat",         &ImGuiSpriteViewer::overridePat},
+		PersistentElement{"overrideAtt",         &ImGuiSpriteViewer::overrideAtt},
+		PersistentElement{"overrideScroll",      &ImGuiSpriteViewer::overrideScroll},
+		PersistentElement{"overrideLines",       &ImGuiSpriteViewer::overrideLines},
 		PersistentElementMinMax{"mode",          &ImGuiSpriteViewer::manualMode, 1, 3}, // 1 or 2
 		PersistentElementEnum{"size",            &ImGuiSpriteViewer::manualSize, validSizes},
 		PersistentElementMax{"mag",              &ImGuiSpriteViewer::manualMag, 2},
@@ -65,6 +80,7 @@ private:
 		PersistentElementMax{"zoom",             &ImGuiSpriteViewer::zoom, 8},
 		PersistentElement{"showGrid",            &ImGuiSpriteViewer::grid},
 		PersistentElementMax{"checkerBoardSize", &ImGuiSpriteViewer::checkerBoardSize, 256},
+		PersistentElementMax{"boundingBoxOnAll", &ImGuiSpriteViewer::boundingBoxOnAll, 2},
 		PersistentElement{"gridColor",           &ImGuiSpriteViewer::gridColor},
 		PersistentElement{"checkerBoardColor1",  &ImGuiSpriteViewer::checkerBoardColor1},
 		PersistentElement{"checkerBoardColor2",  &ImGuiSpriteViewer::checkerBoardColor2},

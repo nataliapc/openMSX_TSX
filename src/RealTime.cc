@@ -1,13 +1,15 @@
 #include "RealTime.hh"
-#include "Timer.hh"
-#include "EventDistributor.hh"
-#include "EventDelay.hh"
+
+#include "BooleanSetting.hh"
 #include "Event.hh"
+#include "EventDelay.hh"
+#include "EventDistributor.hh"
 #include "GlobalSettings.hh"
 #include "MSXMotherBoard.hh"
 #include "Reactor.hh"
-#include "BooleanSetting.hh"
 #include "ThrottleManager.hh"
+#include "Timer.hh"
+
 #include "narrow.hh"
 #include "unreachable.hh"
 
@@ -52,17 +54,17 @@ RealTime::~RealTime()
 	speedManager.detach(*this);
 }
 
-double RealTime::getRealDuration(EmuTime::param time1, EmuTime::param time2)
+double RealTime::getRealDuration(EmuTime::param time1, EmuTime::param time2) const
 {
 	return (time2 - time1).toDouble() / speedManager.getSpeed();
 }
 
-EmuDuration RealTime::getEmuDuration(double realDur)
+EmuDuration RealTime::getEmuDuration(double realDur) const
 {
 	return EmuDuration(realDur * speedManager.getSpeed());
 }
 
-bool RealTime::timeLeft(uint64_t us, EmuTime::param time)
+bool RealTime::timeLeft(uint64_t us, EmuTime::param time) const
 {
 	auto realDuration = static_cast<uint64_t>(
 		getRealDuration(emuTime, time) * 1000000ULL);
@@ -119,12 +121,12 @@ void RealTime::executeUntil(EmuTime::param time)
 	setSyncPoint(time + getEmuDuration(SYNC_INTERVAL));
 }
 
-int RealTime::signalEvent(const Event& event)
+bool RealTime::signalEvent(const Event& event)
 {
 	if (!motherBoard.isActive() || !enabled) {
 		// these are global events, only the active machine should
 		// synchronize with real time
-		return 0;
+		return false;
 	}
 	visit(overloaded{
 		[&](const FinishFrameEvent& ffe) {
@@ -141,7 +143,7 @@ int RealTime::signalEvent(const Event& event)
 			UNREACHABLE;
 		}
 	}, event);
-	return 0;
+	return false;
 }
 
 void RealTime::update(const Setting& /*setting*/) noexcept

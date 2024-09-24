@@ -11,8 +11,11 @@
 #endif
 
 #include "MemBuffer.hh"
-#include <string_view>
+
+#include <bit>
 #include <cassert>
+#include <cstdint>
+#include <string_view>
 
 // arbitrary but distinct values, (roughly) ordered according to version number
 #define OPENGL_ES_2_0 1
@@ -69,12 +72,19 @@ public:
 	  */
 	[[nodiscard]] GLuint get() const { return textureId; }
 
+	/** Return as a 'void*' (needed for 'Dear ImGui').
+	  */
+	[[nodiscard]] void* getImGui() const {
+		assert(textureId);
+		return std::bit_cast<void*>(uintptr_t(textureId));
+	}
+
 	/** Makes this texture the active GL texture.
 	  * The other methods of this class and its subclasses will implicitly
 	  * bind the texture, so you only need this method to explicitly bind
 	  * this texture for use in GL function calls outside of this class.
 	  */
-	void bind() {
+	void bind() const {
 		glBindTexture(GL_TEXTURE_2D, textureId);
 	}
 
@@ -147,10 +157,12 @@ private:
 template<typename T> class PixelBuffer
 {
 public:
-	PixelBuffer() = default;
-	//~PixelBuffer();
+	PixelBuffer();
+	PixelBuffer(const PixelBuffer& other) = delete;
 	PixelBuffer(PixelBuffer&& other) noexcept;
+	PixelBuffer& operator=(const PixelBuffer& other) = delete;
 	PixelBuffer& operator=(PixelBuffer&& other) noexcept;
+	~PixelBuffer();
 
 	/** Sets the image for this buffer.
 	  * TODO: Actually, only image size for now;
@@ -212,17 +224,17 @@ private:
 
 // class PixelBuffer
 
-//template<typename T>
-//PixelBuffer<T>::PixelBuffer()
-//{
-//	glGenBuffers(1, &bufferId);
-//}
+template<typename T>
+PixelBuffer<T>::PixelBuffer()
+{
+	//glGenBuffers(1, &bufferId);
+}
 
-//template<typename T>
-//PixelBuffer<T>::~PixelBuffer()
-//{
-//	glDeleteBuffers(1, &bufferId); // ok to delete '0'
-//}
+template<typename T>
+PixelBuffer<T>::~PixelBuffer()
+{
+	//glDeleteBuffers(1, &bufferId); // ok to delete '0'
+}
 
 template<typename T>
 PixelBuffer<T>::PixelBuffer(PixelBuffer<T>&& other) noexcept
@@ -318,6 +330,11 @@ void PixelBuffer<T>::unmap() const
 class Shader
 {
 public:
+	Shader(const Shader&) = delete;
+	Shader(Shader&&) = delete;
+	Shader& operator=(const Shader&) = delete;
+	Shader& operator=(Shader&&) = delete;
+
 	/** Returns true iff this shader is loaded and compiled without errors.
 	  */
 	[[nodiscard]] bool isOK() const;
@@ -333,7 +350,6 @@ protected:
 	Shader(GLenum type, std::string_view header, std::string_view filename) {
 		init(type, header, filename);
 	}
-
 	~Shader();
 
 private:
@@ -383,7 +399,9 @@ class ShaderProgram
 {
 public:
 	ShaderProgram(const ShaderProgram&) = delete;
+	ShaderProgram(ShaderProgram&&) = delete;
 	ShaderProgram& operator=(const ShaderProgram&) = delete;
+	ShaderProgram& operator=(ShaderProgram&&) = delete;
 
 	/** Create handler and allocate underlying openGL object. */
 	ShaderProgram() { allocate(); }
@@ -445,7 +463,10 @@ class BufferObject
 {
 public:
 	BufferObject();
+	BufferObject(const BufferObject&) = delete;
+	BufferObject& operator=(const BufferObject&) = delete;
 	~BufferObject();
+
 	BufferObject(BufferObject&& other) noexcept
 		: bufferId(other.bufferId)
 	{

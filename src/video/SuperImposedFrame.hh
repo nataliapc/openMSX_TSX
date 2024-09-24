@@ -13,13 +13,11 @@ namespace openmsx {
 class SuperImposedFrame final : public FrameSource
 {
 public:
-	virtual ~SuperImposedFrame() = default;
 	void init(const FrameSource* top, const FrameSource* bottom);
 
 	[[nodiscard]] unsigned getLineWidth(unsigned line) const override;
-	[[nodiscard]] const void* getLineInfo(
-		unsigned line, unsigned& width,
-		void* buf, unsigned bufWidth) const override;
+	[[nodiscard]] std::span<const Pixel> getUnscaledLine(
+		unsigned line, std::span<Pixel> helpBuf) const override;
 
 private:
 	const FrameSource* top;

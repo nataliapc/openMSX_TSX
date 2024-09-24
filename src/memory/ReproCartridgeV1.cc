@@ -28,28 +28,18 @@ Otherwise, the mapper is enabled and the flash is readonly.
 
 namespace openmsx {
 
-static constexpr auto sectorInfo = [] {
-	// 8 * 8kB, followed by 127 * 64kB
-	using Info = AmdFlash::SectorInfo;
-	std::array<Info, 8 + 127> result = {};
-	std::fill(result.begin(), result.begin() + 8, Info{ 8 * 1024, false});
-	std::fill(result.begin() + 8, result.end(),   Info{64 * 1024, false});
-	return result;
-}();
-
 ReproCartridgeV1::ReproCartridgeV1(
 		const DeviceConfig& config, Rom&& rom_)
 	: MSXRom(config, std::move(rom_))
-	, flash(rom, sectorInfo, 0x207E,
-	        AmdFlash::Addressing::BITS_12, config)
-	, scc("ReproCartV1 SCC", config, getCurrentTime(), SCC::SCC_Compatible)
+	, flash(rom, AmdFlashChip::M29W640GB, {}, config)
+	, scc("ReproCartV1 SCC", config, getCurrentTime(), SCC::Mode::Compatible)
 	, psg("ReproCartV1 PSG", DummyAY8910Periphery::instance(), config,
 	      getCurrentTime())
 {
 	powerUp(getCurrentTime());
 	auto& cpuInterface = getCPUInterface();
 	for (auto port : {0x10, 0x11, 0x13}) {
-		cpuInterface.register_IO_Out(port, this);
+		cpuInterface.register_IO_Out(narrow_cast<byte>(port), this);
 	}
 }
 
@@ -57,7 +47,7 @@ ReproCartridgeV1::~ReproCartridgeV1()
 {
 	auto& cpuInterface = getCPUInterface();
 	for (auto port : {0x10, 0x11, 0x13}) {
-		cpuInterface.unregister_IO_Out(port, this);
+		cpuInterface.unregister_IO_Out(narrow_cast<byte>(port), this);
 	}
 }
 
@@ -186,8 +176,8 @@ void ReproCartridgeV1::writeMem(word addr, byte value, EmuTime::param time)
 		// SCC mode register
 		if ((addr & 0xFFFE) == 0xBFFE) {
 			sccMode = value;
-			scc.setChipMode((value & 0x20) ? SCC::SCC_plusmode
-						       : SCC::SCC_Compatible);
+			scc.setMode((value & 0x20) ? SCC::Mode::Plus
+			                           : SCC::Mode::Compatible);
 			invalidateDeviceRCache(0x9800, 0x800);
 			invalidateDeviceRCache(0xB800, 0x800);
 		}
@@ -198,7 +188,7 @@ void ReproCartridgeV1::writeMem(word addr, byte value, EmuTime::param time)
 	}
 }
 
-byte* ReproCartridgeV1::getWriteCacheLine(word addr) const
+byte* ReproCartridgeV1::getWriteCacheLine(word addr)
 {
 	return ((0x4000 <= addr) && (addr < 0xC000))
 	       ? nullptr        // [0x4000,0xBFFF] isn't cacheable

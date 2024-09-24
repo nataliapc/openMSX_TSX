@@ -34,10 +34,10 @@ void ImGuiOpenFile::loadLine(std::string_view name, zstring_view value)
 [[nodiscard]] static bool dirOnlyHasReadme(zstring_view directory)
 {
 	ReadDir dir(directory);
-	while (auto* d = dir.getEntry()) {
+	while (const auto* d = dir.getEntry()) {
 		auto name = std::string_view(d->d_name);
 		if (name == one_of(std::string_view(".."), std::string_view("."))) continue;
-		if (std::string_view(d->d_name) != "README") return false;
+		if (name != "README") return false;
 	}
 	return true;
 }
@@ -57,12 +57,11 @@ void ImGuiOpenFile::setBookmarks()
 {
 	auto& dialog = *ImGuiFileDialog::Instance();
 
-	auto& filePool = manager.getReactor().getFilePool();
+	const auto& filePool = manager.getReactor().getFilePool();
 	std::vector<std::string> existingNames;
 	for (const auto& dir : filePool.getDirectories()) {
-		//using enum FileType; // c++20, but needs gcc-11
-		//if ((dir.types & (ROM | DISK | TAPE)) == NONE) continue;
-		if ((dir.types & (FileType::ROM | FileType::DISK | FileType::TAPE)) == FileType::NONE) continue;
+		using enum FileType;
+		if ((dir.types & (ROM | DISK | TAPE)) == NONE) continue;
 
 		auto path = FileOperations::getNativePath(std::string(dir.path));
 		if (!FileOperations::isDirectory(path)) continue;
@@ -89,7 +88,7 @@ std::string ImGuiOpenFile::getStartPath(zstring_view lastLocationHint)
 }
 
 void ImGuiOpenFile::selectFile(const std::string& title, std::string filters,
-                               std::function<void(const std::string&)> callback,
+                               const std::function<void(const std::string&)>& callback,
                                zstring_view lastLocationHint,
                                Painter painter_)
 {
@@ -101,7 +100,7 @@ void ImGuiOpenFile::selectFile(const std::string& title, std::string filters,
 }
 
 void ImGuiOpenFile::selectNewFile(const std::string& title, std::string filters,
-                                  std::function<void(const std::string&)> callback,
+                                  const std::function<void(const std::string&)>& callback,
                                   zstring_view lastLocationHint,
                                   Painter painter_)
 {
@@ -115,7 +114,7 @@ void ImGuiOpenFile::selectNewFile(const std::string& title, std::string filters,
 }
 
 void ImGuiOpenFile::selectDirectory(const std::string& title,
-                                    std::function<void(const std::string&)> callback,
+                                    const std::function<void(const std::string&)>& callback,
                                     zstring_view lastLocationHint,
                                     Painter painter_)
 {
@@ -124,7 +123,7 @@ void ImGuiOpenFile::selectDirectory(const std::string& title,
 }
 
 void ImGuiOpenFile::common(const std::string& title, const char* filters,
-                           std::function<void(const std::string&)> callback,
+                           const std::function<void(const std::string&)>& callback,
                            zstring_view lastLocationHint,
                            Painter painter_,
                            int extraFlags)

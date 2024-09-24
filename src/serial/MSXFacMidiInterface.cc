@@ -77,7 +77,7 @@ void MSXFacMidiInterface::Interface::setStopBits(StopBits bits)
 	midi.outConnector.setStopBits(bits);
 }
 
-void MSXFacMidiInterface::Interface::setParityBit(bool enable, ParityBit parity)
+void MSXFacMidiInterface::Interface::setParityBit(bool enable, Parity parity)
 {
 	auto& midi = OUTER(MSXFacMidiInterface, interface);
 	midi.outConnector.setParityBit(enable, parity);
@@ -91,7 +91,7 @@ void MSXFacMidiInterface::Interface::recvByte(byte value, EmuTime::param time)
 
 void MSXFacMidiInterface::Interface::signal(EmuTime::param time)
 {
-	auto& midi = OUTER(MSXFacMidiInterface, interface);
+	const auto& midi = OUTER(MSXFacMidiInterface, interface);
 	midi.getPluggedMidiInDev().signal(time);
 }
 
@@ -118,7 +118,7 @@ void MSXFacMidiInterface::setStopBits(StopBits bits)
 	i8251.setStopBits(bits);
 }
 
-void MSXFacMidiInterface::setParityBit(bool enable, ParityBit parity)
+void MSXFacMidiInterface::setParityBit(bool enable, Parity parity)
 {
 	i8251.setParityBit(enable, parity);
 }

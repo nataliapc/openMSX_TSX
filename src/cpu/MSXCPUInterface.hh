@@ -32,7 +32,7 @@ class MSXMotherBoard;
 class VDPIODelay;
 
 inline constexpr bool PROFILE_CACHELINES = false;
-enum CacheLineCounters {
+enum class CacheLineCounters {
 	NonCachedRead,
 	NonCachedWrite,
 	GetReadCacheLine,
@@ -56,10 +56,11 @@ std::ostream& operator<<(std::ostream& os, EnumValueName<CacheLineCounters> evn)
 class MSXCPUInterface : public ProfileCounters<PROFILE_CACHELINES, CacheLineCounters>
 {
 public:
-	MSXCPUInterface(const MSXCPUInterface&) = delete;
-	MSXCPUInterface& operator=(const MSXCPUInterface&) = delete;
-
 	explicit MSXCPUInterface(MSXMotherBoard& motherBoard);
+	MSXCPUInterface(const MSXCPUInterface&) = delete;
+	MSXCPUInterface(MSXCPUInterface&&) = delete;
+	MSXCPUInterface& operator=(const MSXCPUInterface&) = delete;
+	MSXCPUInterface& operator=(MSXCPUInterface&&) = delete;
 	~MSXCPUInterface();
 
 	/**
@@ -195,7 +196,7 @@ public:
 	 * An interval will never cross a 16KB border.
 	 * An interval will never contain the address 0xffff.
 	 */
-	[[nodiscard]] byte* getWriteCacheLine(word start) const {
+	[[nodiscard]] byte* getWriteCacheLine(word start) {
 		tick(CacheLineCounters::GetWriteCacheLine);
 		if (disallowWriteCache[start >> CacheLine::BITS]) [[unlikely]] {
 			return nullptr;
@@ -207,7 +208,7 @@ public:
 	 * CPU uses this method to read 'extra' data from the data bus
 	 * used in interrupt routines. In MSX this returns always 255.
 	 */
-	[[nodiscard]] byte readIRQVector();
+	[[nodiscard]] byte readIRQVector() const;
 
 	/*
 	 * Should only be used by PPI
@@ -311,7 +312,7 @@ private:
 	void register_IO  (int port, bool isIn,
 	                   MSXDevice*& devicePtr, MSXDevice* device);
 	void unregister_IO(MSXDevice*& devicePtr, MSXDevice* device);
-	void testRegisterSlot(MSXDevice& device,
+	void testRegisterSlot(const MSXDevice& device,
 	                      int ps, int ss, unsigned base, unsigned size);
 	void registerSlot(MSXDevice& device,
 	                  int ps, int ss, unsigned base, unsigned size);
@@ -478,6 +479,11 @@ struct GlobalRWHelper
 template<typename MSXDEVICE, typename... CT_INTERVALS>
 struct GlobalWriteClient : GlobalRWHelper<MSXDEVICE, CT_INTERVALS...>
 {
+	GlobalWriteClient(const GlobalWriteClient&) = delete;
+	GlobalWriteClient(GlobalWriteClient&&) = delete;
+	GlobalWriteClient& operator=(const GlobalWriteClient&) = delete;
+	GlobalWriteClient& operator=(GlobalWriteClient&&) = delete;
+
 	GlobalWriteClient()
 	{
 		this->execute([](MSXCPUInterface& cpu, MSXDevice& dev, unsigned addr) {
@@ -496,6 +502,11 @@ struct GlobalWriteClient : GlobalRWHelper<MSXDEVICE, CT_INTERVALS...>
 template<typename MSXDEVICE, typename... CT_INTERVALS>
 struct GlobalReadClient : GlobalRWHelper<MSXDEVICE, CT_INTERVALS...>
 {
+	GlobalReadClient(const GlobalReadClient&) = delete;
+	GlobalReadClient(GlobalReadClient&&) = delete;
+	GlobalReadClient& operator=(const GlobalReadClient&) = delete;
+	GlobalReadClient& operator=(GlobalReadClient&&) = delete;
+
 	GlobalReadClient()
 	{
 		this->execute([](MSXCPUInterface& cpu, MSXDevice& dev, unsigned addr) {

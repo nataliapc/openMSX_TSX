@@ -204,7 +204,7 @@ byte MSXCPUInterface::readMemSlow(word address, EmuTime::param time)
 		// execute read watches before actual read
 		if (readWatchSet[address >> CacheLine::BITS]
 		                [address &  CacheLine::LOW]) {
-			executeMemWatch(WatchPoint::READ_MEM, address);
+			executeMemWatch(WatchPoint::Type::READ_MEM, address);
 		}
 	}
 	if ((address == 0xFFFF) && isExpanded(primarySlotState[3])) [[unlikely]] {
@@ -244,7 +244,7 @@ void MSXCPUInterface::writeMemSlow(word address, byte value, EmuTime::param time
 		motherBoard.getScheduler().schedule(time + EmuDuration::epsilon());
 		if (writeWatchSet[address >> CacheLine::BITS]
 		                 [address &  CacheLine::LOW]) {
-			executeMemWatch(WatchPoint::WRITE_MEM, address, value);
+			executeMemWatch(WatchPoint::Type::WRITE_MEM, address, value);
 		}
 	}
 }
@@ -270,13 +270,13 @@ void MSXCPUInterface::testUnsetExpanded(
 	assert(isExpanded(ps));
 	if (expanded[ps] != 1) return; // ok, still expanded after this
 
-	std::vector<MSXDevice*> inUse;
+	std::vector<const MSXDevice*> inUse;
 
-	auto isAllowed = [&](MSXDevice* dev) {
+	auto isAllowed = [&](const MSXDevice* dev) {
 		return (dev == dummyDevice.get()) ||
 		       contains(allowed, dev, [](const auto& d) { return d.get(); });
 	};
-	auto check = [&](MSXDevice* dev) {
+	auto check = [&](const MSXDevice* dev) {
 		if (!isAllowed(dev)) {
 			if (!contains(inUse, dev)) { // filter duplicates
 				inUse.push_back(dev);
@@ -286,9 +286,9 @@ void MSXCPUInterface::testUnsetExpanded(
 
 	for (auto ss : xrange(4)) {
 		for (auto page : xrange(4)) {
-			MSXDevice* device = slotLayout[ps][ss][page];
-			if (auto* memDev = dynamic_cast<MSXMultiMemDevice*>(device)) {
-				for (auto* dev : memDev->getDevices()) {
+			const MSXDevice* device = slotLayout[ps][ss][page];
+			if (const auto* memDev = dynamic_cast<const MSXMultiMemDevice*>(device)) {
+				for (const auto* dev : memDev->getDevices()) {
 					check(dev);
 				}
 			} else {
@@ -301,7 +301,7 @@ void MSXCPUInterface::testUnsetExpanded(
 
 	auto msg = strCat("Can't remove slot expander from slot ", ps,
 	                  " because the following devices are still inserted:");
-	for (auto& d : inUse) {
+	for (const auto& d : inUse) {
 		strAppend(msg, ' ', d->getName());
 	}
 	strAppend(msg, '.');
@@ -442,7 +442,7 @@ bool MSXCPUInterface::replace_IO_Out(
 	return true;
 }
 
-[[noreturn]] static void reportMemOverlap(int ps, int ss, MSXDevice& dev1, MSXDevice& dev2)
+[[noreturn]] static void reportMemOverlap(int ps, int ss, const MSXDevice& dev1, const MSXDevice& dev2)
 {
 	throw MSXException(
 		"Overlapping memory devices in slot ", ps, '.', ss,
@@ -450,7 +450,7 @@ bool MSXCPUInterface::replace_IO_Out(
 }
 
 void MSXCPUInterface::testRegisterSlot(
-	MSXDevice& device, int ps, int ss, unsigned base, unsigned size)
+	const MSXDevice& device, int ps, int ss, unsigned base, unsigned size)
 {
 	auto page = base >> 14;
 	MSXDevice*& slot = slotLayout[ps][ss][page];
@@ -580,7 +580,7 @@ void MSXCPUInterface::unregisterGlobalWrite(MSXDevice& device, word address)
 	GlobalRwInfo info = { &device, address };
 	move_pop_back(globalWrites, rfind_unguarded(globalWrites, info));
 
-	for (auto& g : globalWrites) {
+	for (const auto& g : globalWrites) {
 		if ((g.addr >> CacheLine::BITS) ==
 		    (address  >> CacheLine::BITS)) {
 			// there is still a global write in this region
@@ -604,7 +604,7 @@ void MSXCPUInterface::unregisterGlobalRead(MSXDevice& device, word address)
 	GlobalRwInfo info = { &device, address };
 	move_pop_back(globalReads, rfind_unguarded(globalReads, info));
 
-	for (auto& g : globalReads) {
+	for (const auto& g : globalReads) {
 		if ((g.addr >> CacheLine::BITS) ==
 		    (address  >> CacheLine::BITS)) {
 			// there is still a global write in this region
@@ -668,7 +668,7 @@ void MSXCPUInterface::reset()
 	setPrimarySlots(initialPrimarySlots);
 }
 
-byte MSXCPUInterface::readIRQVector()
+byte MSXCPUInterface::readIRQVector() const
 {
 	return motherBoard.readIRQVector();
 }
@@ -687,29 +687,25 @@ void MSXCPUInterface::setPrimarySlots(byte value)
 	// difference.  Changing the slots several hundreds of times per
 	// (EmuTime) is not unusual. So this routine ended up quite high
 	// (top-10) in some profile results.
-	byte ps0 = (value >> 0) & 3;
-	if (primarySlotState[0] != ps0) [[unlikely]] {
+	if (byte ps0 = (value >> 0) & 3; primarySlotState[0] != ps0) [[unlikely]] {
 		primarySlotState[0] = ps0;
 		byte ss0 = (subSlotRegister[ps0] >> 0) & 3;
 		secondarySlotState[0] = ss0;
 		updateVisible(0, ps0, ss0);
 	}
-	byte ps1 = (value >> 2) & 3;
-	if (primarySlotState[1] != ps1) [[unlikely]] {
+	if (byte ps1 = (value >> 2) & 3; primarySlotState[1] != ps1) [[unlikely]] {
 		primarySlotState[1] = ps1;
 		byte ss1 = (subSlotRegister[ps1] >> 2) & 3;
 		secondarySlotState[1] = ss1;
 		updateVisible(1, ps1, ss1);
 	}
-	byte ps2 = (value >> 4) & 3;
-	if (primarySlotState[2] != ps2) [[unlikely]] {
+	if (byte ps2 = (value >> 4) & 3; primarySlotState[2] != ps2) [[unlikely]] {
 		primarySlotState[2] = ps2;
 		byte ss2 = (subSlotRegister[ps2] >> 4) & 3;
 		secondarySlotState[2] = ss2;
 		updateVisible(2, ps2, ss2);
 	}
-	byte ps3 = (value >> 6) & 3;
-	if (primarySlotState[3] != ps3) [[unlikely]] {
+	if (byte ps3 = (value >> 6) & 3; primarySlotState[3] != ps3) [[unlikely]] {
 		bool oldExpanded = isExpanded(primarySlotState[3]);
 		bool newExpanded = isExpanded(ps3);
 		primarySlotState[3] = ps3;
@@ -797,14 +793,14 @@ void MSXCPUInterface::writeSlottedMem(unsigned address, byte value,
 
 void MSXCPUInterface::insertBreakPoint(BreakPoint bp)
 {
-	cliComm.update(CliComm::DEBUG_UPDT, tmpStrCat("bp#", bp.getId()), "add");
+	cliComm.update(CliComm::UpdateType::DEBUG_UPDT, tmpStrCat("bp#", bp.getId()), "add");
 	auto it = ranges::upper_bound(breakPoints, bp.getAddress(), {}, &BreakPoint::getAddress);
 	breakPoints.insert(it, std::move(bp));
 }
 
 void MSXCPUInterface::removeBreakPoint(const BreakPoint& bp)
 {
-	cliComm.update(CliComm::DEBUG_UPDT, tmpStrCat("bp#", bp.getId()), "remove");
+	cliComm.update(CliComm::UpdateType::DEBUG_UPDT, tmpStrCat("bp#", bp.getId()), "remove");
 	auto [first, last] = ranges::equal_range(breakPoints, bp.getAddress(), {}, &BreakPoint::getAddress);
 	breakPoints.erase(find_unguarded(first, last, &bp,
 	                                 [](const BreakPoint& i) { return &i; }));
@@ -814,7 +810,7 @@ void MSXCPUInterface::removeBreakPoint(unsigned id)
 	if (auto it = ranges::find(breakPoints, id, &BreakPoint::getId);
 	    // could be ==end for a breakpoint that removes itself AND has the -once flag set
 	    it != breakPoints.end()) {
-		cliComm.update(CliComm::DEBUG_UPDT, tmpStrCat("bp#", it->getId()), "remove");
+		cliComm.update(CliComm::UpdateType::DEBUG_UPDT, tmpStrCat("bp#", it->getId()), "remove");
 		breakPoints.erase(it);
 	}
 }
@@ -860,18 +856,19 @@ static void registerIOWatch(WatchPoint& watchPoint, std::span<MSXDevice*, 256> d
 
 void MSXCPUInterface::setWatchPoint(const std::shared_ptr<WatchPoint>& watchPoint)
 {
-	cliComm.update(CliComm::DEBUG_UPDT, tmpStrCat("wp#", watchPoint->getId()), "add");
+	cliComm.update(CliComm::UpdateType::DEBUG_UPDT, tmpStrCat("wp#", watchPoint->getId()), "add");
 	watchPoints.push_back(watchPoint);
 	WatchPoint::Type type = watchPoint->getType();
 	switch (type) {
-	case WatchPoint::READ_IO:
+	using enum WatchPoint::Type;
+	case READ_IO:
 		registerIOWatch(*watchPoint, IO_In);
 		break;
-	case WatchPoint::WRITE_IO:
+	case WRITE_IO:
 		registerIOWatch(*watchPoint, IO_Out);
 		break;
-	case WatchPoint::READ_MEM:
-	case WatchPoint::WRITE_MEM:
+	case READ_MEM:
+	case WRITE_MEM:
 		updateMemWatch(type);
 		break;
 	default:
@@ -905,19 +902,20 @@ void MSXCPUInterface::removeWatchPoint(std::shared_ptr<WatchPoint> watchPoint)
 	// from the watchPoints collection.
 	if (auto it = ranges::find(watchPoints, watchPoint);
 	    it != end(watchPoints)) {
-		cliComm.update(CliComm::DEBUG_UPDT, tmpStrCat("wp#", watchPoint->getId()), "remove");
+		cliComm.update(CliComm::UpdateType::DEBUG_UPDT, tmpStrCat("wp#", watchPoint->getId()), "remove");
 		// remove before calling updateMemWatch()
 		watchPoints.erase(it);
 		WatchPoint::Type type = watchPoint->getType();
 		switch (type) {
-		case WatchPoint::READ_IO:
+		using enum WatchPoint::Type;
+		case READ_IO:
 			unregisterIOWatch(*watchPoint, IO_In);
 			break;
-		case WatchPoint::WRITE_IO:
+		case WRITE_IO:
 			unregisterIOWatch(*watchPoint, IO_Out);
 			break;
-		case WatchPoint::READ_MEM:
-		case WatchPoint::WRITE_MEM:
+		case READ_MEM:
+		case WRITE_MEM:
 			updateMemWatch(type);
 			break;
 		default:
@@ -936,13 +934,13 @@ void MSXCPUInterface::removeWatchPoint(unsigned id)
 
 void MSXCPUInterface::setCondition(DebugCondition cond)
 {
-	cliComm.update(CliComm::DEBUG_UPDT, tmpStrCat("cond#", cond.getId()), "add");
+	cliComm.update(CliComm::UpdateType::DEBUG_UPDT, tmpStrCat("cond#", cond.getId()), "add");
 	conditions.push_back(std::move(cond));
 }
 
 void MSXCPUInterface::removeCondition(const DebugCondition& cond)
 {
-	cliComm.update(CliComm::DEBUG_UPDT, tmpStrCat("cond#", cond.getId()), "remove");
+	cliComm.update(CliComm::UpdateType::DEBUG_UPDT, tmpStrCat("cond#", cond.getId()), "remove");
 	conditions.erase(rfind_unguarded(conditions, &cond,
 	                                 [](auto& e) { return &e; }));
 }
@@ -952,7 +950,7 @@ void MSXCPUInterface::removeCondition(unsigned id)
 	if (auto it = ranges::find(conditions, id, &DebugCondition::getId);
 	    // could be ==end for a condition that removes itself AND has the -once flag set
 	    it != conditions.end()) {
-		cliComm.update(CliComm::DEBUG_UPDT, tmpStrCat("cond#", it->getId()), "remove");
+		cliComm.update(CliComm::UpdateType::DEBUG_UPDT, tmpStrCat("cond#", it->getId()), "remove");
 		conditions.erase(it);
 	}
 }
@@ -960,11 +958,11 @@ void MSXCPUInterface::removeCondition(unsigned id)
 void MSXCPUInterface::updateMemWatch(WatchPoint::Type type)
 {
 	std::span<std::bitset<CacheLine::SIZE>, CacheLine::NUM> watchSet =
-		(type == WatchPoint::READ_MEM) ? readWatchSet : writeWatchSet;
+		(type == WatchPoint::Type::READ_MEM) ? readWatchSet : writeWatchSet;
 	for (auto i : xrange(CacheLine::NUM)) {
 		watchSet[i].reset();
 	}
-	for (auto& w : watchPoints) {
+	for (const auto& w : watchPoints) {
 		if (w->getType() == type) {
 			unsigned beginAddr = w->getBeginAddress();
 			unsigned endAddr   = w->getEndAddress();
@@ -1007,8 +1005,7 @@ void MSXCPUInterface::executeMemWatch(WatchPoint::Type type,
 	}
 
 	auto scopedBlock = motherBoard.getStateChangeDistributor().tempBlockNewEventsDuringReplay();
-	auto wpCopy = watchPoints;
-	for (auto& w : wpCopy) {
+	for( auto wpCopy = watchPoints; auto& w : wpCopy) {
 		if ((w->getBeginAddress() <= address) &&
 		    (w->getEndAddress()   >= address) &&
 		    (w->getType()         == type)) {
@@ -1034,7 +1031,7 @@ void MSXCPUInterface::doBreak()
 	Reactor& reactor = motherBoard.getReactor();
 	reactor.block();
 	breakedSetting->setReadOnlyValue(TclObject("true"));
-	reactor.getCliComm().update(CliComm::STATUS, "cpu", "suspended");
+	reactor.getCliComm().update(CliComm::UpdateType::STATUS, "cpu", "suspended");
 	reactor.getEventDistributor().distributeEvent(BreakEvent());
 }
 
@@ -1055,7 +1052,7 @@ void MSXCPUInterface::doContinue()
 
 		Reactor& reactor = motherBoard.getReactor();
 		breakedSetting->setReadOnlyValue(TclObject("false"));
-		reactor.getCliComm().update(CliComm::STATUS, "cpu", "running");
+		reactor.getCliComm().update(CliComm::UpdateType::STATUS, "cpu", "running");
 		reactor.unblock();
 		motherBoard.getRealTime().resync();
 	}
@@ -1090,7 +1087,7 @@ MSXCPUInterface::MemoryDebug::MemoryDebug(MSXMotherBoard& motherBoard_)
 
 byte MSXCPUInterface::MemoryDebug::read(unsigned address, EmuTime::param time)
 {
-	auto& interface = OUTER(MSXCPUInterface, memoryDebug);
+	const auto& interface = OUTER(MSXCPUInterface, memoryDebug);
 	return interface.peekMem(narrow<word>(address), time);
 }
 
@@ -1113,7 +1110,7 @@ MSXCPUInterface::SlottedMemoryDebug::SlottedMemoryDebug(
 
 byte MSXCPUInterface::SlottedMemoryDebug::read(unsigned address, EmuTime::param time)
 {
-	auto& interface = OUTER(MSXCPUInterface, slottedMemoryDebug);
+	const auto& interface = OUTER(MSXCPUInterface, slottedMemoryDebug);
 	return interface.peekSlottedMem(address, time);
 }
 
@@ -1177,7 +1174,7 @@ void MSXCPUInterface::SubSlottedInfo::execute(std::span<const TclObject> tokens,
                                               TclObject& result) const
 {
 	checkNumArgs(tokens, 3, "primary");
-	auto& interface = OUTER(MSXCPUInterface, subSlottedInfo);
+	const auto& interface = OUTER(MSXCPUInterface, subSlottedInfo);
 	result = interface.isExpanded(narrow<int>(
 		getSlot(getInterpreter(), tokens[2], "Slot")));
 }
@@ -1212,8 +1209,8 @@ void MSXCPUInterface::ExternalSlotInfo::execute(
 		ps = narrow<int>(getSlot(interp, tokens[2], "Primary slot"));
 		break;
 	}
-	auto& interface = OUTER(MSXCPUInterface, externalSlotInfo);
-	auto& manager = interface.motherBoard.getSlotManager();
+	const auto& interface = OUTER(MSXCPUInterface, externalSlotInfo);
+	const auto& manager = interface.motherBoard.getSlotManager();
 	result = manager.isExternalSlot(ps, ss, true);
 }
 

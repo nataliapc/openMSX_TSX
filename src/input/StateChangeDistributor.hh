@@ -15,6 +15,10 @@ class StateChangeDistributor
 {
 public:
 	StateChangeDistributor() = default;
+	StateChangeDistributor(const StateChangeDistributor&) = delete;
+	StateChangeDistributor(StateChangeDistributor&&) = delete;
+	StateChangeDistributor& operator=(const StateChangeDistributor&) = delete;
+	StateChangeDistributor& operator=(StateChangeDistributor&&) = delete;
 	~StateChangeDistributor();
 
 	/** (Un)registers the given object to receive state change events.
@@ -62,7 +66,7 @@ public:
 		}
 	}
 
-	void distributeReplay(const StateChange& event) {
+	void distributeReplay(const StateChange& event) const {
 		assert(isReplaying());
 		distribute(event);
 	}
@@ -91,7 +95,7 @@ public:
 
 private:
 	[[nodiscard]] bool isRegistered(StateChangeListener* listener) const;
-	void distribute(const StateChange& event);
+	void distribute(const StateChange& event) const;
 
 private:
 	std::vector<StateChangeListener*> listeners; // unordered

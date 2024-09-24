@@ -66,7 +66,7 @@ Touchpad::Touchpad(MSXEventDistributor& eventDistributor_,
 		"{ 256 0 0 } { 0 256 0 }")
 {
 	auto& interp = commandController.getInterpreter();
-	transformSetting.setChecker([this, &interp](TclObject& newValue) {
+	transformSetting.setChecker([this, &interp](const TclObject& newValue) {
 		try {
 			parseTransformMatrix(interp, newValue);
 		} catch (CommandException& e) {
@@ -188,7 +188,7 @@ void Touchpad::write(uint8_t value, EmuTime::param time)
 
 ivec2 Touchpad::transformCoords(ivec2 xy)
 {
-	if (auto* output = display.getOutputSurface()) {
+	if (const auto* output = display.getOutputSurface()) {
 		vec2 uv = vec2(xy) / vec2(output->getLogicalSize());
 		xy = ivec2(m * vec3(uv, 1.0f));
 	}

@@ -1,4 +1,5 @@
 #include "XMLElement.hh"
+
 #include "ConfigException.hh"
 #include "File.hh"
 #include "FileContext.hh" // for bw compat
@@ -10,6 +11,7 @@
 #include "serialize.hh"
 #include "serialize_meta.hh"
 #include "serialize_stl.hh"
+
 #include <cassert>
 #include <vector>
 
@@ -104,8 +106,9 @@ const XMLAttribute* XMLElement::findAttribute(std::string_view attrName) const
 // Throws when not found.
 const XMLAttribute& XMLElement::getAttribute(std::string_view attrName) const
 {
-	const auto* result = findAttribute(attrName);
-	if (result) return *result;
+	if (const auto* result = findAttribute(attrName)) {
+		return *result;
+	}
 	throw ConfigException("Missing attribute \"", attrName, "\".");
 }
 
@@ -409,7 +412,7 @@ static void saveElement(MemOutputArchive& ar, const XMLElement& elem)
 	}
 }
 
-void XMLDocument::serialize(MemOutputArchive& ar, unsigned /*version*/)
+void XMLDocument::serialize(MemOutputArchive& ar, unsigned /*version*/) const
 {
 	if (root) {
 		saveElement(ar, *root);
@@ -471,7 +474,7 @@ static void saveElement(XMLOutputStream<XmlOutputArchive>& stream, const XMLElem
 	});
 }
 
-void XMLDocument::serialize(XmlOutputArchive& ar, unsigned /*version*/)
+void XMLDocument::serialize(XmlOutputArchive& ar, unsigned /*version*/) const
 {
 	auto& stream = ar.getXMLOutputStream();
 	if (root) {
@@ -506,7 +509,7 @@ XMLElement* XMLDocument::clone(const OldXMLElement& inElem)
 	return outElem;
 }
 
-void XMLDocument::load(OldXMLElement& elem)
+void XMLDocument::load(const OldXMLElement& elem)
 {
 	root = clone(elem);
 }

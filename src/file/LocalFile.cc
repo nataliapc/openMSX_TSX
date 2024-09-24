@@ -25,25 +25,18 @@ namespace openmsx {
 
 LocalFile::LocalFile(std::string filename_, File::OpenMode mode)
 	: filename(std::move(filename_))
-#if HAVE_MMAP || defined _WIN32
-	, mmem(nullptr)
-#endif
-#if defined _WIN32
-	, hMmap(nullptr)
-#endif
-	, readOnly(false)
 {
-	if (mode == File::SAVE_PERSISTENT) {
+	if (mode == File::OpenMode::SAVE_PERSISTENT) {
 		if (auto pos = filename.find_last_of('/'); pos != std::string::npos) {
 			FileOperations::mkdirp(filename.substr(0, pos));
 		}
 	}
 
 	const std::string& name = FileOperations::getNativePath(filename);
-	if (mode == one_of(File::SAVE_PERSISTENT, File::TRUNCATE)) {
+	if (mode == one_of(File::OpenMode::SAVE_PERSISTENT, File::OpenMode::TRUNCATE)) {
 		// open file read/write truncated
 		file = FileOperations::openFile(name, "wb+");
-	} else if (mode == File::CREATE) {
+	} else if (mode == File::OpenMode::CREATE) {
 		// open file read/write
 		file = FileOperations::openFile(name, "rb+");
 		if (!file) {
@@ -75,13 +68,6 @@ LocalFile::LocalFile(std::string filename_, File::OpenMode mode)
 
 LocalFile::LocalFile(std::string filename_, const char* mode)
 	: filename(std::move(filename_))
-#if HAVE_MMAP || defined _WIN32
-	, mmem(nullptr)
-#endif
-#if defined _WIN32
-	, hMmap(nullptr)
-#endif
-	, readOnly(false)
 {
 	assert(strchr(mode, 'b'));
 	const std::string name = FileOperations::getNativePath(filename);

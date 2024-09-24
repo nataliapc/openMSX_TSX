@@ -262,7 +262,7 @@ public:
 	 * It's only allowed to call this method on archives that can have
 	 * optional attributes.
 	 */
-	[[nodiscard]] bool hasAttribute(const char* /*name*/)
+	[[nodiscard]] bool hasAttribute(const char* /*name*/) const
 	{
 		UNREACHABLE;
 	}
@@ -303,7 +303,7 @@ public:
 	 * tag name matches the given name. So we will NOT search the tag
 	 * with the given name, the tags have to be in the correct order.
 	 */
-	void beginTag(const char* /*tag*/)
+	void beginTag(const char* /*tag*/) const
 	{
 		// nothing
 	}
@@ -313,7 +313,7 @@ public:
 	 * internal checks (with checks disabled, the tag parameter has no
 	 * influence at all on loading or saving of the stream).
 	 */
-	void endTag(const char* /*tag*/)
+	void endTag(const char* /*tag*/) const
 	{
 		// nothing
 	}
@@ -376,7 +376,7 @@ public:
 		return false;
 	}
 
-	void skipSection(bool /*skip*/)
+	void skipSection(bool /*skip*/) const
 	{
 		UNREACHABLE;
 	}
@@ -524,11 +524,11 @@ class InputArchiveBase2
 public:
 	static constexpr bool IS_LOADER = true;
 
-	void beginSection()
+	void beginSection() const
 	{
 		UNREACHABLE;
 	}
-	void endSection()
+	void endSection() const
 	{
 		UNREACHABLE;
 	}
@@ -673,7 +673,7 @@ public:
 
 	template<typename T> void save(const T& t)
 	{
-		put(&t, sizeof(t));
+		buffer.insert(&t, sizeof(t));
 	}
 	inline void saveChar(char c)
 	{
@@ -724,14 +724,7 @@ public:
 	[[nodiscard]] MemBuffer<uint8_t> releaseBuffer(size_t& size);
 
 private:
-	void put(const void* data, size_t len)
-	{
-		if (len) {
-			buffer.insert(data, len);
-		}
-	}
-
-	ALWAYS_INLINE void serialize_group(const std::tuple<>& /*tuple*/)
+	ALWAYS_INLINE void serialize_group(const std::tuple<>& /*tuple*/) const
 	{
 		// done categorizing, there were no memcpy-able elements
 	}
@@ -785,7 +778,7 @@ public:
 
 	template<typename T> void load(T& t)
 	{
-		get(&t, sizeof(t));
+		buffer.read(&t, sizeof(t));
 	}
 	inline void loadChar(char& c)
 	{
@@ -821,13 +814,6 @@ public:
 	}
 
 private:
-	void get(void* data, size_t len)
-	{
-		if (len) {
-			buffer.read(data, len);
-		}
-	}
-
 	// See comments in MemOutputArchive
 	template<typename TUPLE>
 	ALWAYS_INLINE void serialize_group(const TUPLE& tuple)
@@ -881,8 +867,8 @@ public:
 	void save(unsigned u);             // but having them non-inline
 	void save(unsigned long long ull); // saves quite a bit of code
 
-	void beginSection() { /*nothing*/ }
-	void endSection()   { /*nothing*/ }
+	void beginSection() const { /*nothing*/ }
+	void endSection()   const { /*nothing*/ }
 
 	// workaround(?) for visual studio 2015:
 	//   put the default here instead of in the base class
@@ -943,25 +929,25 @@ public:
 		return actual < required;
 	}
 
-	template<typename T> void load(T& t)
+	void loadChar(char& c) const;
+	void load(bool& b) const;
+	void load(unsigned char& b) const;
+	void load(signed char& c) const;
+	void load(char& c) const;
+	void load(int& i) const;                  // these 3 are not strictly needed
+	void load(unsigned& u) const;             // but having them non-inline
+	void load(unsigned long long& ull) const; // saves quite a bit of code
+	void load(std::string& t) const;
+	template<typename T> void load(T& t) const
 	{
 		std::string str;
 		load(str);
 		std::istringstream is(str);
 		is >> t;
 	}
-	void loadChar(char& c);
-	void load(bool& b);
-	void load(unsigned char& b);
-	void load(signed char& c);
-	void load(char& c);
-	void load(int& i);                  // these 3 are not strictly needed
-	void load(unsigned& u);             // but having them non-inline
-	void load(unsigned long long& ull); // saves quite a bit of code
-	void load(std::string& t);
-	[[nodiscard]] std::string_view loadStr();
+	[[nodiscard]] std::string_view loadStr() const;
 
-	void skipSection(bool /*skip*/) { /*nothing*/ }
+	void skipSection(bool /*skip*/) const { /*nothing*/ }
 
 	// workaround(?) for visual studio 2015:
 	//   put the default here instead of in the base class
@@ -986,7 +972,7 @@ public:
 	void beginTag(const char* tag);
 	void endTag(const char* tag);
 
-	template<typename T> void attributeImpl(const char* name, T& t)
+	template<typename T> void attributeImpl(const char* name, T& t) const
 	{
 		std::string str;
 		attribute(name, str);
@@ -997,9 +983,9 @@ public:
 	{
 		attributeImpl(name, t);
 	}
-	void attribute(const char* name, std::string& t);
-	void attribute(const char* name, int& i);
-	void attribute(const char* name, unsigned& u);
+	void attribute(const char* name, std::string& t) const;
+	void attribute(const char* name, int& i) const;
+	void attribute(const char* name, unsigned& u) const;
 
 	[[nodiscard]] bool hasAttribute(const char* name) const;
 	[[nodiscard]] int countChildren() const;

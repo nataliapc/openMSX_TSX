@@ -1,18 +1,22 @@
 #include "MSXCPU.hh"
+
+#include "CPUCore.hh"
 #include "MSXCPUInterface.hh"
+#include "R800.hh"
+#include "Z80.hh"
+
 #include "MSXMotherBoard.hh"
 #include "Debugger.hh"
 #include "Scheduler.hh"
 #include "IntegerSetting.hh"
-#include "CPUCore.hh"
-#include "Z80.hh"
-#include "R800.hh"
 #include "TclObject.hh"
+#include "serialize.hh"
+
 #include "outer.hh"
 #include "ranges.hh"
-#include "serialize.hh"
 #include "unreachable.hh"
 #include "xrange.hh"
+
 #include <cassert>
 #include <memory>
 
@@ -22,12 +26,12 @@ MSXCPU::MSXCPU(MSXMotherBoard& motherboard_)
 	: motherboard(motherboard_)
 	, traceSetting(
 		motherboard.getCommandController(), "cputrace",
-		"CPU tracing on/off", false, Setting::DONT_SAVE)
+		"CPU tracing on/off", false, Setting::Save::NO)
 	, diHaltCallback(
 		motherboard.getCommandController(), "di_halt_callback",
 		"Tcl proc called when the CPU executed a DI/HALT sequence",
 		"default_di_halt_callback",
-		Setting::SaveSetting::SAVE) // user must be able to override
+		Setting::Save::YES) // user must be able to override
 	, z80(std::make_unique<CPUCore<Z80TYPE>>(
 		motherboard, "z80", traceSetting,
 		diHaltCallback, EmuTime::zero()))
@@ -87,11 +91,11 @@ void MSXCPU::doReset(EmuTime::param time)
 	reference = time;
 }
 
-void MSXCPU::setActiveCPU(CPUType cpu)
+void MSXCPU::setActiveCPU(Type cpu)
 {
-	if (cpu == CPU_R800) assert(r800);
+	if (cpu == Type::R800) assert(r800);
 
-	bool tmp = cpu == CPU_Z80;
+	bool tmp = cpu == Type::Z80;
 	if (tmp != z80Active) {
 		exitCPULoopSync();
 		newZ80Active = tmp;
@@ -352,16 +356,6 @@ void MSXCPU::update(const Setting& setting) noexcept
 	exitCPULoopSync();
 }
 
-// Command
-
-void MSXCPU::disasmCommand(
-	Interpreter& interp, std::span<const TclObject> tokens,
-	TclObject& result) const
-{
-	z80Active ? z80 ->disasmCommand(interp, tokens, result)
-	          : r800->disasmCommand(interp, tokens, result);
-}
-
 void MSXCPU::setPaused(bool paused)
 {
 	if (z80Active) {
@@ -384,7 +378,7 @@ MSXCPU::TimeInfoTopic::TimeInfoTopic(InfoCommand& machineInfoCommand)
 void MSXCPU::TimeInfoTopic::execute(
 	std::span<const TclObject> /*tokens*/, TclObject& result) const
 {
-	auto& cpu = OUTER(MSXCPU, timeInfo);
+	const auto& cpu = OUTER(MSXCPU, timeInfo);
 	EmuDuration dur = cpu.getCurrentTime() - cpu.reference;
 	result = dur.toDouble();
 }

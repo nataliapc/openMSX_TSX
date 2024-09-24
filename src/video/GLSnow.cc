@@ -1,4 +1,5 @@
 #include "GLSnow.hh"
+
 #include "GLContext.hh"
 #include "gl_mat.hh"
 #include "Display.hh"
@@ -11,7 +12,7 @@ using namespace gl;
 namespace openmsx {
 
 GLSnow::GLSnow(Display& display_)
-	: Layer(COVER_FULL, Z_BACKGROUND)
+	: Layer(Coverage::FULL, ZIndex::BACKGROUND)
 	, display(display_)
 	, noiseTexture(true, true) // enable interpolation + wrapping
 {
@@ -61,7 +62,7 @@ void GLSnow::paint(OutputSurface& /*output*/)
 		offset + vec2(0.0f, 0.0f),
 	};
 
-	auto& glContext = *gl::context;
+	const auto& glContext = *gl::context;
 	glContext.progTex.activate();
 	glUniform4f(glContext.unifTexColor, 1.0f, 1.0f, 1.0f, 1.0f);
 	mat4 I;

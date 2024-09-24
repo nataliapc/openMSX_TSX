@@ -9,6 +9,7 @@
 #include "VDP.hh"
 #include "VDPVRAM.hh"
 
+#include "MemBuffer.hh"
 #include "ranges.hh"
 
 #include <imgui.h>
@@ -35,7 +36,7 @@ void ImGuiBitmapViewer::paint(MSXMotherBoard* motherBoard)
 	ImGui::SetNextWindowSize({528, 618}, ImGuiCond_FirstUseEver);
 	im::Window("Bitmap viewer", &showBitmapViewer, [&]{
 		auto* vdp = dynamic_cast<VDP*>(motherBoard->findDevice("VDP")); // TODO name based OK?
-		if (!vdp) return;
+		if (!vdp || vdp->isMSX1VDP()) return;
 
 		auto parseMode = [](DisplayMode mode) {
 			auto base = mode.getBase();
@@ -80,39 +81,86 @@ void ImGuiBitmapViewer::paint(MSXMotherBoard* motherBoard)
 		};
 
 		static const char* const color0Str = "0\0001\0002\0003\0004\0005\0006\0007\0008\0009\00010\00011\00012\00013\00014\00015\000none\000";
+		bool manualMode   = overrideAll || overrideMode;
+		bool manualPage   = overrideAll || overridePage;
+		bool manualLines  = overrideAll || overrideLines;
+		bool manualColor0 = overrideAll || overrideColor0;
 		im::Group([&]{
-			ImGui::RadioButton("Use VDP settings", &bitmapManual, 0);
-			im::Disabled(bitmapManual != 0, [&]{
+			ImGui::TextUnformatted("VDP settings");
+			im::Disabled(manualMode, [&]{
 				ImGui::AlignTextToFramePadding();
 				ImGui::StrCat("Screen mode: ", modeToStr(vdpMode));
+			});
+			im::Disabled(manualPage, [&]{
 				ImGui::AlignTextToFramePadding();
 				ImGui::StrCat("Display page: ", vdpPage);
+			});
+			im::Disabled(manualLines, [&]{
 				ImGui::AlignTextToFramePadding();
 				ImGui::StrCat("Visible lines: ", vdpLines ? 212 : 192);
+			});
+			im::Disabled(manualColor0, [&]{
 				ImGui::AlignTextToFramePadding();
 				ImGui::StrCat("Replace color 0: ", getComboString(vdpColor0, color0Str));
-				ImGui::AlignTextToFramePadding();
-				ImGui::StrCat("Interlace: ", "TODO");
 			});
+			// TODO interlace
 		});
 		ImGui::SameLine();
 		im::Group([&]{
-			ImGui::RadioButton("Manual override", &bitmapManual, 1);
-			im::Disabled(bitmapManual != 1, [&]{
+			ImGui::Checkbox("Manual override", &overrideAll);
+			im::Group([&]{
+				im::Disabled(overrideAll, [&]{
+					ImGui::Checkbox("##mode",   overrideAll ? &overrideAll : &overrideMode);
+					ImGui::Checkbox("##page",   overrideAll ? &overrideAll : &overridePage);
+					ImGui::Checkbox("##lines",  overrideAll ? &overrideAll : &overrideLines);
+					ImGui::Checkbox("##color0", overrideAll ? &overrideAll : &overrideColor0);
+				});
+			});
+			ImGui::SameLine();
+			im::Group([&]{
 				im::ItemWidth(ImGui::GetFontSize() * 9.0f, [&]{
-					ImGui::Combo("##Screen mode", &bitmapScrnMode, "screen 5\000screen 6\000screen 7\000screen 8\000screen 11\000screen 12\000");
-					int numPages = bitmapScrnMode <= SCR6 ? 4 : 2; // TODO extended VRAM
-					if (bitmapPage >= numPages) bitmapPage = numPages - 1;
-					ImGui::Combo("##Display page", &bitmapPage, numPages == 2 ? "0\0001\000" : "0\0001\0002\0003\000");
-					ImGui::Combo("##Visible lines", &bitmapLines, "192\000212\000256\000");
-					ImGui::Combo("##Color 0 replacement", &bitmapColor0, color0Str);
+					im::Disabled(!manualMode, [&]{
+						ImGui::Combo("##Screen mode", &bitmapScrnMode, "screen 5\000screen 6\000screen 7\000screen 8\000screen 11\000screen 12\000");
+					});
+					im::Disabled(!manualPage, [&]{
+						int numPages = bitmapScrnMode <= SCR6 ? 4 : 2; // TODO extended VRAM
+						if (bitmapPage >= numPages) bitmapPage = numPages - 1;
+						if (bitmapPage < 0) bitmapPage = numPages;
+						ImGui::Combo("##Display page", &bitmapPage, numPages == 2 ? "0\0001\000All\000" : "0\0001\0002\0003\000All\000");
+						if (bitmapPage == numPages) bitmapPage = -1;
+					});
+					im::Disabled(!manualLines || bitmapPage < 0, [&]{
+						ImGui::Combo("##Visible lines", &bitmapLines, "192\000212\000256\000");
+					});
+					im::Disabled(!manualColor0, [&]{
+						ImGui::Combo("##Color 0 replacement", &bitmapColor0, color0Str);
+					});
 				});
 			});
 		});
 
 		ImGui::SameLine();
-		ImGui::Dummy(ImVec2(25, 1));
+		ImGui::Dummy(ImVec2(15, 1));
 		ImGui::SameLine();
+
+		const auto& vram = vdp->getVRAM();
+		int mode   = manualMode   ? bitmapScrnMode : vdpMode;
+		int page   = manualPage   ? bitmapPage     : vdpPage;
+		int lines  = manualLines  ? bitmapLines    : vdpLines;
+		int color0 = manualColor0 ? bitmapColor0   : vdpColor0;
+		int divX = mode == one_of(SCR6, SCR7) ? 1 : 2;
+		int width  = 512 / divX;
+		int height = (lines == 0) ? 192
+		           : (lines == 1) ? 212
+		           : 256;
+		if (page < 0) {
+			int numPages = mode <= SCR6 ? 4 : 2;
+			height = 256 * numPages;
+			page = 0;
+		}
+		auto rasterBeamPos = vdp->getMSXPos(vdp->getCurrentTime());
+		rasterBeamPos.x /= divX;
+
 		im::Group([&]{
 			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.0f);
 			ImGui::Combo("Palette", &manager.palette->whichPalette, "VDP\000Custom\000Fixed\000");
@@ -128,19 +176,24 @@ void ImGuiBitmapViewer::paint(MSXMotherBoard* motherBoard)
 				ImGui::ColorEdit4("Grid color", bitmapGridColor.data(),
 					ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel | ImGuiColorEditFlags_AlphaBar);
 			});
+			ImGui::Separator();
+			ImGui::Checkbox("beam", &rasterBeam);
+			ImGui::SameLine();
+			im::Disabled(!rasterBeam, [&]{
+				ImGui::ColorEdit4("raster beam color", rasterBeamColor.data(),
+					ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel | ImGuiColorEditFlags_AlphaBar);
+				ImGui::SameLine();
+				im::Font(manager.fontMono, [&]{
+					ImGui::StrCat('(',  dec_string<4>(rasterBeamPos.x),
+					              ',', dec_string<4>(rasterBeamPos.y), ')');
+				});
+			});
+			HelpMarker("Position of the raster beam, expressed in MSX coordinates.\n"
+			           "Left/top border have negative x/y-coordinates.\n"
+			           "Only practically useful when emulation is paused.");
 		});
 
 		ImGui::Separator();
-
-		auto& vram = vdp->getVRAM();
-		int mode   = bitmapManual ? bitmapScrnMode : vdpMode;
-		int page   = bitmapManual ? bitmapPage     : vdpPage;
-		int lines  = bitmapManual ? bitmapLines    : vdpLines;
-		int color0 = bitmapManual ? bitmapColor0   : vdpColor0;
-		int width  = mode == one_of(SCR6, SCR7) ? 512 : 256;
-		int height = (lines == 0) ? 192
-				: (lines == 1) ? 212
-						: 256;
 
 		std::array<uint32_t, 16> palette;
 		auto msxPalette = manager.palette->getPalette(vdp);
@@ -148,7 +201,7 @@ void ImGuiBitmapViewer::paint(MSXMotherBoard* motherBoard)
 			[](uint16_t msx) { return ImGuiPalette::toRGBA(msx); });
 		if (color0 < 16) palette[0] = palette[color0];
 
-		std::array<uint32_t, 512 * 256> pixels;
+		MemBuffer<uint32_t> pixels(512 * 256 * 4); // max size: screen 6/7, show all pages
 		renderBitmap(vram.getData(), palette, mode, height, page,
 				pixels.data());
 		if (!bitmapTex) {
@@ -157,17 +210,19 @@ void ImGuiBitmapViewer::paint(MSXMotherBoard* motherBoard)
 		bitmapTex->bind();
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0,
 				GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
-		int zx = (1 + bitmapZoom) * (width == 256 ? 2 : 1);
+		int zx = (1 + bitmapZoom) * divX;
 		int zy = (1 + bitmapZoom) * 2;
+		gl::vec2 zm = gl::vec2(float(zx), float(zy));
 
 		gl::vec2 scrnPos;
-		gl::vec2 size(float(width * zx), float(height * zy));
-		gl::vec2 availSize = gl::vec2(ImGui::GetContentRegionAvail()) - gl::vec2(0.0f, ImGui::GetTextLineHeightWithSpacing());
-		gl::vec2 reqSize = size + gl::vec2(ImGui::GetStyle().ScrollbarSize);
+		auto msxSize = gl::vec2(float(width), float(height));
+		auto size = msxSize * zm;
+		auto availSize = gl::vec2(ImGui::GetContentRegionAvail()) - gl::vec2(0.0f, ImGui::GetTextLineHeightWithSpacing());
+		auto reqSize = size + gl::vec2(ImGui::GetStyle().ScrollbarSize);
 		im::Child("##bitmap", min(availSize, reqSize), 0, ImGuiWindowFlags_HorizontalScrollbar, [&]{
 			scrnPos = ImGui::GetCursorScreenPos();
 			auto pos = ImGui::GetCursorPos();
-			ImGui::Image(reinterpret_cast<void*>(bitmapTex->get()), size);
+			ImGui::Image(bitmapTex->getImGui(), size);
 
 			if (bitmapGrid && (zx > 1) && (zy > 1)) {
 				auto color = ImGui::ColorConvertFloat4ToU32(bitmapGridColor);
@@ -184,13 +239,24 @@ void ImGuiBitmapViewer::paint(MSXMotherBoard* motherBoard)
 				glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, zx, zy, 0,
 						GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
 				ImGui::SetCursorPos(pos);
-				ImGui::Image(reinterpret_cast<void*>(bitmapGridTex->get()), size,
-						ImVec2(0.0f, 0.0f), ImVec2(float(width), float(height)));
+				ImGui::Image(bitmapGridTex->getImGui(), size, gl::vec2{}, msxSize);
+			}
+			if (rasterBeam) {
+				auto* drawList = ImGui::GetWindowDrawList();
+				auto center = scrnPos + (gl::vec2(rasterBeamPos) + gl::vec2{0.5f}) * zm;
+				auto color = ImGui::ColorConvertFloat4ToU32(rasterBeamColor);
+				auto thickness = zm.y * 0.5f;
+				auto zm1 = 1.5f * zm;
+				auto zm3 = 3.5f * zm;
+				drawList->AddRect(center - zm, center + zm, color, 0.0f, 0, thickness);
+				drawList->AddLine(center - gl::vec2{zm1.x, 0.0f}, center - gl::vec2{zm3.x, 0.0f}, color, thickness);
+				drawList->AddLine(center + gl::vec2{zm1.x, 0.0f}, center + gl::vec2{zm3.x, 0.0f}, color, thickness);
+				drawList->AddLine(center - gl::vec2{0.0f, zm1.y}, center - gl::vec2{0.0f, zm3.y}, color, thickness);
+				drawList->AddLine(center + gl::vec2{0.0f, zm1.y}, center + gl::vec2{0.0f, zm3.y}, color, thickness);
 			}
 		});
 		if (ImGui::IsItemHovered() && (mode != OTHER)) {
-			gl::vec2 zoom{float(zx), float(zy)};
-			auto [x_, y_] = trunc((gl::vec2(ImGui::GetIO().MousePos) - scrnPos) / zoom);
+			auto [x_, y_] = trunc((gl::vec2(ImGui::GetIO().MousePos) - scrnPos) / zm);
 			auto x = x_; auto y = y_; // clang workaround
 			if ((0 <= x) && (x < width) && (0 <= y) && (y < height)) {
 				auto dec3 = [&](int d) {
@@ -260,7 +326,7 @@ void ImGuiBitmapViewer::paint(MSXMotherBoard* motherBoard)
 
 // TODO avoid code duplication with src/video/BitmapConverter
 void ImGuiBitmapViewer::renderBitmap(std::span<const uint8_t> vram, std::span<const uint32_t, 16> palette16,
-                                     int mode, int lines, int page, uint32_t* output)
+                                     int mode, int lines, int page, uint32_t* output) const
 {
 	auto yjk2rgb = [](int y, int j, int k) -> std::tuple<int, int, int> {
 		// Note the formula for 'blue' differs from the 'traditional' formula

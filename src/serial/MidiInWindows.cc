@@ -14,7 +14,7 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
-#include <Windows.h>
+#include <windows.h>
 #include <mmsystem.h>
 #include <memory>
 #include <sys/types.h>
@@ -37,7 +37,6 @@ void MidiInWindows::registerAll(EventDistributor& eventDistributor,
 MidiInWindows::MidiInWindows(EventDistributor& eventDistributor_,
                              Scheduler& scheduler_, unsigned num)
 	: eventDistributor(eventDistributor_), scheduler(scheduler_)
-	, devIdx(unsigned(-1))
 {
 	name = w32_midiInGetVFN(num);
 	desc = w32_midiInGetRDN(num);
@@ -56,9 +55,9 @@ MidiInWindows::~MidiInWindows()
 void MidiInWindows::plugHelper(Connector& connector_, EmuTime::param /*time*/)
 {
 	auto& midiConnector = static_cast<MidiInConnector&>(connector_);
-	midiConnector.setDataBits(SerialDataInterface::DATA_8); // 8 data bits
-	midiConnector.setStopBits(SerialDataInterface::STOP_1); // 1 stop bit
-	midiConnector.setParityBit(false, SerialDataInterface::EVEN); // no parity
+	midiConnector.setDataBits(SerialDataInterface::DataBits::D8); // 8 data bits
+	midiConnector.setStopBits(SerialDataInterface::StopBits::S1); // 1 stop bit
+	midiConnector.setParityBit(false, SerialDataInterface::Parity::EVEN); // no parity
 
 	setConnector(&connector_); // base class will do this in a moment,
 	                           // but thread already needs it
@@ -192,7 +191,7 @@ void MidiInWindows::signal(EmuTime::param time)
 }
 
 // EventListener
-int MidiInWindows::signalEvent(const Event& /*event*/)
+bool MidiInWindows::signalEvent(const Event& /*event*/)
 {
 	if (isPluggedIn()) {
 		signal(scheduler.getCurrentTime());
@@ -200,7 +199,7 @@ int MidiInWindows::signalEvent(const Event& /*event*/)
 		std::scoped_lock lock(queueMutex);
 		queue.clear();
 	}
-	return 0;
+	return false;
 }
 
 template<typename Archive>

@@ -34,10 +34,14 @@ TODO:
 */
 
 #include "VDPCmdEngine.hh"
-#include "EmuTime.hh"
+
 #include "VDPVRAM.hh"
+
+#include "EmuTime.hh"
 #include "serialize.hh"
+
 #include "unreachable.hh"
+
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -170,7 +174,7 @@ struct Graphic4Mode
 	static constexpr byte PIXELS_PER_BYTE_SHIFT = 1;
 	static constexpr unsigned PIXELS_PER_LINE = 256;
 	static unsigned addressOf(unsigned x, unsigned y, bool extVRAM);
-	static byte point(VDPVRAM& vram, unsigned x, unsigned y, bool extVRAM);
+	static byte point(const VDPVRAM& vram, unsigned x, unsigned y, bool extVRAM);
 	template<typename LogOp>
 	static void pset(EmuTime::param time, VDPVRAM& vram,
 		unsigned x, unsigned addr, byte src, byte color, LogOp op);
@@ -188,7 +192,7 @@ inline unsigned Graphic4Mode::addressOf(
 }
 
 inline byte Graphic4Mode::point(
-	VDPVRAM& vram, unsigned x, unsigned y, bool extVRAM)
+	const VDPVRAM& vram, unsigned x, unsigned y, bool extVRAM)
 {
 	return (vram.cmdReadWindow.readNP(addressOf(x, y, extVRAM))
 		>> (((~x) & 1) << 2)) & 15;
@@ -222,7 +226,7 @@ struct Graphic5Mode
 	static constexpr byte PIXELS_PER_BYTE_SHIFT = 2;
 	static constexpr unsigned PIXELS_PER_LINE = 512;
 	static unsigned addressOf(unsigned x, unsigned y, bool extVRAM);
-	static byte point(VDPVRAM& vram, unsigned x, unsigned y, bool extVRAM);
+	static byte point(const VDPVRAM& vram, unsigned x, unsigned y, bool extVRAM);
 	template<typename LogOp>
 	static void pset(EmuTime::param time, VDPVRAM& vram,
 		unsigned x, unsigned addr, byte src, byte color, LogOp op);
@@ -240,7 +244,7 @@ inline unsigned Graphic5Mode::addressOf(
 }
 
 inline byte Graphic5Mode::point(
-	VDPVRAM& vram, unsigned x, unsigned y, bool extVRAM)
+	const VDPVRAM& vram, unsigned x, unsigned y, bool extVRAM)
 {
 	return (vram.cmdReadWindow.readNP(addressOf(x, y, extVRAM))
 		>> (((~x) & 3) << 1)) & 3;
@@ -276,7 +280,7 @@ struct Graphic6Mode
 	static constexpr byte PIXELS_PER_BYTE_SHIFT = 1;
 	static constexpr unsigned PIXELS_PER_LINE = 512;
 	static unsigned addressOf(unsigned x, unsigned y, bool extVRAM);
-	static byte point(VDPVRAM& vram, unsigned x, unsigned y, bool extVRAM);
+	static byte point(const VDPVRAM& vram, unsigned x, unsigned y, bool extVRAM);
 	template<typename LogOp>
 	static void pset(EmuTime::param time, VDPVRAM& vram,
 		unsigned x, unsigned addr, byte src, byte color, LogOp op);
@@ -294,7 +298,7 @@ inline unsigned Graphic6Mode::addressOf(
 }
 
 inline byte Graphic6Mode::point(
-	VDPVRAM& vram, unsigned x, unsigned y, bool extVRAM)
+	const VDPVRAM& vram, unsigned x, unsigned y, bool extVRAM)
 {
 	return (vram.cmdReadWindow.readNP(addressOf(x, y, extVRAM))
 		>> (((~x) & 1) << 2)) & 15;
@@ -328,7 +332,7 @@ struct Graphic7Mode
 	static constexpr byte PIXELS_PER_BYTE_SHIFT = 0;
 	static constexpr unsigned PIXELS_PER_LINE = 256;
 	static unsigned addressOf(unsigned x, unsigned y, bool extVRAM);
-	static byte point(VDPVRAM& vram, unsigned x, unsigned y, bool extVRAM);
+	static byte point(const VDPVRAM& vram, unsigned x, unsigned y, bool extVRAM);
 	template<typename LogOp>
 	static void pset(EmuTime::param time, VDPVRAM& vram,
 		unsigned x, unsigned addr, byte src, byte color, LogOp op);
@@ -346,7 +350,7 @@ inline unsigned Graphic7Mode::addressOf(
 }
 
 inline byte Graphic7Mode::point(
-	VDPVRAM& vram, unsigned x, unsigned y, bool extVRAM)
+	const VDPVRAM& vram, unsigned x, unsigned y, bool extVRAM)
 {
 	return vram.cmdReadWindow.readNP(addressOf(x, y, extVRAM));
 }
@@ -378,7 +382,7 @@ struct NonBitmapMode
 	static constexpr byte PIXELS_PER_BYTE_SHIFT = 0;
 	static constexpr unsigned PIXELS_PER_LINE = 256;
 	static unsigned addressOf(unsigned x, unsigned y, bool extVRAM);
-	static byte point(VDPVRAM& vram, unsigned x, unsigned y, bool extVRAM);
+	static byte point(const VDPVRAM& vram, unsigned x, unsigned y, bool extVRAM);
 	template<typename LogOp>
 	static void pset(EmuTime::param time, VDPVRAM& vram,
 		unsigned x, unsigned addr, byte src, byte color, LogOp op);
@@ -396,7 +400,7 @@ inline unsigned NonBitmapMode::addressOf(
 }
 
 inline byte NonBitmapMode::point(
-	VDPVRAM& vram, unsigned x, unsigned y, bool extVRAM)
+	const VDPVRAM& vram, unsigned x, unsigned y, bool extVRAM)
 {
 	return vram.cmdReadWindow.readNP(addressOf(x, y, extVRAM));
 }
@@ -613,7 +617,7 @@ struct IncrMask7
 	{
 		return 0;
 	}
-	void step() {}
+	void step() const {}
 };
 
 
@@ -774,8 +778,7 @@ void VDPCmdEngine::executePoint(EmuTime::param limit)
 	if (engineTime >= limit) [[unlikely]] return;
 
 	bool srcExt  = (ARG & MXS) != 0;
-	bool doPoint = !srcExt || hasExtendedVRAM;
-	if (doPoint) [[likely]] {
+	if (bool doPoint = !srcExt || hasExtendedVRAM; doPoint) [[likely]] {
 		COL = Mode::point(vram, SX, SY, srcExt);
 	} else {
 		COL = 0xFF;
@@ -807,7 +810,7 @@ void VDPCmdEngine::executePset(EmuTime::param limit)
 		if (doPset) [[likely]] {
 			tmpDst = vram.cmdWriteWindow.readNP(addr);
 		}
-		nextAccessSlot(DELTA_24); // TODO
+		nextAccessSlot(Delta::D24); // TODO
 		[[fallthrough]];
 	case 1:
 		if (engineTime >= limit) [[unlikely]] { phase = 1; break; }
@@ -865,7 +868,7 @@ void VDPCmdEngine::executeSrch(EmuTime::param limit)
 			commandDone(calculator.getTime());
 			break;
 		}
-		calculator.next(DELTA_88); // TODO
+		calculator.next(Delta::D88); // TODO
 	}
 	engineTime = calculator.getTime();
 }
@@ -903,7 +906,7 @@ loop:		if (calculator.limitReached()) [[unlikely]] { phase = 0; break; }
 		if (doPset) [[likely]] {
 			tmpDst = vram.cmdWriteWindow.readNP(addr);
 		}
-		calculator.next(DELTA_24);
+		calculator.next(Delta::D24);
 		[[fallthrough]];
 	case 1: {
 		if (calculator.limitReached()) [[unlikely]] { phase = 1; break; }
@@ -912,7 +915,7 @@ loop:		if (calculator.limitReached()) [[unlikely]] { phase = 0; break; }
 			           tmpDst, CL, LogOp());
 		}
 
-		Delta delta = DELTA_88;
+		Delta delta = Delta::D88;
 		if ((ARG & MAJ) == 0) {
 			// X-Axis is major direction.
 			ADX += TX;
@@ -927,7 +930,7 @@ loop:		if (calculator.limitReached()) [[unlikely]] { phase = 0; break; }
 			if (ASX < NY) {
 				ASX += NX;
 				DY += TY;
-				delta = DELTA_120; // 88 + 32
+				delta = Delta::D120; // 88 + 32
 			}
 			ASX -= NY;
 			ASX &= 1023; // mask to 10 bits range
@@ -938,7 +941,7 @@ loop:		if (calculator.limitReached()) [[unlikely]] { phase = 0; break; }
 			if (ASX < NY) {
 				ASX += NX;
 				ADX += TX;
-				delta = DELTA_120; // 88 + 32
+				delta = Delta::D120; // 88 + 32
 			}
 			ASX -= NY;
 			ASX &= 1023; // mask to 10 bits range
@@ -996,7 +999,7 @@ loop:		if (calculator.limitReached()) [[unlikely]] { phase = 0; break; }
 		if (doPset) [[likely]] {
 			tmpDst = vram.cmdWriteWindow.readNP(addr);
 		}
-		calculator.next(DELTA_24);
+		calculator.next(Delta::D24);
 		[[fallthrough]];
 	case 1: {
 		if (calculator.limitReached()) [[unlikely]] { phase = 1; break; }
@@ -1005,9 +1008,9 @@ loop:		if (calculator.limitReached()) [[unlikely]] { phase = 0; break; }
 			           tmpDst, CL, LogOp());
 		}
 		ADX += TX;
-		Delta delta = DELTA_72;
+		Delta delta = Delta::D72;
 		if (--ANX == 0) {
-			delta = DELTA_136; // 72 + 64;
+			delta = Delta::D136; // 72 + 64;
 			DY += TY; --NY;
 			ADX = DX; ANX = tmpNX;
 			if (--tmpNY == 0) {
@@ -1124,14 +1127,14 @@ loop:		if (calculator.limitReached()) [[unlikely]] { phase = 0; break; }
 		} else {
 		       tmpSrc = 0xFF;
 		}
-		calculator.next(DELTA_32);
+		calculator.next(Delta::D32);
 		[[fallthrough]];
 	case 1:
 		if (calculator.limitReached()) [[unlikely]] { phase = 1; break; }
 		if (doPset) [[likely]] {
 			tmpDst = vram.cmdWriteWindow.readNP(dstAddr);
 		}
-		calculator.next(DELTA_24);
+		calculator.next(Delta::D24);
 		[[fallthrough]];
 	case 2: {
 		if (calculator.limitReached()) [[unlikely]] { phase = 2; break; }
@@ -1140,9 +1143,9 @@ loop:		if (calculator.limitReached()) [[unlikely]] { phase = 0; break; }
 			           tmpDst, tmpSrc, LogOp());
 		}
 		ASX += TX; ADX += TX;
-		Delta delta = DELTA_64;
+		Delta delta = Delta::D64;
 		if (--ANX == 0) {
-			delta = DELTA_128; // 64 + 64
+			delta = Delta::D128; // 64 + 64
 			SY += TY; DY += TY; --NY;
 			ASX = SX; ADX = DX; ANX = tmpNX;
 			if (--tmpNY == 0) {
@@ -1261,12 +1264,11 @@ void VDPCmdEngine::executeLmcm(EmuTime::param limit)
 	int TY = (ARG & DIY) ? -1 : 1;
 	ANX = clipNX_1_pixel<Mode>(ASX, ANX, ARG);
 	bool srcExt  = (ARG & MXS) != 0;
-	bool doPoint = !srcExt || hasExtendedVRAM;
 
 	// TODO we should (most likely) perform the actual read earlier and
 	//  buffer it, and on a CPU-IO-read start the next read (just like how
 	//  regular reading from VRAM works).
-	if (doPoint) [[likely]] {
+	if (bool doPoint = !srcExt || hasExtendedVRAM; doPoint) [[likely]] {
 		COL = Mode::point(vram, ASX, SY, srcExt);
 	} else {
 		COL = 0xFF;
@@ -1381,9 +1383,9 @@ void VDPCmdEngine::executeHmmv(EmuTime::param limit)
 			              COL, calculator.getTime());
 		}
 		ADX += TX;
-		Delta delta = DELTA_48;
+		Delta delta = Delta::D48;
 		if (--ANX == 0) {
-			delta = DELTA_104; // 48 + 56;
+			delta = Delta::D104; // 48 + 56;
 			DY += TY; --NY;
 			ADX = DX; ANX = tmpNX;
 			if (--tmpNY == 0) {
@@ -1491,7 +1493,7 @@ loop:		if (calculator.limitReached()) [[unlikely]] { phase = 0; break; }
 		} else {
 			tmpSrc = 0xFF;
 		}
-		calculator.next(DELTA_24);
+		calculator.next(Delta::D24);
 		[[fallthrough]];
 	case 1: {
 		if (calculator.limitReached()) [[unlikely]] { phase = 1; break; }
@@ -1500,9 +1502,9 @@ loop:		if (calculator.limitReached()) [[unlikely]] { phase = 0; break; }
 			              tmpSrc, calculator.getTime());
 		}
 		ASX += TX; ADX += TX;
-		Delta delta = DELTA_64;
+		Delta delta = Delta::D64;
 		if (--ANX == 0) {
-			delta = DELTA_128; // 64 + 64
+			delta = Delta::D128; // 64 + 64
 			SY += TY; DY += TY; --NY;
 			ASX = SX; ADX = DX; ANX = tmpNX;
 			if (--tmpNY == 0) {
@@ -1628,7 +1630,7 @@ loop:		if (calculator.limitReached()) [[unlikely]] { phase = 0; break; }
 			tmpSrc = vram.cmdReadWindow.readNP(
 			       Mode::addressOf(ADX, SY, dstExt));
 		}
-		calculator.next(DELTA_24);
+		calculator.next(Delta::D24);
 		[[fallthrough]];
 	case 1:
 		if (calculator.limitReached()) [[unlikely]] { phase = 1; break; }
@@ -1646,7 +1648,7 @@ loop:		if (calculator.limitReached()) [[unlikely]] { phase = 0; break; }
 				break;
 			}
 		}
-		calculator.next(DELTA_40);
+		calculator.next(Delta::D40);
 		goto loop;
 	default:
 		UNREACHABLE;
@@ -1779,7 +1781,7 @@ VDPCmdEngine::VDPCmdEngine(VDP& vdp_, CommandController& commandController)
 	        "Tcl proc to call when a write to the VDP command engine is "
 		"detected while the previous command is still in progress.",
 		"",
-		Setting::SaveSetting::SAVE)
+		Setting::Save::YES)
 	, executingProbe(
 		vdp_.getMotherBoard().getDebugger(),
 		strCat(vdp.getName(), '.', "commandExecuting"),

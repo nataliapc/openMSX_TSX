@@ -39,7 +39,7 @@ ImGuiConsole::ImGuiConsole(ImGuiManager& manager_)
 	: ImGuiPart(manager_)
 	, consoleSetting(
 		manager.getReactor().getCommandController(), "console",
-		"turns console display on/off", false, Setting::DONT_SAVE)
+		"turns console display on/off", false, Setting::Save::NO)
 	, history(1000)
 	, lines(1000)
 	, prompt(PROMPT_NEW)
@@ -128,9 +128,12 @@ void ImGuiConsole::paint(MSXMotherBoard* /*motherBoard*/)
 		im::ScopedFont sf(manager.fontMono);
 
 		// Reserve enough left-over height for 1 separator + 1 input text
-		auto& style = ImGui::GetStyle();
+		const auto& style = ImGui::GetStyle();
 		const float footerHeightToReserve = style.ItemSpacing.y +
 						ImGui::GetFrameHeightWithSpacing();
+
+		bool scrollUp   = ImGui::Shortcut(ImGuiKey_PageUp);
+		bool scrollDown = ImGui::Shortcut(ImGuiKey_PageDown);
 		im::Child("ScrollingRegion", ImVec2(0, -footerHeightToReserve), 0,
 		          ImGuiWindowFlags_HorizontalScrollbar, [&]{
 			im::PopupContextWindow([&]{
@@ -153,8 +156,16 @@ void ImGuiConsole::paint(MSXMotherBoard* /*motherBoard*/)
 				ImGui::SetScrollHereY(1.0f);
 			}
 
+			auto scrollDelta = ImGui::GetWindowHeight() * 0.5f;
+			if (scrollUp) {
+				ImGui::SetScrollY(std::max(ImGui::GetScrollY() - scrollDelta, 0.0f));
+			}
+			if (scrollDown) {
+				ImGui::SetScrollY(std::min(ImGui::GetScrollY() + scrollDelta, ImGui::GetScrollMaxY()));
+			}
+
 			// recalculate the number of columns
-			auto width = ImGui::GetContentRegionMax().x;
+			auto width = ImGui::GetContentRegionAvail().x;
 			auto charWidth = ImGui::CalcTextSize("M"sv).x;
 			columns = narrow_cast<unsigned>(width / charWidth);
 		});
@@ -238,7 +249,7 @@ void ImGuiConsole::paint(MSXMotherBoard* /*motherBoard*/)
 		/**/ // but it's fragile because it depends on some internal implementation
 		/**/ // details. More specifically: the scroll-position. And obtaining this
 		/**/ // information required stuff from <imgui_internal.h>.
-		/**/ auto* font = ImGui::GetFont();
+		/**/ const auto* font = ImGui::GetFont();
 		/**/ auto fontSize = ImGui::GetFontSize();
 		/**/ gl::vec2 frameSize(itemWidth, fontSize + style.FramePadding.y * 2.0f);
 		/**/ gl::vec2 topLeft = cursorScrnPos;
@@ -249,7 +260,7 @@ void ImGuiConsole::paint(MSXMotherBoard* /*motherBoard*/)
 		/**/ auto charWidth = ImGui::GetFont()->GetCharAdvance('A'); // assumes fixed-width font
 		/**/ if (ImGui::IsItemActive()) {
 		/**/	auto id = ImGui::GetID("##Input");
-		/**/	if (auto* state = ImGui::GetInputTextState(id)) { // Internal API !!!
+		/**/	if (const auto* state = ImGui::GetInputTextState(id)) { // Internal API !!!
 		/**/		// adjust for scroll
 		/**/		drawPos.x -= state->ScrollX;
 		/**/		// redraw cursor (it was drawn transparent before)
@@ -349,13 +360,14 @@ void ImGuiConsole::colorize(std::string_view line)
 		}
 		imColor color = [&] {
 			switch (col) {
-			case 'E': return imColor::ERROR;
-			case 'c': return imColor::COMMENT;
-			case 'v': return imColor::VARIABLE;
-			case 'l': return imColor::LITERAL;
-			case 'p': return imColor::PROC;
-			case 'o': return imColor::OPERATOR;
-			default:  return imColor::TEXT; // other
+			using enum imColor;
+			case 'E': return ERROR;
+			case 'c': return COMMENT;
+			case 'v': return VARIABLE;
+			case 'l': return LITERAL;
+			case 'p': return PROC;
+			case 'o': return OPERATOR;
+			default:  return TEXT; // other
 			}
 		}();
 		coloredInputBuf.addChunk(line.substr(pos2, pos - pos2), color);
@@ -381,7 +393,7 @@ void ImGuiConsole::saveHistory()
 		if (!outputFile) {
 			throw FileException("Error while saving the console history.");
 		}
-		for (auto& s : view::reverse(history)) {
+		for (const auto& s : view::reverse(history)) {
 			outputFile << s << '\n';
 		}
 	} catch (FileException& e) {

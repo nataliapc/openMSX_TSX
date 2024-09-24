@@ -36,7 +36,9 @@ class MSXDevice
 {
 public:
 	MSXDevice(const MSXDevice&) = delete;
+	MSXDevice(MSXDevice&&) = delete;
 	MSXDevice& operator=(const MSXDevice&) = delete;
+	MSXDevice& operator=(MSXDevice&&) = delete;
 
 	using Devices = std::vector<MSXDevice*>;
 
@@ -174,7 +176,7 @@ public:
 	 * The default implementation always returns a null pointer.
 	 * The start of the interval is CacheLine::SIZE aligned.
 	 */
-	[[nodiscard]] virtual byte* getWriteCacheLine(word start) const;
+	[[nodiscard]] virtual byte* getWriteCacheLine(word start);
 
 	/**
 	 * Read a byte from a given memory location. Reading memory

@@ -1,18 +1,18 @@
 #include "PostProcessor.hh"
+
 #include "AviRecorder.hh"
 #include "CliComm.hh"
 #include "CommandException.hh"
-#include "DeinterlacedFrame.hh"
 #include "Deflicker.hh"
-#include "DoubledFrame.hh"
+#include "DeinterlacedFrame.hh"
 #include "Display.hh"
+#include "DoubledFrame.hh"
 #include "Event.hh"
 #include "EventDistributor.hh"
 #include "FloatSetting.hh"
 #include "GLContext.hh"
 #include "GLScaler.hh"
 #include "GLScalerFactory.hh"
-#include "MemBuffer.hh"
 #include "MSXMotherBoard.hh"
 #include "OutputSurface.hh"
 #include "PNG.hh"
@@ -20,14 +20,17 @@
 #include "Reactor.hh"
 #include "RenderSettings.hh"
 #include "SuperImposedFrame.hh"
-#include "aligned.hh"
 #include "gl_transform.hh"
+
+#include "MemBuffer.hh"
+#include "aligned.hh"
 #include "narrow.hh"
 #include "random.hh"
 #include "ranges.hh"
 #include "stl.hh"
 #include "vla.hh"
 #include "xrange.hh"
+
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -127,29 +130,27 @@ void PostProcessor::executeUntil(EmuTime::param /*time*/)
 		getVideoSource(), getVideoSourceSetting(), false));
 }
 
-using WorkBuffer = std::vector<MemBuffer<char, SSE_ALIGNMENT>>;
-static void getScaledFrame(FrameSource& paintFrame,
-                           std::span<const void*> lines,
+using WorkBuffer = std::vector<MemBuffer<FrameSource::Pixel, SSE_ALIGNMENT>>;
+static void getScaledFrame(const FrameSource& paintFrame,
+                           std::span<const FrameSource::Pixel*> lines,
                            WorkBuffer& workBuffer)
 {
 	auto height = narrow<unsigned>(lines.size());
 	unsigned width = (height == 240) ? 320 : 640;
-	unsigned pitch = width * 4;
-	const void* linePtr = nullptr;
-	void* work = nullptr;
+	const FrameSource::Pixel* linePtr = nullptr;
+	FrameSource::Pixel* work = nullptr;
 	for (auto i : xrange(height)) {
 		if (linePtr == work) {
 			// If work buffer was used in previous iteration,
 			// then allocate a new one.
-			work = workBuffer.emplace_back(pitch).data();
+			work = workBuffer.emplace_back(width).data();
 		}
-		auto* work2 = static_cast<uint32_t*>(work);
 		if (height == 240) {
-			auto line = paintFrame.getLinePtr320_240(i, std::span<uint32_t, 320>{work2, 320});
+			auto line = paintFrame.getLinePtr320_240(i, std::span<uint32_t, 320>{work, 320});
 			linePtr = line.data();
 		} else {
 			assert (height == 480);
-			auto line = paintFrame.getLinePtr640_480(i, std::span<uint32_t, 640>{work2, 640});
+			auto line = paintFrame.getLinePtr640_480(i, std::span<uint32_t, 640>{work, 640});
 			linePtr = line.data();
 		}
 		lines[i] = linePtr;
@@ -162,7 +163,7 @@ void PostProcessor::takeRawScreenShot(unsigned height2, const std::string& filen
 		throw CommandException("TODO");
 	}
 
-	VLA(const void*, lines, height2);
+	VLA(const FrameSource::Pixel*, lines, height2);
 	WorkBuffer workBuffer;
 	getScaledFrame(*paintFrame, lines, workBuffer);
 	unsigned width = (height2 == 240) ? 320 : 640;
@@ -225,7 +226,7 @@ void PostProcessor::paint(OutputSurface& /*output*/)
 	int glow = renderSettings.getGlow();
 
 	if ((screen.getViewOffset() != ivec2()) || // any part of the screen not covered by the viewport?
-	    (deform == RenderSettings::DEFORM_3D) || !paintFrame) {
+	    (deform == RenderSettings::DisplayDeform::_3D) || !paintFrame) {
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
 		if (!paintFrame) {
@@ -234,8 +235,8 @@ void PostProcessor::paint(OutputSurface& /*output*/)
 	}
 
 	// New scaler algorithm selected?
-	auto algo = renderSettings.getScaleAlgorithm();
-	if (scaleAlgorithm != algo) {
+	if (auto algo = renderSettings.getScaleAlgorithm();
+	    scaleAlgorithm != algo) {
 		scaleAlgorithm = algo;
 		currScaler = GLScalerFactory::createScaler(renderSettings);
 
@@ -271,9 +272,7 @@ void PostProcessor::paint(OutputSurface& /*output*/)
 	}
 	renderedFrame.fbo.push();
 
-	for (auto& r : regions) {
-		//fprintf(stderr, "post processing lines %d-%d: %d\n",
-		//	r.srcStartY, r.srcEndY, r.lineWidth);
+	for (const auto& r : regions) {
 		auto it = find_unguarded(textures, r.lineWidth, &TextureData::width);
 		auto* superImpose = superImposeVideoFrame
 		                  ? &superImposeTex : nullptr;
@@ -293,7 +292,7 @@ void PostProcessor::paint(OutputSurface& /*output*/)
 	auto [w, h] = screen.getViewSize();
 	glViewport(x, y, w, h);
 
-	if (deform == RenderSettings::DEFORM_3D) {
+	if (deform == RenderSettings::DisplayDeform::_3D) {
 		drawMonitor3D();
 	} else {
 		float x1 = (320.0f - float(horStretch)) * (1.0f / (2.0f * 320.0f));
@@ -302,7 +301,7 @@ void PostProcessor::paint(OutputSurface& /*output*/)
 			vec2(x1, 1), vec2(x1, 0), vec2(x2, 0), vec2(x2, 1)
 		};
 
-		auto& glContext = *gl::context;
+		const auto& glContext = *gl::context;
 		glContext.progTex.activate();
 		glUniform4f(glContext.unifTexColor,
 				1.0f, 1.0f, 1.0f, 1.0f);
@@ -346,7 +345,7 @@ std::unique_ptr<RawFrame> PostProcessor::rotateFrames(
 	bool doDeflicker   = false;
 	auto currType = finishedFrame->getField();
 	if (canDoInterlace) {
-		if (currType != FrameSource::FIELD_NONINTERLACED) {
+		if (currType != FrameSource::FieldType::NONINTERLACED) {
 			if (renderSettings.getDeinterlace()) {
 				doDeinterlace = true;
 				numRequired = 2;
@@ -394,7 +393,7 @@ std::unique_ptr<RawFrame> PostProcessor::rotateFrames(
 
 	// Setup the to-be-painted frame
 	if (doDeinterlace) {
-		if (currType == FrameSource::FIELD_ODD) {
+		if (currType == FrameSource::FieldType::ODD) {
 			deinterlacedFrame->init(lastFrames[1].get(), lastFrames[0].get());
 		} else {
 			deinterlacedFrame->init(lastFrames[0].get(), lastFrames[1].get());
@@ -403,7 +402,7 @@ std::unique_ptr<RawFrame> PostProcessor::rotateFrames(
 	} else if (doInterlace) {
 		interlacedFrame->init(
 			lastFrames[0].get(),
-			(currType == FrameSource::FIELD_ODD) ? 1 : 0);
+			(currType == FrameSource::FieldType::ODD) ? 1 : 0);
 		paintFrame = interlacedFrame.get();
 	} else if (doDeflicker) {
 		deflicker->init();
@@ -451,8 +450,8 @@ std::unique_ptr<RawFrame> PostProcessor::rotateFrames(
 void PostProcessor::update(const Setting& setting) noexcept
 {
 	VideoLayer::update(setting);
-	auto& noiseSetting = renderSettings.getNoiseSetting();
-	auto& horizontalStretch = renderSettings.getHorizontalStretchSetting();
+	const auto& noiseSetting = renderSettings.getNoiseSetting();
+	const auto& horizontalStretch = renderSettings.getHorizontalStretchSetting();
 	if (&setting == &noiseSetting) {
 		preCalcNoise(noiseSetting.getFloat());
 	} else if (&setting == &horizontalStretch) {
@@ -465,7 +464,7 @@ void PostProcessor::uploadFrame()
 	createRegions();
 
 	const unsigned srcHeight = paintFrame->getHeight();
-	for (auto& r : regions) {
+	for (const auto& r : regions) {
 		// upload data
 		// TODO get before/after data from scaler
 		int before = 1;
@@ -558,7 +557,7 @@ void PostProcessor::drawGlow(int glow)
 {
 	if ((glow == 0) || !storedFrame) return;
 
-	auto& glContext = *gl::context;
+	const auto& glContext = *gl::context;
 	glContext.progTex.activate();
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -634,7 +633,7 @@ void PostProcessor::preCalcNoise(float factor)
 #endif
 }
 
-void PostProcessor::drawNoise()
+void PostProcessor::drawNoise() const
 {
 	if (renderSettings.getNoise() == 0.0f) return;
 
@@ -658,7 +657,7 @@ void PostProcessor::drawNoise()
 		noise + vec2(0.0f, 0.0f  ),
 	};
 
-	auto& glContext = *gl::context;
+	const auto& glContext = *gl::context;
 	glContext.progTex.activate();
 
 	glEnable(GL_BLEND);
@@ -766,7 +765,7 @@ void PostProcessor::preCalcMonitor3D(float width)
 		1, GL_FALSE, normal.data());
 }
 
-void PostProcessor::drawMonitor3D()
+void PostProcessor::drawMonitor3D() const
 {
 	monitor3DProg.activate();
 

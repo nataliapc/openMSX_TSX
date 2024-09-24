@@ -33,7 +33,7 @@ VRAMWindow::VRAMWindow(Ram& vram)
  *   size of this debuggable would have to be 256kB to be able to access the
  *   complete extended VRAM in interleaved mode.
  */
-VDPVRAM::LogicalVRAMDebuggable::LogicalVRAMDebuggable(VDP& vdp_)
+VDPVRAM::LogicalVRAMDebuggable::LogicalVRAMDebuggable(const VDP& vdp_)
 	: SimpleDebuggable(vdp_.getMotherBoard(), vdp_.getName() == "VDP" ? "VRAM" :
 			vdp_.getName() + " VRAM",
 			"CPU view on video RAM given the current display mode.",
@@ -43,7 +43,7 @@ VDPVRAM::LogicalVRAMDebuggable::LogicalVRAMDebuggable(VDP& vdp_)
 
 unsigned VDPVRAM::LogicalVRAMDebuggable::transform(unsigned address)
 {
-	auto& vram = OUTER(VDPVRAM, logicalVRAMDebug);
+	const auto& vram = OUTER(VDPVRAM, logicalVRAMDebug);
 	return vram.vdp.getDisplayMode().isPlanar()
 	     ? ((address << 16) | (address >> 1)) & 0x1FFFF
 	     : address;
@@ -66,7 +66,7 @@ void VDPVRAM::LogicalVRAMDebuggable::write(
 // class PhysicalVRAMDebuggable
 
 VDPVRAM::PhysicalVRAMDebuggable::PhysicalVRAMDebuggable(
-		VDP& vdp_, unsigned actualSize_)
+		const VDP& vdp_, unsigned actualSize_)
 	: SimpleDebuggable(vdp_.getMotherBoard(), vdp_.getName() == "VDP" ?
 	                   "physical VRAM" : strCat("physical ", vdp_.getName(), " VRAM"),
 	                   "VDP-screen-mode-independent view on the video RAM.",
@@ -105,9 +105,6 @@ VDPVRAM::VDPVRAM(VDP& vdp_, unsigned size, EmuTime::param time)
 	, data(*vdp_.getDeviceConfig2().getXML(), bufferSize(size))
 	, logicalVRAMDebug (vdp)
 	, physicalVRAMDebug(vdp, size)
-	#ifdef DEBUG
-	, vramTime(EmuTime::zero())
-	#endif
 	, actualSize(size)
 	, vrMode(vdp.getVRMode())
 	, cmdReadWindow(data)

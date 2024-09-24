@@ -71,7 +71,7 @@ private:
 		  */
 		void advance(unsigned duration);
 
-		void doNextEvent(AY8910& ay8910);
+		void doNextEvent(const AY8910& ay8910);
 
 		/** Gets the current output of this generator.
 		  */
@@ -81,7 +81,7 @@ private:
 		void serialize(Archive& ar, unsigned version);
 
 	private:
-		[[nodiscard]] int getDetune(AY8910& ay8910);
+		[[nodiscard]] int getDetune(const AY8910& ay8910);
 
 	private:
 		/** Time passed since start of vibrato cycle.
@@ -192,7 +192,6 @@ private:
 	const bool isAY8910;
 	const bool ignorePortDirections;
 	bool doDetune;
-	bool detuneInitialized = false; // (lazily) initialize detune stuff
 };
 
 SERIALIZE_CLASS_VERSION(AY8910::Generator, 2);

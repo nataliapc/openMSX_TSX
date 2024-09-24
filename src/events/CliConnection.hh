@@ -7,6 +7,9 @@
 #include "CliComm.hh"
 #include "AdhocCliCommParser.hh"
 #include "Poller.hh"
+
+#include "stl.hh"
+
 #include <array>
 #include <mutex>
 #include <string>
@@ -73,14 +76,14 @@ private:
 	            std::string_view name, std::string_view value) noexcept override;
 
 	// EventListener
-	int signalEvent(const Event& event) override;
+	bool signalEvent(const Event& event) override;
 
 	CommandController& commandController;
 	EventDistributor& eventDistributor;
 
 	std::thread thread;
 
-	std::array<bool, CliComm::NUM_UPDATES> updateEnabled;
+	array_with_enum_index<CliComm::UpdateType, bool> updateEnabled;
 };
 
 class StdioConnection final : public CliConnection

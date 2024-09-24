@@ -35,7 +35,7 @@ void BaseSetting::info(TclObject& result) const
 
 Setting::Setting(CommandController& commandController_,
                  std::string_view name, static_string_view description_,
-                 const TclObject& initialValue, SaveSetting save_)
+                 const TclObject& initialValue, Save save_)
 	: BaseSetting(name)
 	, commandController(commandController_)
 	, description(description_)
@@ -43,7 +43,7 @@ Setting::Setting(CommandController& commandController_,
 	, defaultValue(initialValue)
 	, save(save_)
 {
-	checkFunc = [](TclObject&) { /* nothing */ };
+	checkFunc = [](const TclObject&) { /* nothing */ };
 }
 
 void Setting::init()
@@ -97,7 +97,7 @@ void Setting::notify() const
 	auto base = getBaseName();
 	TclObject val = getValue();
 	commandController.getCliComm().updateFiltered(
-		CliComm::SETTING, base, val.getString());
+		CliComm::UpdateType::SETTING, base, val.getString());
 
 	// Always keep SettingsConfig in sync.
 	auto& config = getGlobalCommandController().getSettingsConfig();
@@ -113,16 +113,16 @@ void Setting::notifyPropertyChange() const
 	TclObject result;
 	info(result);
 	commandController.getCliComm().updateFiltered(
-		CliComm::SETTING_INFO, getBaseName(), result.getString());
+		CliComm::UpdateType::SETTING_INFO, getBaseName(), result.getString());
 }
 
 bool Setting::needLoadSave() const
 {
-	return save == SAVE;
+	return save == Save::YES;
 }
 bool Setting::needTransfer() const
 {
-	return save != DONT_TRANSFER;
+	return save != Save::NO_AND_DONT_TRANSFER;
 }
 
 GlobalCommandController& Setting::getGlobalCommandController() const
@@ -162,7 +162,7 @@ void Setting::setValueDirect(const TclObject& newValue_)
 	}
 
 	// synchronize proxy
-	auto* controller = dynamic_cast<MSXCommandController*>(
+	const auto* controller = dynamic_cast<MSXCommandController*>(
 		&getCommandController());
 	if (!controller) {
 		// This is not a machine specific setting.

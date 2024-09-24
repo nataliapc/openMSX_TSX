@@ -29,7 +29,7 @@ using Pixel = uint32_t;
 void scale_1on3(std::span<const Pixel> in, std::span<Pixel> out);
 void scale_1on4(std::span<const Pixel> in, std::span<Pixel> out);
 void scale_1on6(std::span<const Pixel> in, std::span<Pixel> out);
-void Scale_1on2(std::span<const Pixel> in, std::span<Pixel> out);
+void scale_1on2(std::span<const Pixel> in, std::span<Pixel> out);
 void scale_2on1(std::span<const Pixel> in, std::span<Pixel> out);
 void scale_6on1(std::span<const Pixel> in, std::span<Pixel> out);
 void scale_4on1(std::span<const Pixel> in, std::span<Pixel> out);
@@ -43,10 +43,6 @@ void scale_8on3(std::span<const Pixel> in, std::span<Pixel> out);
 void scale_2on9(std::span<const Pixel> in, std::span<Pixel> out);
 void scale_4on9(std::span<const Pixel> in, std::span<Pixel> out);
 void scale_8on9(std::span<const Pixel> in, std::span<Pixel> out);
-void scale_4on5(std::span<const Pixel> in, std::span<Pixel> out);
-void scale_7on8(std::span<const Pixel> in, std::span<Pixel> out);
-void scale_9on10(std::span<const Pixel> in, std::span<Pixel> out);
-void scale_17on20(std::span<const Pixel> in, std::span<Pixel> out);
 
 /**  BlendLines functor
  * Generate an output line that is an interpolation of two input lines.
@@ -171,7 +167,7 @@ inline void scale_1on2(std::span<const Pixel> in, std::span<Pixel> out)
 	// Hopefully in some years the compilers have improved further so that
 	// the intrinsic version is no longer needed.
 	auto srcWidth = in.size();
-	assert(out.size() == 2 * srcWidth);
+	assert((out.size() / 2) == srcWidth);
 
 #ifdef __SSE2__
 	size_t chunk = 4 * sizeof(__m128i) / sizeof(Pixel);
@@ -238,7 +234,7 @@ inline void scale_2on1_SSE(
 
 inline void scale_2on1(std::span<const Pixel> in, std::span<Pixel> out)
 {
-	assert(in.size() == 2 * out.size());
+	assert((in.size() / 2) == out.size());
 	auto outWidth = out.size();
 #ifdef __SSE2__
 	auto n64 = (outWidth * sizeof(Pixel)) & ~63;
@@ -259,7 +255,7 @@ inline void scale_2on1(std::span<const Pixel> in, std::span<Pixel> out)
 
 inline void scale_6on1(std::span<const Pixel> in, std::span<Pixel> out)
 {
-	assert(in.size() == 6 * out.size());
+	assert((in.size() / 6) == out.size());
 	PixelOperations pixelOps;
 	for (auto i : xrange(out.size())) {
 		out[i] = pixelOps.template blend<1, 1, 1, 1, 1, 1>(subspan<6>(in, 6 * i));
@@ -268,7 +264,7 @@ inline void scale_6on1(std::span<const Pixel> in, std::span<Pixel> out)
 
 inline void scale_4on1(std::span<const Pixel> in, std::span<Pixel> out)
 {
-	assert(in.size() == 4 * out.size());
+	assert((in.size() / 4) == out.size());
 	PixelOperations pixelOps;
 	for (auto i : xrange(out.size())) {
 		out[i] = pixelOps.template blend<1, 1, 1, 1>(subspan<4>(in, 4 * i));
@@ -277,7 +273,7 @@ inline void scale_4on1(std::span<const Pixel> in, std::span<Pixel> out)
 
 inline void scale_3on1(std::span<const Pixel> in, std::span<Pixel> out)
 {
-	assert(in.size() == 3 * out.size());
+	assert((in.size() / 3) == out.size());
 	PixelOperations pixelOps;
 	for (auto i : xrange(out.size())) {
 		out[i] = pixelOps.template blend<1, 1, 1>(subspan<3>(in, 3 * i));
@@ -459,89 +455,6 @@ inline void scale_8on9(std::span<const Pixel> in, std::span<Pixel> out)
 	if ((i + 5) < n) out[i + 5] = 0;
 	if ((i + 6) < n) out[i + 6] = 0;
 	if ((i + 7) < n) out[i + 7] = 0;
-}
-
-inline void scale_4on5(std::span<const Pixel> in, std::span<Pixel> out)
-{
-	assert((in.size() / 4) == (out.size() / 5));
-	PixelOperations pixelOps;
-	size_t n = out.size();
-	assert((n % 5) == 0);
-	for (size_t i = 0, j = 0; i < n; i += 5, j += 4) {
-		out[i + 0] = in[j + 0];
-		out[i + 1] = pixelOps.template blend<1, 3>(subspan<2>(in, j + 0));
-		out[i + 2] = pixelOps.template blend<1, 1>(subspan<2>(in, j + 1));
-		out[i + 3] = pixelOps.template blend<3, 1>(subspan<2>(in, j + 2));
-		out[i + 4] = in[j + 3];
-	}
-}
-
-inline void scale_7on8(std::span<const Pixel> in, std::span<Pixel> out)
-{
-	assert((in.size() / 7) == (out.size() / 8));
-	PixelOperations pixelOps;
-	size_t n = out.size();
-	assert((n % 8) == 0);
-	for (size_t i = 0, j = 0; i < n; i += 8, j += 7) {
-		out[i + 0] = in[j + 0];
-		out[i + 1] = pixelOps.template blend<1, 6>(subspan<2>(in, j + 0));
-		out[i + 2] = pixelOps.template blend<2, 5>(subspan<2>(in, j + 1));
-		out[i + 3] = pixelOps.template blend<3, 4>(subspan<2>(in, j + 2));
-		out[i + 4] = pixelOps.template blend<4, 3>(subspan<2>(in, j + 3));
-		out[i + 5] = pixelOps.template blend<5, 2>(subspan<2>(in, j + 4));
-		out[i + 6] = pixelOps.template blend<6, 1>(subspan<2>(in, j + 5));
-		out[i + 7] = in[j + 6];
-	}
-}
-
-inline void scale_17on20(std::span<const Pixel> in, std::span<Pixel> out)
-{
-	assert((in.size() / 17) == (out.size() / 20));
-	PixelOperations pixelOps;
-	size_t n = out.size();
-	assert((n % 20) == 0);
-	for (size_t i = 0, j = 0; i < n; i += 20, j += 17) {
-		out[i +  0] = in[j +  0];
-		out[i +  1] = pixelOps.template blend< 3, 14>(subspan<2>(in, j +  0));
-		out[i +  2] = pixelOps.template blend< 6, 11>(subspan<2>(in, j +  1));
-		out[i +  3] = pixelOps.template blend< 9,  8>(subspan<2>(in, j +  2));
-		out[i +  4] = pixelOps.template blend<12,  5>(subspan<2>(in, j +  3));
-		out[i +  5] = pixelOps.template blend<15,  2>(subspan<2>(in, j +  4));
-		out[i +  6] = in[j +  5];
-		out[i +  7] = pixelOps.template blend< 1, 16>(subspan<2>(in, j +  5));
-		out[i +  8] = pixelOps.template blend< 4, 13>(subspan<2>(in, j +  6));
-		out[i +  9] = pixelOps.template blend< 7, 10>(subspan<2>(in, j +  7));
-		out[i + 10] = pixelOps.template blend<10,  7>(subspan<2>(in, j +  8));
-		out[i + 11] = pixelOps.template blend<13,  4>(subspan<2>(in, j +  9));
-		out[i + 12] = pixelOps.template blend<16,  1>(subspan<2>(in, j + 10));
-		out[i + 13] = in[j + 11];
-		out[i + 14] = pixelOps.template blend< 2, 15>(subspan<2>(in, j + 11));
-		out[i + 15] = pixelOps.template blend< 5, 12>(subspan<2>(in, j + 12));
-		out[i + 16] = pixelOps.template blend< 8,  9>(subspan<2>(in, j + 13));
-		out[i + 17] = pixelOps.template blend<11,  6>(subspan<2>(in, j + 14));
-		out[i + 18] = pixelOps.template blend<14,  3>(subspan<2>(in, j + 15));
-		out[i + 19] = in[j + 16];
-	}
-}
-
-inline void scale_9on10(std::span<const Pixel> in, std::span<Pixel> out)
-{
-	assert((in.size() / 9) == (out.size() / 10));
-	PixelOperations pixelOps;
-	size_t n = out.size();
-	assert((n % 10) == 0);
-	for (size_t i = 0, j = 0; i < n; i += 10, j += 9) {
-		out[i + 0] = in[j + 0];
-		out[i + 1] = pixelOps.template blend<1, 8>(subspan<2>(in, j + 0));
-		out[i + 2] = pixelOps.template blend<2, 7>(subspan<2>(in, j + 1));
-		out[i + 3] = pixelOps.template blend<3, 6>(subspan<2>(in, j + 2));
-		out[i + 4] = pixelOps.template blend<4, 5>(subspan<2>(in, j + 3));
-		out[i + 5] = pixelOps.template blend<5, 4>(subspan<2>(in, j + 4));
-		out[i + 6] = pixelOps.template blend<6, 3>(subspan<2>(in, j + 5));
-		out[i + 7] = pixelOps.template blend<7, 2>(subspan<2>(in, j + 6));
-		out[i + 8] = pixelOps.template blend<8, 1>(subspan<2>(in, j + 7));
-		out[i + 9] = in[j + 8];
-	}
 }
 
 template<unsigned w1, unsigned w2>

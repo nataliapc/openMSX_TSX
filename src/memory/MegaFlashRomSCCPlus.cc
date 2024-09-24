@@ -29,8 +29,8 @@ Main features:
 --------------------------------------------------------------------------------
 [Memory]
 
- - Model Numonix M29W800DB TSOP48
- - Datasheet: http://www.numonyx.com/Documents/Datasheets/M29W800D.PDF
+ - Model Numonyx M29W800DB TSOP48
+ - Datasheet: https://media-www.micron.com/-/media/client/global/documents/products/data-sheet/nor-flash/parallel/m29w/m29w800d.pdf
  - Block layout:
      #00000 16K
      #04000  8K
@@ -162,40 +162,45 @@ Main features:
             Bank2(6 downto 0) & adr(12 downto 0) when adr(14 downto 13) = "00" else 	--#8000-#9FFF
             Bank3(6 downto 0) & adr(12 downto 0);
 
+--------------------------------------------------------------------------------
+[FLASH ROM ADDRESSING]
+
+ In order to be compatible with OPFX which sends command sequences like
+ (0x555) = 0xAA, (0xAAA) = 0x55, whilst dual mode 8/16-bit chips like the
+ M29W800DB expect (0xAAA) = 0xAA, (0x555) = 0x55 when operating in byte mode,
+ CPU line A12 is connected to Flash line A0.
+
+  CPU line | Flash line (-1 on datasheet)
+ ----------+------------------------------
+  A0-A11   |  A1-A12
+  A12      |  A0
+  A13-A15  |  A13-A19 (through mapper)
+
+ Since the smallest sector size is 8 kB, sector numbers are unaffected, only
+ sector offsets are. Unfortunately, this prohibits read caching.
+
 ******************************************************************************/
 
 namespace openmsx {
 
-static constexpr auto sectorInfo = [] {
-	// 1 * 16kB, followed by 2 * 8kB, 1 * 32kB, 15 * 64kB
-	using Info = AmdFlash::SectorInfo;
-	std::array<Info, 1 + 2 + 1 + 15> result = {};
-	std::fill(result.begin() + 0, result.begin() + 1, Info{16 * 1024, false});
-	std::fill(result.begin() + 1, result.begin() + 3, Info{ 8 * 1024, false});
-	std::fill(result.begin() + 3, result.begin() + 4, Info{32 * 1024, false});
-	std::fill(result.begin() + 4, result.end(),       Info{64 * 1024, false});
-	return result;
-}();
-
 MegaFlashRomSCCPlus::MegaFlashRomSCCPlus(
 		const DeviceConfig& config, Rom&& rom_)
 	: MSXRom(config, std::move(rom_))
-	, scc("MFR SCC+ SCC-I", config, getCurrentTime(), SCC::SCC_Compatible)
+	, scc("MFR SCC+ SCC-I", config, getCurrentTime(), SCC::Mode::Compatible)
 	, psg("MFR SCC+ PSG", DummyAY8910Periphery::instance(), config,
 	      getCurrentTime())
-	, flash(rom, sectorInfo, 0x205B,
-	        AmdFlash::Addressing::BITS_11, config)
+	, flash(rom, AmdFlashChip::M29W800DB, {}, config)
 {
 	powerUp(getCurrentTime());
 	for (auto port : {0x10, 0x11}) {
-		getCPUInterface().register_IO_Out(port, this);
+		getCPUInterface().register_IO_Out(narrow_cast<byte>(port), this);
 	}
 }
 
 MegaFlashRomSCCPlus::~MegaFlashRomSCCPlus()
 {
 	for (auto port : {0x10, 0x11}) {
-		getCPUInterface().unregister_IO_Out(port, this);
+		getCPUInterface().unregister_IO_Out(narrow_cast<byte>(port), this);
 	}
 }
 
@@ -246,6 +251,9 @@ unsigned MegaFlashRomSCCPlus::getSubslot(unsigned addr) const
 
 unsigned MegaFlashRomSCCPlus::getFlashAddr(unsigned addr) const
 {
+	// Pazos: FlashROM A0 (A-1 on datasheet) is connected to CPU A12.
+	addr = (addr & 0xE000) | ((addr & 0x1000) >> 12) | ((addr & 0x0FFF) << 1);
+
 	unsigned subslot = getSubslot(addr);
 	unsigned tmp = [&] {
 		if ((configReg & 0xC0) == 0x40) {
@@ -338,10 +346,7 @@ const byte* MegaFlashRomSCCPlus::getReadCacheLine(word addr) const
 
 	if (((configReg & 0xC0) == 0x40) ||
 	    ((0x4000 <= addr) && (addr < 0xC000))) {
-		// read (flash)rom content
-		unsigned flashAddr = getFlashAddr(addr);
-		assert(flashAddr != unsigned(-1));
-		return flash.getReadCacheLine(flashAddr);
+		return nullptr; // uncacheable due to address swizzling
 	} else {
 		// unmapped read
 		return unmappedRead.data();
@@ -378,8 +383,8 @@ void MegaFlashRomSCCPlus::writeMem(word addr, byte value, EmuTime::param time)
 		// Konami-SCC
 		if ((addr & 0xFFFE) == 0xBFFE) {
 			sccMode = value;
-			scc.setChipMode((value & 0x20) ? SCC::SCC_plusmode
-			                               : SCC::SCC_Compatible);
+			scc.setMode((value & 0x20) ? SCC::Mode::Plus
+			                           : SCC::Mode::Compatible);
 			invalidateDeviceRCache(0x9800, 0x800);
 			invalidateDeviceRCache(0xB800, 0x800);
 		}
@@ -483,7 +488,7 @@ void MegaFlashRomSCCPlus::writeMem(word addr, byte value, EmuTime::param time)
 	}
 }
 
-byte* MegaFlashRomSCCPlus::getWriteCacheLine(word /*addr*/) const
+byte* MegaFlashRomSCCPlus::getWriteCacheLine(word /*addr*/)
 {
 	return nullptr;
 }

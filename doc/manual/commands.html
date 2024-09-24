@@ -37,7 +37,6 @@
         <li><a class="internal" href="#keymatrix">keymatrixdown / keymatrixup</a></li>
         <li><a class="internal" href="#laserdiscplayer">laserdiscplayer</a></li>
         <li><a class="internal" href="#list_extensions">list_extensions</a></li>
-        <li><a class="internal" href="#load_icons">load_icons</a></li>
         <li><a class="internal" href="#load_settings">load_settings</a></li>
         <li><a class="internal" href="#machine">machine</a></li>
         <li><a class="internal" href="#machines">create_machine / load_machine / activate_machine / list_machines / delete_machine</a></li>
@@ -91,14 +90,6 @@
         <li><a class="internal" href="#cmdtiming">cmdtiming</a></li>
         <li><a class="internal" href="#color_matrix">color_matrix</a></li>
         <li><a class="internal" href="#console">console</a></li>
-        <li><a class="internal" href="#consolebackground">consolebackground</a></li>
-        <li><a class="internal" href="#consolecolumns">consolecolumns</a></li>
-        <li><a class="internal" href="#consolefont">consolefont</a></li>
-        <li><a class="internal" href="#consolefontsize">consolefontsize</a></li>
-        <li><a class="internal" href="#console_history_size">console_history_size</a></li>
-        <li><a class="internal" href="#consoleplacement">consoleplacement</a></li>
-        <li><a class="internal" href="#consolerows">consolerows</a></li>
-        <li><a class="internal" href="#console_remove_doubles">console_remove_doubles</a></li>
         <li><a class="internal" href="#contrast">contrast</a></li>
         <li><a class="internal" href="#cputrace">cputrace</a></li>
         <li><a class="internal" href="#debugoutput">debugoutput</a></li>
@@ -124,7 +115,7 @@
         <li><a class="internal" href="#interleave_black_frame">interleave_black_frame</a></li>
         <li><a class="internal" href="#invalid_ppi_mode_callback">invalid_ppi_mode_callback</a></li>
         <li><a class="internal" href="#invalid_psg_directions_callback">invalid_psg_directions_callback</a></li>
-        <li><a class="internal" href="#joystickN_config">joystick&lt;n&gt;_config</a></li>
+        <li><a class="internal" href="#msxjoystickN_config">msxjoystick&lt;n&gt;_config/joymega&lt;n&gt;_config</a></li>
         <li><a class="internal" href="#joystickN_deadzone">joystick&lt;n&gt;_deadzone</a></li>
         <li><a class="internal" href="#kbd_auto_toggle_code_kana_lock">kbd_auto_toggle_code_kana_lock</a></li>
         <li><a class="internal" href="#kbd_code_kana_host_key">kbd_code_kana_host_key</a></li>
@@ -135,7 +126,6 @@
         <li><a class="internal" href="#kbd_numkeypad_always_enabled">kbd_numkeypad_always_enabled</a></li>
         <li><a class="internal" href="#kbd_numkeypad_enter_key">kbd_numkeypad_enter_key</a></li>
         <li><a class="internal" href="#kbd_trace_key_presses">kbd_trace_key_presses</a></li>
-        <li><a class="internal" href="#keyjoystick_n_button">keyjoystick&lt;n&gt;.&lt;button&gt;</a></li>
         <li><a class="internal" href="#led">led_&lt;name&gt;</a></li>
         <li><a class="internal" href="#limitsprites">limitsprites</a></li>
         <li><a class="internal" href="#master_volume">master_volume</a></li>
@@ -152,6 +142,10 @@
         <li><a class="internal" href="#power">power</a></li>
         <li><a class="internal" href="#printerlogfilename">printerlogfilename</a></li>
         <li><a class="internal" href="#print-resolution">print-resolution</a></li>
+        <li><a class="internal" href="#psg_detune_frequency">PSG_detune_frequency</a></li>
+        <li><a class="internal" href="#psg_detune_percent">PSG_detune_percent</a></li>
+        <li><a class="internal" href="#psg_vibrato_frequency">PSG_vibrato_frequency</a></li>
+        <li><a class="internal" href="#psg_vibrato_percent">PSG_vibrato_percent</a></li>
         <li><a class="internal" href="#r800_freq">r800_freq / r800_freq_locked</a></li>
         <li><a class="internal" href="#renderer">renderer</a></li>
         <li><a class="internal" href="#renshaturbo">renshaturbo</a></li>
@@ -171,10 +165,6 @@
         <li><a class="internal" href="#soundchip_balance">&lt;soundchip&gt;_balance</a></li>
         <li><a class="internal" href="#soundchip_channel_record">&lt;soundchip&gt;_ch&lt;channel&gt;_record</a></li>
         <li><a class="internal" href="#soundchip_channel_mute">&lt;soundchip&gt;_ch&lt;channel&gt;_mute</a></li>
-        <li><a class="internal" href="#soundchip_detune_frequency">&lt;soundchip&gt;_detune_frequency</a></li>
-        <li><a class="internal" href="#soundchip_detune_percent">&lt;soundchip&gt;_detune_percent</a></li>
-        <li><a class="internal" href="#soundchip_vibrato_frequency">&lt;soundchip&gt;_vibrato_frequency</a></li>
-        <li><a class="internal" href="#soundchip_vibrato_percent">&lt;soundchip&gt;_vibrato_percent</a></li>
         <li><a class="internal" href="#soundchip_volume">&lt;soundchip&gt;_volume</a></li>
         <li><a class="internal" href="#throttle">throttle</a></li>
         <li><a class="internal" href="#too_fast_vram_access">too_fast_vram_access</a></li>
@@ -405,8 +395,8 @@
     <br />
     Only run in fastforward-mode while F9 is pressed (like BrMSX):<br />
     <code>unbind F9</code><br />
-    <code>bind F9         "set fastforward off"</code><br />
-    <code>bind F9,release "set fastforward on"</code><br />
+    <code>bind F9         "set fastforward on"</code><br />
+    <code>bind F9,release "set fastforward off"</code><br />
     <br />
     Pause when window loses focus (like fMSX):<br />
     <code>bind "focus 0" "set pause on"</code><br />
@@ -599,7 +589,7 @@
       <td><code>debug list</code></td>
 
       <td>Return a list of all debuggables.<br />
-      A debuggable is (part of) the state of a MSX device that can be accessed
+      A debuggable is (part of) the state of an MSX device that can be accessed
       via these debug commands.<br />
       Examples are:
         <ul>
@@ -821,21 +811,6 @@
     offer convenience wrappers around these commands. For example: <a class="internal" href="#other"><code>showmem</code></a>, <a class="internal" href="#other"><code>disasm</code></a>, <a class="internal" href="#other"><code>cpuregs</code></a>, <a class="internal" href="#other"><code>save_debuggable</code></a>, etc.
   </div>
 
-  <h3><a id="disable_reversebar">disable_reversebar</a></h3>
-
-  <p>Disables the bar on top of the gui to reverse the emulator status. Use also <code>toggle_reversebar</code> command to enable/disable this feature.</p>
-
-  <div class="subsectiontitle">
-    usage:
-  </div>
-
-  <table>
-    <tr>
-      <td><code>disable_reversebar</code></td>
-      <td>Disables reverse status emulator bar.</td>
-    </tr>
-  </table>
-
   <h3><a id="disk">disk&lt;x&gt; / virtual_drive</a></h3>
 
   <p>Insert a disk image in a drive. Optionally apply an IPS patch to the disk image.
@@ -909,23 +884,8 @@
 
   <table>
     <tr>
-      <td><code>exit</code></td>
+      <td><code>exit [exit-code]</code></td>
       <td>Exits the emulator</td>
-    </tr>
-  </table>
-
-  <h3><a id="enable_reversebar">enable_reversebar</a></h3>
-
-  <p>Enables a bar on top of the gui to reverse the emulator status. Use also <code>toggle_reversebar</code> command to enable/disable this feature.</p>
-
-  <div class="subsectiontitle">
-    usage:
-  </div>
-
-  <table>
-    <tr>
-      <td><code>enable_reversebar</code></td>
-      <td>Enable reverse status emulator bar.</td>
     </tr>
   </table>
 
@@ -934,7 +894,7 @@
   <p>Insert an MSX extension in a running MSX machine. The <code>ext</code> command inserts the extension in the first available slot. The <code>exta</code>, <code>extb</code> etc. commands insert it in the specified slot. The extension can be removed again with the <code><a class="internal" href="#remove_extension">remove_extension</a></code>
   command. See also the commands <code><a class="internal" href="#cart">cart</a></code>, <code><a class="internal" href="#list_extensions">list_extensions</a></code> and <code><a class="internal" href="#remove_extension">remove_extension</a></code>.</p>
 
-  <p>To get a list of possible extensions it's convenient to use the tab-completetion feature, i.e. type '<code>ext&lt;space&gt;&lt;tab&gt;</code>'. Alternatively the command '<code><a class="internal" href="#openmsx_info">openmsx_info</a> extensions</code>' gives you the same information (and is easier to use in a scripting context).</p>
+  <p>To get a list of possible extensions it's convenient to use the tab-completion feature, i.e. type '<code>ext&lt;space&gt;&lt;tab&gt;</code>'. Alternatively the command '<code><a class="internal" href="#openmsx_info">openmsx_info</a> extensions</code>' gives you the same information (and is easier to use in a scripting context).</p>
 
   <p>Note that some extensions (i.e. those without any memory) will not physically occupy any slot when inserted, even when they were inserted in a specific slot.</p>
 
@@ -957,7 +917,7 @@
 
   <h3><a id="filepool">filepool</a></h3>
 
-  <p>With this command you can manage your file pool settings. File pools are directories on your host system (PC/Mac/Dingoo/etc.). They are used by openMSX to search files in, which are referred to from machine or extension definition files, save states or replays which you are trying to load. First, the file will be searched at the path that was also used when the save state or replay was created. But if it isn't found there (which is usually the case if you load such a state or replay you got from someone else), it will use the file pools to search instead. In other words, if you are trying to load such replays, it's probably a good idea to put the media files referred to (ROMs, disks, tapes) in the (proper) filepool.</p>
+  <p>With this command you can manage your file pool settings. File pools are directories on your host system (PC/Mac/Dingoo/etc.). They are used by openMSX to search files in, which are referred to from machine or extension definition files, save states or replays which you are trying to load. First, the file will be searched at the path that was also used when the save state or replay was created. But if it isn't found there (which is usually the case if you load such a state or replay you got from someone else), it will use the file pools to search instead. In other words, if you are trying to load such replays, it's probably a good idea to put the media files referred to (ROMs, disks, tapes) in the (proper) file pool.</p>
 
   <p>File pools have the following properties:</p>
   <dl>
@@ -1214,29 +1174,6 @@
     </tr>
   </table>
 
-  <h3><a id="load_icons">load_icons</a></h3>
-
-  <p>Load a different icon set (used for the On Screen Display (OSD) LEDs).</p>
-  <p>Icon sets are stored in the share/skins directory.</p>
-
-  <div class="subsectiontitle">
-    usage:
-  </div>
-
-  <table>
-    <tr>
-      <td><code>load_icons &lt;name&gt;</code></td>
-
-      <td>Load the given icon set, but don't change the position on the screen.</td>
-    </tr>
-
-    <tr>
-      <td><code>load_icons &lt;name&gt; &lt;position&gt;</code></td>
-
-      <td>Load the given icon set and place them at the requested position. Position can be <code>bottom</code>, <code>top</code>, <code>left</code> or <code>right</code>.</td>
-    </tr>
-  </table>
-
   <h3><a id="load_settings">load_settings</a></h3>
 
   <p>Load settings from a given settings XML file. The settings file does not have to be complete: settings that are not mentioned in the given file are left untouched. See also <code><a class="internal" href="#save_settings">save_settings</a></code>.</p>
@@ -1464,7 +1401,7 @@
 
   <p>Similar to the <code><a class="internal" href="#disk">disk&lt;x&gt;</a></code>
   commands there is a <code>nowind&lt;x&gt;</code> command for each nowind
-  interface. This command is modeled after the 'usbhost' command of the real
+  interface. This command is modelled after the 'usbhost' command of the real
   nowind interface. Though only a subset of the options is supported. Here's a
   short overview of the command line options:</p>
 
@@ -1940,7 +1877,7 @@
 
   <h3><a id="screenshot">screenshot</a></h3>
 
-  <p>Take a screenshot of the openMSX screen. By default this takes a screenshot of the 'scaled' MSX screen (see <code><a class="internal" href="#scale_algorithm">scale_algorithm</a></code> setting) without OSD elements (e.g. console and icons). If you want to include the OSD elements pass the <code>-with-osd</code> option. If you want a screenshot of the 'unscaled' raw MSX screen, pass the <code>-raw</code> option. The screenshots are PNG files and (by default) are saved in the <code>screenshots</code> subdirectory of the openMSX data directory in your home directory. There's also an option <code>-no-sprites</code> to take a screenshot with sprite rendering disabled.</p>
+  <p>Take a screenshot of the openMSX screen. By default this takes a screenshot of the 'scaled' MSX screen (see <code><a class="internal" href="#scale_algorithm">scale_algorithm</a></code> setting) without OSD/GUI elements (e.g. console and icons). If you want to include the GUI and OSD elements pass the <code>-with-osd</code> option. If you want a screenshot of the 'unscaled' raw MSX screen, pass the <code>-raw</code> option. The screenshots are PNG files and (by default) are saved in the <code>screenshots</code> subdirectory of the openMSX data directory in your home directory. There's also an option <code>-no-sprites</code> to take a screenshot with sprite rendering disabled.</p>
 
   <div class="subsectiontitle">
     usage:
@@ -2108,14 +2045,6 @@
 
   <table>
     <tr>
-      <td><code>store_machine</code></td>
-      <td>Save state of current machine to file "openmsxNNNN.xml.gz"</td>
-    </tr>
-    <tr>
-      <td><code>store_machine &lt;machineID&gt;</code></td>
-      <td>Save state of indicated machine to file "openmsxNNNN.xml.gz"</td>
-    </tr>
-    <tr>
       <td><code>store_machine &lt;machineID&gt; &lt;filename&gt;</code></td>
       <td>Save state of indicated machine to specified file</td>
     </tr>
@@ -2142,7 +2071,8 @@
 
   <h3><a id="test_machine">test_machine / test_all_machines / test_all_extensions</a></h3>
 
-  <p>Test whether the given MSX machine configuration works. For example whether you have all required system ROMs for this machine. See also <code><a class="internal" href="#machines">load_machine</a></code>.</p>
+  <p>Test whether the given MSX machine configuration works. For example whether you have all required system ROMs for this machine. See also <code><a class="internal" href="#machines">load_machine</a></code>. This is an alternative to using the equivalent option in the GUI <span class="menu-reference">Main menu bar
+&rarr; Machine &rarr; Test MSX hardware...</span></p>
 
   <div class="subsectiontitle">
     usage:
@@ -2211,7 +2141,7 @@
     </tr>
 
     <tr>
-      <td><code>trainer &lt;game&gt; \[&lt;cheat&gt; ..\]</code></td>
+      <td><code>trainer &lt;game&gt; [&lt;cheat&gt; ..]</code></td>
 
       <td>Toggle cheats of &lt;game&gt; on/off</td>
     </tr>
@@ -2384,7 +2314,7 @@
     </tr>
     <tr>
       <td><code>get_screen</code></td>
-      <td>Capture the content of a MSX text screen in a Tcl string</td>
+      <td>Capture the content of an MSX text screen in a Tcl string</td>
     </tr>
     <tr>
       <td><code>get_screen_mode</code></td>
@@ -2407,10 +2337,6 @@
       <td>Write the content of a file to a openMSX debuggable</td>
     </tr>
     <tr>
-      <td><code>main_menu_open</code> / <code>main_menu_close</code> / <code>main_menu_toggle</code></td>
-      <td>Control the visibility of the default OSD menu</td>
-    </tr>
-    <tr>
       <td><code>multi_screenshot</code></td>
       <td>Take screenshots of multiple successive frames</td>
     </tr>
@@ -2428,7 +2354,7 @@
     </tr>
     <tr>
       <td><code>poke</code></td>
-      <td>Write a byte to the given memory location. Use <code>dpoke</code> to only write if the to be written value is different from the current value.</td>
+      <td>Write a byte to the given memory location. Use <code>dpoke</code> to only write if the value to be written is different from the current value.</td>
     </tr>
     <tr>
       <td><code>poke16</code></td>
@@ -2440,7 +2366,7 @@
     </tr>
     <tr>
       <td><code>ram_watch</code></td>
-      <td>Add or remove RAM watch addresses to/from the list on the right side of the screen, useful for debugging or TASing</td>
+      <td>Add or remove RAM watch addresses to/from the list on the right side of the screen, useful for debugging or tool assisted speedrunning (TAS)</td>
     </tr>
     <tr>
       <td><code>reg</code></td>
@@ -2499,10 +2425,6 @@
       <td>Skip the current CPU instruction</td>
     </tr>
     <tr>
-      <td><code>sprite_viewer</code></td>
-      <td>Show a widget with which you can view the sprite patterns</td>
-    </tr>
-    <tr>
       <td><code>stack</code></td>
       <td>Print the top of the CPU stack</td>
     </tr>
@@ -2544,7 +2466,13 @@
     </tr>
     <tr>
       <td><code>toggle_info_panel</code></td>
-      <td>Show (or hide) a panel with various types of info on the currently running MSX (emulation); similar to the info in the panel you get when using the DIGIblue theme in blueMSX</td>
+      <td>Show (or hide) a panel with various types of info on the currently
+          running MSX (emulation); similar to the info in the panel you get
+          when using the DIGIblue theme in blueMSX. In the future, this will be
+          fully replaced by the Status bar, which can be toggled via <span
+          class="menu-reference">Main menu bar &rarr; Settings &rarr; Misc
+          &rarr; Show status bar</span>.
+      </td>
     </tr>
     <tr>
       <td><code>toggle_mog_overlay</code></td>
@@ -2563,16 +2491,8 @@
       <td>Enable (or disable) an OSD drawn shield in Nemesis (Gradius) 1, all enemy objects will repel from it</td>
     </tr>
     <tr>
-      <td><code>toggle_osd_keyboard</code></td>
-      <td>Show (or hide) an on-screen keyboard (mostly useful for devices without physical keyboard); only supports an international keyboard-layout for now</td>
-    </tr>
-    <tr>
       <td><code>toggle_psg2scc</code></td>
       <td>Enable (or disable) playing PSG sound on SCC</td>
-    </tr>
-    <tr>
-      <td><code>toggle_reversebar</code></td>
-      <td>Show (or hide) the reverse bar, which helps to control and view the data of the <a class="internal" href="#reverse">reverse</a> feature, which is automatically enabled when the bar is enabled</td>
     </tr>
     <tr>
       <td><code>toggle_scc_editor</code></td>
@@ -2580,11 +2500,11 @@
     </tr>
     <tr>
       <td><code>toggle_scc_viewer</code></td>
-      <td>Show a graphical view of the SCC chip(s) of the system, showing waveforms and volume per channel</td>
-    </tr>
-    <tr>
-      <td><code>toggle_show_palette</code></td>
-      <td>Show (or hide) a graphical view on the palette registers</td>
+      <td>Show a graphical view of the SCC chip(s) of the system, showing
+          waveforms and volume per channel. In the future, this will be fully
+          replaced by <span class="menu-reference">Main menu bar &rarr; Tools
+          &rarr; SCC viewer ...</span>.
+      </td>
     </tr>
     <tr>
       <td><code>toggle_tron</code></td>
@@ -2599,12 +2519,13 @@
       <td>Enable (or disable) display on the OSD how busy the VDP is</td>
     </tr>
     <tr>
-      <td><code>toggle_vdp_reg_viewer</code></td>
-      <td>Enable (or disable) a widget that shows an overview of all VDP registers and highlights changes in the values</td>
-    </tr>
-    <tr>
       <td><code>toggle_vu_meters</code></td>
-      <td>Show (or hide) a graphical view of the volumes of the sound channels of several sound chips</td>
+      <td>Show (or hide) a graphical view of the volumes of the sound channels
+      of several sound chips. These are volumes based on the current register
+      values of the chips and only for those for which this is implemented. For
+      "physical" VU-meters for all possible audio channels, check out <span
+      class="menu-reference">Main menu bar &rarr; Tools &rarr; Audio channel
+      viewer...</span>.</td>
     </tr>
     <tr>
       <td><code>type_via_keybuf</code></td>
@@ -2791,7 +2712,7 @@
 
   <h3><a id="auto_enable_reverse">auto_enable_reverse</a></h3>
 
-  <p>Using the <code><a class="internal" href="#reverse">reverse</a></code> feature has a small memory and performance cost. Therefore it has to be enabled before it can be used. This setting controls whether the reverse feature should automatically be activated when openMSX starts. On desktop computers this generally won't be a problem. But for small handheld devices it can be.</p>
+  <p>Using the <code><a class="internal" href="#reverse">reverse</a></code> feature comes at a small memory and performance cost. Therefore it has to be enabled before it can be used. This setting controls whether the reverse feature should automatically be activated when openMSX starts. While with desktop computers this generally won't be a problem, the performance drop might be more noticeable on older/smaller handheld devices.</p>
 
   <div class="subsectiontitle">
     usage:
@@ -2808,11 +2729,7 @@
     </tr>
     <tr>
       <td><code>set auto_enable_reverse on</code></td>
-      <td>Enable the reverse feature when openMSX starts</td>
-    </tr>
-    <tr>
-      <td><code>set auto_enable_reverse gui</code></td>
-      <td>Enable the reverse feature and the reverse bar when openMSX starts. Default setting for Desktop/PC</td>
+      <td>Enable the reverse feature when openMSX starts. Default setting for Desktop/PC</td>
     </tr>
   </table>
 
@@ -2871,7 +2788,7 @@
 
   <h3><a id="brightness">brightness</a></h3>
 
-  <p>Controls the brightness of the video output. Can be between -100 and 100. Lower values are darker, higher values are brighter. The default is 0, which is neutral. This setting shifts the brightness of all colors, including black and white, while the <code><a class="internal" href="#gamma">gamma</a></code> setting changes the relative brightness of colors but does not change black and white.</p>
+  <p>Controls the brightness of the video output. Can be between -100 and 100. Lower values are darker, higher values are brighter. The default is 0, which is neutral. This setting shifts the brightness of all colours, including black and white, while the <code><a class="internal" href="#gamma">gamma</a></code> setting changes the relative brightness of colours but does not change black and white.</p>
 
   <p>The section about the <code><a class="internal" href="#noise">noise</a></code> setting describes a typical way of using <code>brightness</code>.</p>
 
@@ -2929,10 +2846,10 @@
 
   <h3><a id="color_matrix">color_matrix</a></h3>
 
-  <p>This setting represents a 3&times;3 matrix that is used to transform MSX RGB colors to host RGB colors. This setting can
-  be used to generate all kind of color schemes, see <code>scripts/monitor.tcl</code> for examples.</p>
+  <p>This setting represents a 3&times;3 matrix that is used to transform MSX RGB colours to host RGB colours. This setting can
+  be used to generate all kind of colour schemes, see <code>scripts/monitor.tcl</code> for examples.</p>
 
-  <p>To get the following color transformation:</p>
+  <p>To get the following colour transformation:</p>
   <pre>
         | a b c |   | Rm |   | Rh |
         | d e f | &times; | Gm | = | Gh |
@@ -2957,7 +2874,7 @@
     <tr>
       <td><code>set color_matrix { { 1 0 0 } { 0 1 0 } { 0 0 1 } }</code></td>
 
-      <td>This is the default (no color transformation)</td>
+      <td>This is the default (no colour transformation)</td>
     </tr>
 
     <tr>
@@ -2996,189 +2913,6 @@
       <td><code>set console off</code></td>
 
       <td>Turns the console off</td>
-    </tr>
-  </table>
-
-  <h3><a id="consolebackground">consolebackground</a></h3>
-
-  <p>Change the console background image. Only images in the PNG format are supported. Background images may also have an alpha channel (amount of transparency per pixel).</p>
-
-  <div class="subsectiontitle">
-    usage:
-  </div>
-
-  <table>
-    <tr>
-      <td><code>set consolebackground</code></td>
-
-      <td>Shows the current setting</td>
-    </tr>
-
-    <tr>
-      <td><code>set consolebackground &lt;image&gt;</code></td>
-
-      <td>Sets a new background image</td>
-    </tr>
-  </table>
-
-  <h3><a id="consolecolumns">consolecolumns</a></h3>
-
-  <p>Change the width of the console measured by the number of columns.</p>
-
-  <div class="subsectiontitle">
-    usage:
-  </div>
-
-  <table>
-    <tr>
-      <td><code>set consolecolumns</code></td>
-
-      <td>Shows the current setting</td>
-    </tr>
-
-    <tr>
-      <td><code>set consolecolumns &lt;value&gt;</code></td>
-
-      <td>Set the specified width</td>
-    </tr>
-  </table>
-
-  <h3><a id="consolefont">consolefont</a></h3>
-
-  <p>Change the console font. This should be the filename of a True Type Font. The default value is <code>skins/VeraMono.ttf.gz</code>.</p>
-  <p>Font files of other types than True Type Fonts (TTF) are not supported. The font must also be monospaced.</p>
-
-  <div class="subsectiontitle">
-    usage:
-  </div>
-
-  <table>
-    <tr>
-      <td><code>set consolefont</code></td>
-
-      <td>Shows the current setting</td>
-    </tr>
-
-    <tr>
-      <td><code>set consolefont &lt;myfont.ttf&gt;</code></td>
-
-      <td>Sets a new font</td>
-    </tr>
-  </table>
-
-  <h3><a id="consolefontsize">consolefontsize</a></h3>
-
-  <p>Set the size for the console font. The default value is 12.</p>
-
-  <div class="subsectiontitle">
-    usage:
-  </div>
-
-  <table>
-    <tr>
-      <td><code>set consolefontsize</code></td>
-
-      <td>Shows the current setting</td>
-    </tr>
-
-    <tr>
-      <td><code>set consolefontsize 16</code></td>
-
-      <td>Set a bigger than default font size</td>
-    </tr>
-  </table>
-
-  <h3><a id="console_history_size">console_history_size</a></h3>
-
-  <p>Determines how many commands are saved into the console history.</p>
-
-  <div class="subsectiontitle">
-    usage:
-  </div>
-
-  <table>
-    <tr>
-      <td><code>set console_history_size</code></td>
-
-      <td>Shows the current setting</td>
-    </tr>
-
-    <tr>
-      <td><code>set console_history_size 5000</code></td>
-
-      <td>Keep a maximum of 5000 commands in the console history</td>
-    </tr>
-  </table>
-
-  <h3><a id="consoleplacement">consoleplacement</a></h3>
-
-  <p>Changes the position of the console on the emulator screen.</p>
-
-  <div class="subsectiontitle">
-    usage:
-  </div>
-
-  <table>
-    <tr>
-      <td><code>set consoleplacement</code></td>
-
-      <td>Shows the current setting</td>
-    </tr>
-
-    <tr>
-      <td><code>set consoleplacement &lt;place&gt;</code></td>
-
-      <td>Moves the console to the specified location; <code>&lt;place&gt;</code> can be <code>topleft</code>, <code>top</code>, <code>topright</code>, <code>left</code>, <code>center</code>, <code>right</code>, <code>bottomleft</code>, <code>bottom</code> or <code>bottomright</code>.</td>
-    </tr>
-  </table>
-
-  <h3><a id="consolerows">consolerows</a></h3>
-
-  <p>Change the height of the console measured by the number of rows.</p>
-
-  <div class="subsectiontitle">
-    usage:
-  </div>
-
-  <table>
-    <tr>
-      <td><code>set consolerows</code></td>
-
-      <td>Shows the current setting</td>
-    </tr>
-
-    <tr>
-      <td><code>set consolerows &lt;value&gt;</code></td>
-
-      <td>Set the specified number of rows</td>
-    </tr>
-  </table>
-
-  <h3><a id="console_remove_doubles">console_remove_doubles</a></h3>
-
-  <p>Determines whether the console history remembers two identical subsequent commands.</p>
-
-  <div class="subsectiontitle">
-    usage:
-  </div>
-
-  <table>
-    <tr>
-      <td><code>set console_remove_doubles</code></td>
-
-      <td>Shows the current setting</td>
-    </tr>
-
-    <tr>
-      <td><code>set console_remove_doubles on</code></td>
-
-      <td>Remove (do not remember) the last command if it's the same as the previous (default)</td>
-    </tr>
-
-    <tr>
-      <td><code>set console_remove_doubles off</code></td>
-
-      <td>Allow double subsequent command entries in the console history</td>
     </tr>
   </table>
 
@@ -3298,7 +3032,7 @@
 
   <h3><a id="DirAsDSKmode">DirAsDSKmode</a></h3>
 
-  <p>Determine the behavior of the DirAsDSK when inserting a directory to be used as diskimage.</p>
+  <p>Determine the behaviour of the DirAsDSK when inserting a directory to be used as diskimage.</p>
 
   <p>The possible values are <code>read_only</code> and <code>full</code>. The default mode is <code>full</code>.</p>
 
@@ -3335,14 +3069,13 @@
   <h3><a id="deflicker">deflicker</a></h3>
 
   <p>Turns deflicker on/off. deflicker is a filter which tries to detect pixels
-  that alternate each frame between two different color values and replaces
-  those alternations with the average color. It gives a very nice result for
+  that alternate each frame between two different colour values and replaces
+  those alternations with the average colour. It gives a very nice result for
   software (mostly demos) that use this technique to get the optical illusion
-  of more colors than are actually supported by the hardware. It also works
+  of more colours than are actually supported by the hardware. It also works
   well in games with flickering sprites on a static background (like Maze of
   Galious). This setting is disabled by default because there aren't that many
-  situations were it really improves video quality and it does have a
-  performance cost. </p>
+  situations where the performance cost justifies the improved video quality. </p>
 
   <div class="subsectiontitle">
     usage:
@@ -3391,10 +3124,6 @@
     </tr>
   </table>
 
-  <div class="note">
-    Note: Deinterlacing is only supported for <code><a class="internal" href="#scale_factor">scale_factors</a></code> bigger or equal to 2.
-  </div>
-
 
   <h3><a id="disablesprites">disablesprites</a></h3>
 
@@ -3426,7 +3155,7 @@
 
   <h3><a id="display_deform">display_deform</a></h3>
 
-  <p>Select display deformation effect. This effect is only supported in the SDLGL-PP renderer.</p>
+  <p>Select display deformation effect.</p>
 
   <div class="subsectiontitle">
     usage:
@@ -3619,7 +3348,7 @@
 
   <h3><a id="fullspeedwhenloading">fullspeedwhenloading</a></h3>
 
-  <p>When enabled, openMSX will try to detect when the MSX is loading from diskette, cassette or laserdisc. During loading openMSX will run at full speed (<code><a class="internal" href="#throttle">throttle</a></code> off). This can be convenient if you're not interested in the realistic but slow loading times on MSX. Default is off, because it is not according to the behaviour of a real MSX.</p>
+  <p>When enabled, openMSX will try to detect when the MSX is loading from diskette, cassette or laserdisc. During loading openMSX will run at full speed (<code><a class="internal" href="#throttle">throttle</a></code> off). This can be convenient if you're not interested in the realistic but slow loading times on MSX. Default is off, because it is not how a real MSX behaves.</p>
 
   <p>Unlike the fast loading features in for example fMSX, <code>fullspeedwhenloading</code> does not intercept BIOS calls. Instead, it speeds up the emulation of the entire MSX, including all hardware devices.</p>
 
@@ -3695,10 +3424,6 @@
     </tr>
   </table>
 
-  <div class="note">
-    Note: Not all renderers support this.
-  </div>
-
   <h3><a id="grabinput">grabinput</a></h3>
 
   <p>Controls whether openMSX grabs all input events or not. When this setting is turned on, all input events are directly passed to openMSX. The mouse pointer can't leave the openMSX window and the window manager won't be able to react to keyboard shortcuts.</p>
@@ -3731,7 +3456,7 @@
 
   <h3><a id="horizontal_stretch">horizontal_stretch</a></h3>
 
-  <p>Sets the amount of horizontal stretch, thus also the aspect ratio of the screen. More specifically, a setting of <code>n</code> means stretch the center <code>n</code> MSX pixels to the full width of the host output window (at <code><a class="internal" href="#scale_factor">scale_factor</a></code> 1).</p>
+  <p>Sets the amount of horizontal stretch, thus also the aspect ratio of the screen. More specifically, a setting of <code>n</code> means stretch the centre <code>n</code> MSX pixels to the full width of the host output window (at the virtual <code><a class="internal" href="#scale_factor">scale_factor</a></code> 1).</p>
 
   <div class="subsectiontitle">
     usage:
@@ -3760,10 +3485,6 @@
     <code>set horizontal_stretch 272</code> (approach real aspect ratio of MSX screen)<br />
     <code>set horizontal_stretch 280</code> (default: show all generated border pixels, so that all border demo effects are still visible)<br />
     <code>set horizontal_stretch 256</code> (borders are not visible at all; doesn't work well in combination with set-adjust)
-  </div>
-
-  <div class="note">
-    Note: when using the SDL renderer, this setting may cause a lot more CPU usage (e.g. on a Dingoo) when not using the value 320.
   </div>
 
   <h3><a id="inputdelay">inputdelay</a></h3>
@@ -3824,7 +3545,7 @@
 
   <p>Selects the Tcl procedure to be called when the running MSX software has selected an invalid PPI mode. Or at least a PPI mode that's not yet correctly emulated. Typically on a real machine these modes will hang the MSX.</p>
 
-  <p>The default openmsx startup scripts initialize this setting with a proc that prints a warning message just once. Though if you're a developer you may want to change this to always print the warning or automatically break emulation when this happens so you can debug the problem.</p>
+  <p>The default openMSX startup scripts initialize this setting with a proc that prints a warning message just once. Though if you're a developer you may want to change this to always print the warning or automatically break emulation when this happens so you can debug the problem.</p>
 
   <div class="subsectiontitle">
     usage:
@@ -3845,7 +3566,7 @@
 
   <p>Selects the Tcl procedure to be called when the running MSX software has selected invalid PSG port directions (port A should always be set as input).</p>
 
-  <p>The default openmsx startup scripts initialize this setting with a proc that prints a warning message just once. Though if you're a developer you may want to change this to always print the warning or automatically break emulation when this happens so you can debug the problem.</p>
+  <p>The default openMSX startup scripts initialize this setting with a proc that prints a warning message just once. Though if you're a developer you may want to change this to always print the warning or automatically break emulation when this happens, so you can debug the problem.</p>
 
   <div class="subsectiontitle">
     usage:
@@ -3862,41 +3583,48 @@
   </table>
 
 
-  <h3><a id="joystickN_config">joystick&lt;n&gt;_config</a></h3>
+  <h3><a id="msxjoystickN_config">msxjoystick&lt;n&gt;_config/joymega&lt;n&gt;_config</a></h3>
 
-  <p>This setting configures how the buttons/axis of the host joystick(s) are
-  mapped to the corresponding inputs of the emulated MSX joystick(s). For many
-  joysticks the initial value of this setting provides an acceptable default
-  mapping. But depending on your joystick type and taste you may want to tweak
+  <p>This setting configures how the buttons/axis/keys of the host are
+  mapped to the inputs of the emulated MSX joysticks or JoyMega devices. For many
+  host controllers the initial value of this setting provides an acceptable default
+  mapping. But depending on your controller type and taste you may want to tweak
   it.</p>
+
+  <p>The easiest way to tweak it, is by using the GUI menu under <span class="menu-reference">Main menu bar &rarr; Settings
+  &rarr; Input &rarr; Configure MSX joysticks</span>.</p>
 
   <p>The value of this setting is a Tcl dictionary. This means it's a list of
   key/value pairs where each even element is a key and each odd element is the
   corresponding value. The keys in this dictionary represent the 6 possible MSX
   joystick inputs. Possible key values are <code>LEFT</code>,
   <code>RIGHT</code>, <code>UP</code>, <code>DOWN</code>, <code>A</code> and
-  <code>B</code>. The corresponding dictionary-values are lists of host
-  joystick inputs. Possible elements for these lists are
-  <code>button&lt;n&gt;</code>, <code>+axis&lt;n&gt;</code>,
-  <code>-axis&lt;n&gt;</code> and <code>{L,R,U,D}_hat&lt;n&gt;</code>.</p>
+  <code>B</code>. For the JoyMega devices, add <code>C</code>, <code>X</code>,
+  <code>Y</code>, <code>Z</code>, <code>SELECT</code> and <code>START</code>.
+  The corresponding dictionary-values are lists of boolean host
+  inputs. Possible elements for these lists regarding host controller input are
+  <code>joy&lt;n&gt; button&lt;m&gt;</code>, <code>joy&lt;n&gt; +axis&lt;m&gt;</code>,
+  <code>joy&lt;n&gt; -axis&lt;m&gt;</code> and <code>joy&lt;n&gt; hat&lt;m&gt;
+  left/right/down/up</code>. But also host keyboard input can be configured
+  with <code>keyb &lt;KEYNAME&gt;</code>, where KEYNAME is the name of a
+  key.</p>
 
   <p>Let's explain this with an example. The following is the default value for
   this setting:<br/>
-  &nbsp;<code>LEFT -axis0  RIGHT +axis0  UP -axis1  DOWN +axis1  A {button0 button2}  B {button1 button3}</code><br/>
-  Axis 0 is usually the primary X-axis of the host joystick. When that axis is
-  moved towards negative values the LEFT input switch on the emulated joystick
-  is activated. When it is moved towards positive values the RIGHT MSX input
-  switch is activated. Similarly host axis1 is mapped to the UP and DOWN MSX
-  inputs. The (default) configuration for the buttons is slightly more
-  complicated. Here both host button 0 and 2 will activate MSX button A, and
-  both button 1 and 3 will activate MSX button B. (This example shows a host
-  joystick with 4 buttons, but in general (by default) all even host buttons
-  will active MSX button A and all odd host buttons will active MSX button
-  B).</p>
+  &nbsp;<code>UP {{joy1 -axis1} {joy1 hat0 up}} DOWN {{joy1 +axis1} {joy1 hat0 down}} LEFT {{joy1 -axis0} {joy1 hat0 left}} RIGHT {{joy1 +axis0} {joy1 hat0 right}} A {{joy1 button0} {joy1 button2} {joy1 button4} {joy1 button6} {joy1 button8} {joy1 button10}} B {{joy1 button1} {joy1 button3} {joy1 button5} {joy1 button7} {joy1 button9} {joy1 button11}}</code><br/>
+  Axis 0 is usually the primary X-axis of the host controller's analogue stick.
+  When that axis is moved towards negative values the LEFT input switch on the
+  emulated joystick is activated. When it is moved towards positive values the
+  RIGHT MSX input switch is activated. The D-pad of the detected host
+  controller is also mapped via the <code>hat0</code> events.
+  Similarly host axis1 is mapped to the UP and DOWN MSX inputs. The (default)
+  configuration for the buttons is slightly more complicated. Here all even
+  numbered host buttons (0, 2, etc.) will activate MSX button A, and odd host
+  button numbers will activate MSX button B.</p>
 
   <p>There are no restrictions on the possible mappings. For example it is
   allowed to map host axis/buttons to MSX buttons/axis or vice-versa. This
-  allows to for example map a host joypad (which acts like 4 buttons) to the
+  allows to for example map a host joypad (which acts like 4 buttons, instead of hats) to the
   MSX directional inputs. (Technically speaking the MSX axis inputs LEFT,
   RIGHT, UP and DOWN are just 4 input switches, just like the buttons A and B
   are just 2 input switches). It's also allowed to map the same host action to
@@ -3913,42 +3641,50 @@
   </div>
   <table>
     <tr>
-      <td><code>set joystick1_config</code></td>
-      <td>Shows the current configuration of the first joystick</td>
+      <td><code>set msxjoystick1_config</code></td>
+      <td>Shows the current configuration of the first MSX joystick (there are 2 MSX joysticks defined)</td>
     </tr>
     <tr>
-      <td><code>dict set joystick1_config A button5</code></td>
-      <td>(Re)map MSX button A to (only) host button 5. Leave the mapping of the
+      <td><code>dict set msxjoystick1_config A {joy1 button5}</code></td>
+      <td>(Re)map MSX button A to (only) host button 5 of host joystick/controller 1. Leave the mapping of the
       other MSX inputs unchanged.</td>
     </tr>
     <tr>
-      <td><code>dict set joystick1_config A {button0 button2}<br/>
-                dict set joystick1_config B {button1 button2}</code></td>
-      <td>Map button 0 to A, 1 to B and 2 to A+B. So pressing host button 2
+      <td><code>dict set msxjoystick1_config A {{joy1 button0} {joy1 button2}}<br/>
+                dict set msxjoystick1_config B {{joy1 button1} {joy1 button2}}</code></td>
+      <td>Map joystick/controller 1's button 0 to A, 1 to B and 2 to A+B. So pressing host button 2
       will press both MSX buttons.</td>
     </tr>
     <tr>
-      <td><code>dict set joystick1_config LEFT  {-axis0 -axis2 button10}<br/>
-                dict set joystick1_config RIGHT {+axis0 +axis2 button11}<br/>
-                dict set joystick1_config UP    {-axis1 -axis3 button12}<br/>
-                dict set joystick1_config DOWN  {+axis1 +axis3 button13}</code></td>
-      <td>Map 2 pairs of axis and 1 keypad (4 buttons) to the MSX direction inputs.</td>
+      <td><code>dict set msxjoystick1_config LEFT  {{joy2 -axis0} {joy2 -axis2} {joy1 button10}}<br/>
+                dict set msxjoystick1_config RIGHT {{joy2 +axis0} {joy2 +axis2} {joy1 button11}}<br/>
+                dict set msxjoystick1_config UP    {{joy2 -axis1} {joy2 -axis3} {joy1 button12}}<br/>
+                dict set msxjoystick1_config DOWN  {{joy2 +axis1} {joy2 +axis3} {joy1 button13}}</code></td>
+      <td>Map 2 pairs of axis and 1 keypad (4 buttons) from host controller/joystick 2 to the MSX direction inputs for MSX joystick 1.</td>
     </tr>
     <tr>
-      <td><code>dict lappend joystick1_config LEFT  L_hat0<br/>
-                dict lappend joystick1_config RIGHT R_hat0<br/>
-                dict lappend joystick1_config UP    U_hat0<br/>
-                dict lappend joystick1_config DOWN  D_hat0</code></td>
-      <td>Additionally map hat0 to the 4 MSX directions.</td>
+      <td><code>dict lappend msxjoystick2_config LEFT  {joy1 hat0 left}<br/>
+                dict lappend msxjoystick2_config RIGHT {joy1 hat0 right}<br/>
+                dict lappend msxjoystick2_config UP    {joy1 hat0 up}<br/>
+                dict lappend msxjoystick2_config DOWN  {joy1 hat0 down}</code></td>
+      <td>Additionally map hat0 of host controller/joystick 1 to the 4 MSX directions of msxjoystick2.</td>
+    </tr>
+    <tr>
+      <td><code>dict lappend msxjoystick2_config LEFT  {keyb A}<br/>
+                dict lappend msxjoystick2_config RIGHT {keyb D}<br/>
+                dict lappend msxjoystick2_config UP    {keyb W}<br/>
+                dict lappend msxjoystick2_config DOWN  {keyb S}</code></td>
+      <td>Additionally map the W, A, S, D keyboard key presses to the 4 MSX directions of msxjoystick2.</td>
     </tr>
   </table>
 
 
   <h3><a id="joystickN_deadzone">joystick&lt;n&gt;_deadzone</a></h3>
 
-  <p>This setting configures how big the dead center zone of an (analogue)
+  <p>This setting configures how big the dead centre zone of an (analogue)
   joystick is. This is expressed as a percentage: 0 means no dead zone, 100
-  means everything falls inside the dead zone.</p>
+  means everything falls inside the dead zone. The setting is only available
+  when connected host analogue sticks are detected.</p>
 
   <div class="subsectiontitle">
     usage:
@@ -4035,7 +3771,7 @@
   <h3><a id="kbd_deadkey1_host_key">kbd_deadkey1_host_key</a></h3>
 
   <p>Host key that maps to the (1st) dead key. By default right-CTRL (RCTRL) key.</p>
-  <p>Some MSX models have one dead key that can be used to enter accented charachters. For example the MSX
+  <p>Some MSX models have one dead key that can be used to enter accented characters. For example the MSX
   models sold in the Netherlands have a dead key that has following four accents printed on it: ` &#xb4; ^ &#xa8;.
   On the other hand, the Brazilian Gradiente Expert XP-800 has following four accents on its
   dead key: ` &#xb4; ^ <sup>~</sup>.</p>
@@ -4048,7 +3784,7 @@
   <p>Following table shows for example how to
   enter respectively &#xf9;, &#xfa;, &#xfb; or &#xfc; on the MSX models sold in the Netherlands:</p>
   <table>
-	  <tr><th>Key presses</th><th>Charachter</th></tr>
+	  <tr><th>Key presses</th><th>Character</th></tr>
 	  <tr><td>DEAD_KEY1 followed by u</td><td>&#xf9;</td></tr>
 	  <tr><td>DEAD_KEY1+SHIFT followed by u</td><td>&#xfa;</td></tr>
 	  <tr><td>DEAD_KEY1+CODE followed by u</td><td>&#xfb;</td></tr>
@@ -4171,7 +3907,7 @@
 
     <dt>KEY mapping:</dt>
     <dd>This mode is deprecated, it's superseded by the previous two modes and may get removed in a future openMSX release.<br/>
-    This mode has rudimentary knowledge about the host keyboard layout, but no knowledge about the MSX keyboard layout. It remaps individual keys, not key combinations. Take for example a french AZERTY host keyboard and an emulated MSX with 'international' keyboard layout. Pressing the 'A' host key correctly maps to the 'A' MSX key. But pressing SHIFT+'3' on the host (which produces '3'), maps to SHIFT+'3' on the MSX keyboard (which produces '#').</dd>
+    This mode has rudimentary knowledge about the host keyboard layout, but no knowledge about the MSX keyboard layout. It remaps individual keys, not key combinations. Take for example a French AZERTY host keyboard and an emulated MSX with 'international' keyboard layout. Pressing the 'A' host key correctly maps to the 'A' MSX key. But pressing SHIFT+'3' on the host (which produces '3'), maps to SHIFT+'3' on the MSX keyboard (which produces '#').</dd>
   </dl>
 
   <div class="subsectiontitle">
@@ -4264,8 +4000,8 @@
   pressed on the host keyboard on stderr.  Also show Unicode value and
   corresponding MSX key-presses for characters that get 'pasted' into the MSX
   by the console <code><a class="internal" href="#type">type</a></code>
-  command. This setting is especially useful when defining unicode keymap
-  files, so that you can find out the unicode values belonging to certain
+  command. This setting is especially useful when defining Unicode keymap
+  files, so that you can find out the Unicode values belonging to certain
   keys/characters.</p>
 
   <div class="subsectiontitle">
@@ -4286,41 +4022,6 @@
     </tr>
 
   </table>
-
-  <h3><a id="keyjoystick_n_button">keyjoystick&lt;n&gt;.&lt;button&gt;</a></h3>
-
-  <p>Configure the keys of the keyjoysticks. It's likely this will change in the future.</p>
-
-  <p>Valid values for <code>&lt;n&gt;</code>: <code>1</code>, <code>2</code>.</p>
-
-  <p>Valid values for <code>&lt;button&gt;</code>: <code>up</code>, <code>down</code>, <code>left</code>, <code>right</code>, <code>triga</code>, <code>trigb</code>.</p>
-
-  <div class="subsectiontitle">
-    usage:
-  </div>
-
-  <table>
-    <tr>
-      <td><code>set keyjoystick1.up W</code></td>
-    </tr>
-
-    <tr>
-      <td><code>set keyjoystick1.down S</code></td>
-    </tr>
-
-    <tr>
-      <td><code>set keyjoystick1.left A</code></td>
-    </tr>
-
-    <tr>
-      <td><code>set keyjoystick1.right D</code></td>
-    </tr>
-
-    <tr>
-      <td><code>set keyjoystick1.triga SPACE</code></td>
-    </tr>
-  </table>
-
 
   <h3><a id="led">led_&lt;name&gt;</a></h3>
 
@@ -4513,7 +4214,6 @@
     <li>frame counter (can also be toggled with <code>toggle_frame_counter</code>), which shows the VDP (not V9990) frame number on screen</li>
     <li>cursors (can also be toggled with <code>toggle_cursors</code>), shows which keys (important for games) are pressed</li>
   </ul>
-  <p>It also (re)enables the reverse bar widget.</p>
   <p>The mode configures the following key bindings, overriding any existing key bindings (note: Mac key bindings are not proper yet...):</p>
   <table>
     <tr> <th>keys (PC)</th>  <th>keys (Mac)</th>         <th>function</th> </tr>
@@ -4750,13 +4450,159 @@
     </tr>
   </table>
 
+  <h3><a id="psg_detune_frequency">PSG_detune_frequency</a></h3>
+
+  <p>Sets the frequency of the detune (a random variation in a sound's frequency) effect. It makes a sound fatter and more natural, as if played by a human being.
+  </p>
+
+  <div class="subsectiontitle">
+    usage:
+  </div>
+
+  <table>
+    <tr>
+      <td><code>set PSG_detune_frequency</code></td>
+
+      <td>Shows the current setting</td>
+    </tr>
+
+    <tr>
+      <td><code>set PSG_detune_frequency &lt;num&gt;</code></td>
+
+      <td>Sets new detune frequency in Hz; 1 is minimum, 100 is maximum</td>
+    </tr>
+  </table>
+
+  <div class="subsectiontitle">
+    examples:
+  </div>
+
+  <div class="examples">
+    <code>set PSG_detune_frequency</code><br />
+    <code>set PSG_detune_frequency 5</code> (default)<br />
+  </div>
+
+  <div class="note">
+    Note: It is often more convenient to use the <code><a class="internal" href="#psg_profile">psg_profile</a></code> command.
+  </div>
+
+  <h3><a id="psg_detune_percent">psg_detune_percent</a></h3>
+
+  <p>Sets the strength of the detune effect. By default it is 0, which means the effect is switched off.
+  </p>
+
+  <div class="subsectiontitle">
+    usage:
+  </div>
+
+  <table>
+    <tr>
+      <td><code>set PSG_detune_percent</code></td>
+
+      <td>Shows the current setting</td>
+    </tr>
+
+    <tr>
+      <td><code>set PSG_detune_percent &lt;num&gt;</code></td>
+
+      <td>Sets new detune strength; 0 is minimum, 10 is maximum</td>
+    </tr>
+  </table>
+
+  <div class="subsectiontitle">
+    examples:
+  </div>
+
+  <div class="examples">
+    <code>set PSG_detune_percent</code><br />
+    <code>set PSG_detune_percent 0</code> (switched off, default)<br />
+    <code>set PSG_detune_percent 0.5</code> (recommended)<br />
+  </div>
+
+  <div class="note">
+    Note: It is often more convenient to use the <code><a class="internal" href="#psg_profile">psg_profile</a></code> command.
+  </div>
+
+  <h3><a id="psg_vibrato_frequency">PSG_vibrato_frequency</a></h3>
+
+  <p>Sets the frequency of the vibrato (a periodic variation in a sound's frequency) effect.
+  </p>
+
+  <div class="subsectiontitle">
+    usage:
+  </div>
+
+  <table>
+    <tr>
+      <td><code>set PSG_vibrato_frequency</code></td>
+
+      <td>Shows the current setting</td>
+    </tr>
+
+    <tr>
+      <td><code>set PSG_vibrato_frequency &lt;num&gt;</code></td>
+
+      <td>Sets new vibrato frequency in Hz; 1 is minimum, 10 is maximum</td>
+    </tr>
+  </table>
+
+  <div class="subsectiontitle">
+    examples:
+  </div>
+
+  <div class="examples">
+    <code>set PSG_vibrato_frequency</code><br />
+    <code>set PSG_vibrato_frequency 5</code> (default)<br />
+  </div>
+
+  <div class="note">
+    Note: It is often more convenient to use the <code><a class="internal" href="#psg_profile">psg_profile</a></code> command.
+  </div>
+
+  <h3><a id="psg_vibrato_percent">PSG_vibrato_percent</a></h3>
+
+  <p>Sets the strength of the vibrato effect. By default it is 0, which means the effect is switched off.
+  </p>
+
+  <div class="subsectiontitle">
+    usage:
+  </div>
+
+  <table>
+    <tr>
+      <td><code>set PSG_vibrato_percent</code></td>
+
+      <td>Shows the current setting</td>
+    </tr>
+
+    <tr>
+      <td><code>set PSG_vibrato_percent &lt;num&gt;</code></td>
+
+      <td>Sets new vibrato strength; 0 is minimum, 10 is maximum</td>
+    </tr>
+  </table>
+
+  <div class="subsectiontitle">
+    examples:
+  </div>
+
+  <div class="examples">
+    <code>set PSG_vibrato_percent</code><br />
+    <code>set PSG_vibrato_percent 0</code> (switched off, default)<br />
+    <code>set PSG_vibrato_percent 1</code> (recommended)<br />
+  </div>
+
+  <div class="note">
+    Note: It is often more convenient to use the <code><a class="internal" href="#psg_profile">psg_profile</a></code> command.
+  </div>
+
   <h3><a id="r800_freq">r800_freq / r800_freq_locked</a></h3>
 
   <p>These two settings control the R800 clock frequency. See <code><a class="internal" href="#z80_freq">z80_freq / z80_freq_locked</a></code> for details.</p>
 
   <h3><a id="renderer">renderer</a></h3>
 
-  <p>Switch to a different video renderer. See the User's Manual for <a class="external" href="user.html#renderers">a description of the available renderers</a>.</p>
+  <p>Switch to a different video renderer. However, currently there is only one alternative: <code>none</code>, and that is useful only for disabling rendering in scripts completely.</p>
 
   <div class="subsectiontitle">
     usage:
@@ -4770,9 +4616,9 @@
     </tr>
 
     <tr>
-      <td><code>set renderer &lt;name&gt;</code></td>
+      <td><code>set renderer none</code></td>
 
-      <td>Switches to the given renderer</td>
+      <td>Disable rendering completely</td>
     </tr>
   </table>
 
@@ -4799,7 +4645,7 @@
   </table>
 
   <div class="note">
-    Note: This setting is only available if the current MSX machine has hardware Rensha Turbo support.
+    Note: This setting is only available if the current MSX machine has hardware Ren-Sha Turbo support.
   </div>
 
   <h3><a id="resampler">resampler</a></h3>
@@ -4826,13 +4672,13 @@
     <tr>
       <td><code>set resampler blip</code></td>
 
-      <td>Sets the <a href="http://slack.net/~ant/libs/audio.html#Blip_Buffer">Blip_Buffer</a> based resampler, which has the best quality per CPU usage ratio (this is the default value).</td>
+      <td>Sets the <a href="http://slack.net/~ant/libs/audio.html#Blip_Buffer">Blip_Buffer</a> based resampler, which has the best quality per CPU usage ratio.</td>
     </tr>
 
     <tr>
       <td><code>set resampler hq</code></td>
 
-      <td>Sets the highest quality resampler, but it also takes the most CPU time. It's based on the <a href="http://www.mega-nerd.com/SRC/">libsamplerate</a> algorithm.</td>
+      <td>Sets the highest quality resampler, but it also takes the most CPU time. It's based on the <a href="http://www.mega-nerd.com/SRC/">libsamplerate</a> algorithm. This is the default value on most platforms, as it gives the best quality.</td>
     </tr>
   </table>
 
@@ -4892,15 +4738,15 @@
   <p>Sets the ip address (or hostname) and port for the RS232-Net pluggable. Note that
   <code>rs232-net</code> has to be plugged in the <code>msx-rs232</code>
   connector for this to become useful. This setting
-  needs to point to a valid host at the moment of pluggin it.</p>
+  needs to point to a valid host at the moment of plugging it.</p>
   <p>The address must follow one of the following syntaxes:</p>
   <ul>
-    <li><strong>hostname</strong> ie: abc.com</li>
-    <li><strong>hostname:port</strong> ie: abc.com:23</li>
-    <li><strong>ipv4</strong> ie: 127.0.0.1</li>
-    <li><strong>ipv4:port</strong> ie: 127.0.0.1:2323</li>
-    <li><strong>ipv6</strong> ie: ::1</li>
-    <li><strong>[ipv6]:port</strong> ie: [::1]:8080</li>
+    <li><strong>hostname</strong> e.g.: abc.com</li>
+    <li><strong>hostname:port</strong> e.g.: abc.com:23</li>
+    <li><strong>ipv4</strong> e.g.: 127.0.0.1</li>
+    <li><strong>ipv4:port</strong> e.g.: 127.0.0.1:2323</li>
+    <li><strong>ipv6</strong> e.g.: ::1</li>
+    <li><strong>[ipv6]:port</strong> e.g.: [::1]:8080</li>
   </ul>
 
   <div class="subsectiontitle">
@@ -4921,7 +4767,7 @@
     </tr>
   </table>
 
-  <h3><a id="rs232-outputfilename">rs232-net-ip232</a></h3>
+  <h3><a id="rs232-net-ip232">rs232-net-ip232</a></h3>
 
   <p>Enable the use of the IP232 protocol when used in conjunction with the <code>TCPSer</code> software modem. Note that
   <code>rs232-net</code> has to be plugged in the <code>msx-rs232</code>
@@ -4962,7 +4808,7 @@
 
   <p>In <code>EmuTime</code> mode the time is only synchronized with the host clock when openMSX starts. From then on the clock ticks at the same pace as the emulated machine. So when emulation is paused, the clock is paused as well. If emulation is run at 200% speed, the clock also ticks twice as fast.</p>
 
-  <p>In <code>EmuTime</code> mode it's not possible for a MSX program to detect whether it's running on a real or on an emulated machine. That's why this is the default mode. On the other hand the <code>RealTime</code> mode might be better if for example you care that timestamps of files written by the emulated MSX machine are in sync with the host machine time.</p>
+  <p>In <code>EmuTime</code> mode it's not possible for an MSX program to detect whether it's running on a real or on an emulated machine. That's why this is the default mode. On the other hand the <code>RealTime</code> mode might be better if for example you care that timestamps of files written by the emulated MSX machine are in sync with the host machine time.</p>
 
   <div class="subsectiontitle">
     usage:
@@ -5067,13 +4913,9 @@
     </tr>
   </table>
 
-  <div class="note">
-    Note: Not all renderers support all scale algorithms.
-  </div>
-
   <h3><a id="scale_factor">scale_factor</a></h3>
 
-  <p>Selects the scale factor. Scale factor &lt;n&gt; means the typical MSX pixel (MSX resolution 256&times;212) is mapped on &lt;n&gt; by &lt;n&gt; host pixels. For the moment the possible values are 1 to 4. In the future we may support a wider range or even non-integer values. The User's Manual contains <a class="external" href="user.html#scalers">more information about scalers</a>.</p>
+  <p>Selects the scale factor. Scale factor &lt;n&gt; means the typical MSX pixel (MSX resolution 256&times;212) is mapped on &lt;n&gt; by &lt;n&gt; host pixels. For the moment the possible values are 2 to 4. In the future we may support a wider range or even non-integer values. The User's Manual contains <a class="external" href="user.html#scalers">more information about scalers</a>.</p>
 
   <div class="subsectiontitle">
     usage:
@@ -5092,10 +4934,6 @@
       <td>Sets a new scale factor</td>
     </tr>
   </table>
-
-  <div class="note">
-    Note: Not all renderers support all scale factors.
-  </div>
 
   <h3><a id="scanline">scanline</a></h3>
 
@@ -5125,7 +4963,7 @@
 
   <h3><a id="sound_driver">sound_driver</a></h3>
 
-  <p>Select the sound output driver. The list of available sound drivers is platform specific.</p>
+  <p>Select the sound output driver.</p>
 
   <div class="subsectiontitle">
     usage:
@@ -5288,164 +5126,6 @@
     <code>set SCC_ch1_mute</code><br />
     <code>set PSG_ch3_mute on</code><br />
     <code>set SCC_ch5_mute off</code>
-  </div>
-
-  <h3><a id="soundchip_detune_frequency">&lt;soundchip&gt;_detune_frequency</a></h3>
-
-  <p>Sets the frequency of the detune (a random variation in a sound's frequency) effect. It makes a sound fatter and more natural, as if played by a human being.
-  </p>
-
-  <div class="subsectiontitle">
-    usage:
-  </div>
-
-  <table>
-    <tr>
-      <td><code>set &lt;soundchip&gt;_detune_frequency</code></td>
-
-      <td>Shows the current setting</td>
-    </tr>
-
-    <tr>
-      <td><code>set &lt;soundchip&gt;_detune_frequency &lt;num&gt;</code></td>
-
-      <td>Sets new detune frequency in Hz; 1 is minimum, 100 is maximum</td>
-    </tr>
-  </table>
-
-  <div class="subsectiontitle">
-    examples:
-  </div>
-
-  <div class="examples">
-    <code>set PSG_detune_frequency</code><br />
-    <code>set PSG_detune_frequency 5</code> (default)<br />
-  </div>
-
-  <div class="note">
-    Note: For now, this setting is only available for the PSG soundchip.
-  </div>
-  <div class="note">
-    Note: It is often more convenient to use the <code><a class="internal" href="#psg_profile">psg_profile</a></code> command.
-  </div>
-
-  <h3><a id="soundchip_detune_percent">&lt;soundchip&gt;_detune_percent</a></h3>
-
-  <p>Sets the strength of the detune effect. By default it is 0, which means the effect is switched off.
-  </p>
-
-  <div class="subsectiontitle">
-    usage:
-  </div>
-
-  <table>
-    <tr>
-      <td><code>set &lt;soundchip&gt;_detune_percent</code></td>
-
-      <td>Shows the current setting</td>
-    </tr>
-
-    <tr>
-      <td><code>set &lt;soundchip&gt;_detune_percent &lt;num&gt;</code></td>
-
-      <td>Sets new detune strength; 0 is minimum, 10 is maximum</td>
-    </tr>
-  </table>
-
-  <div class="subsectiontitle">
-    examples:
-  </div>
-
-  <div class="examples">
-    <code>set PSG_detune_percent</code><br />
-    <code>set PSG_detune_percent 0</code> (switched off, default)<br />
-    <code>set PSG_detune_percent 0.5</code> (recommended)<br />
-  </div>
-
-  <div class="note">
-    Note: For now, this setting is only available for the PSG soundchip.
-  </div>
-  <div class="note">
-    Note: It is often more convenient to use the <code><a class="internal" href="#psg_profile">psg_profile</a></code> command.
-  </div>
-
-  <h3><a id="soundchip_vibrato_frequency">&lt;soundchip&gt;_vibrato_frequency</a></h3>
-
-  <p>Sets the frequency of the vibrato (a periodic variation in a sound's frequency) effect.
-  </p>
-
-  <div class="subsectiontitle">
-    usage:
-  </div>
-
-  <table>
-    <tr>
-      <td><code>set &lt;soundchip&gt;_vibrato_frequency</code></td>
-
-      <td>Shows the current setting</td>
-    </tr>
-
-    <tr>
-      <td><code>set &lt;soundchip&gt;_vibrato_frequency &lt;num&gt;</code></td>
-
-      <td>Sets new vibrato frequency in Hz; 1 is minimum, 10 is maximum</td>
-    </tr>
-  </table>
-
-  <div class="subsectiontitle">
-    examples:
-  </div>
-
-  <div class="examples">
-    <code>set PSG_vibrato_frequency</code><br />
-    <code>set PSG_vibrato_frequency 5</code> (default)<br />
-  </div>
-
-  <div class="note">
-    Note: For now, this setting is only available for the PSG soundchip.
-  </div>
-  <div class="note">
-    Note: It is often more convenient to use the <code><a class="internal" href="#psg_profile">psg_profile</a></code> command.
-  </div>
-
-  <h3><a id="soundchip_vibrato_percent">&lt;soundchip&gt;_vibrato_percent</a></h3>
-
-  <p>Sets the strength of the vibrato effect. By default it is 0, which means the effect is switched off.
-  </p>
-
-  <div class="subsectiontitle">
-    usage:
-  </div>
-
-  <table>
-    <tr>
-      <td><code>set &lt;soundchip&gt;_vibrato_percent</code></td>
-
-      <td>Shows the current setting</td>
-    </tr>
-
-    <tr>
-      <td><code>set &lt;soundchip&gt;_vibrato_percent &lt;num&gt;</code></td>
-
-      <td>Sets new vibrato strength; 0 is minimum, 10 is maximum</td>
-    </tr>
-  </table>
-
-  <div class="subsectiontitle">
-    examples:
-  </div>
-
-  <div class="examples">
-    <code>set PSG_vibrato_percent</code><br />
-    <code>set PSG_vibrato_percent 0</code> (switched off, default)<br />
-    <code>set PSG_vibrato_percent 1</code> (recommended)<br />
-  </div>
-
-  <div class="note">
-    Note: For now, this setting is only available for the PSG soundchip.
-  </div>
-  <div class="note">
-    Note: It is often more convenient to use the <code><a class="internal" href="#psg_profile">psg_profile</a></code> command.
   </div>
 
   <h3><a id="soundchip_volume">&lt;soundchip&gt;_volume</a></h3>
@@ -5619,7 +5299,7 @@
 
   <h3><a id="turborpause">turborpause</a></h3>
 
-  <p>Controls the pause key on a MSX turboR machine.</p>
+  <p>Controls the pause key on an MSX turboR machine.</p>
 
   <div class="subsectiontitle">
     usage:
@@ -5725,8 +5405,7 @@
     Video 9000 is available), <code>GFX9000</code> (V9990),
     <code>Video9000</code> (V9990 superimposed on top of V99x8, default if
     available) and <code>Laserdisc</code> (for Palcom machines). There can be
-    even more video sources, e.g. due to cartridges with a built in VDP like
-    the Neos MA-20(V).
+    even more video sources, e.g. offered by cartridges with a built in VDP such as the Neos MA-20(V).
   </p>
 
   <div class="subsectiontitle">
@@ -5754,12 +5433,12 @@
   </table>
 
   <div class="note">
-    Note: This setting is only available if multiple videosources are present.
+    Note: This setting is only available if multiple video sources are present.
   </div>
 
   <h3><a id="vsync">vsync</a></h3>
 
-  <p>Enables or disables vsync. This setting determines whether the SDLGL-PP renderer should synchronize its frames to your host monitors frame rate (e.g. 60fps).</p>
+  <p>Enables or disables vsync. This setting determines whether MSX frame rendering should be synchronized to your host monitors frame rate (e.g. 60fps).</p>
   <p>The default value is not to synchronize ("<code>off</code>"). When enabled, adaptive vsync is attempted if your hardware and driver support it, which means that if a frame is too late, it will be output immediately anyway. If not supported, normal vsync will be used, which may mean a frame is output later, when the sync is missed.</p>
   <p>Enable this if your MSX is running at about the same frame rate as your monitor (e.g. 60Hz MSX output on a 60Hz host monitor) and you want to avoid (or reduce) tearing, which can be quite visible in smooth horizontal scrolling demos. Keep in mind <a class="internal" href="#throttle">throttle mode</a> off works a bit differently if vsync is enabled (see there).</p>
 
@@ -5787,10 +5466,6 @@
     </tr>
 
   </table>
-
-  <div class="note">
-   Note: This setting only has effect when the SDLGL-PP renderer is used.
-  </div>
 
   <h3><a id="v9990cmdtrace">v9990cmdtrace</a></h3>
 

@@ -11,6 +11,8 @@
 #include "TclObject.hh"
 
 #include "circular_buffer.hh"
+#include "function_ref.hh"
+#include "stl.hh"
 #include "zstring_view.hh"
 
 #include <array>
@@ -34,8 +36,7 @@ public:
 	};
 
 public:
-	explicit ImGuiMedia(ImGuiManager& manager_)
-		: ImGuiPart(manager_) {}
+	using ImGuiPart::ImGuiPart;
 
 	[[nodiscard]] zstring_view iniName() const override { return "media"; }
 	void save(ImGuiTextBuffer& buf) override;
@@ -55,24 +56,24 @@ public:
 	ExtensionInfo* findExtensionInfo(std::string_view config);
 	[[nodiscard]] const std::string& getTestResult(ExtensionInfo& info);
 
+	void addRecent(const TclObject& cmd);
+
 public:
-	enum SelectDiskType {
-		SELECT_DISK_IMAGE,
-		SELECT_DIR_AS_DISK,
-		SELECT_RAMDISK,
-		SELECT_EMPTY_DISK,
+	enum class SelectDiskType : int {
+		IMAGE, DIR_AS_DISK, RAMDISK, EMPTY,
+		NUM
 	};
-	enum SelectCartridgeType {
-		SELECT_ROM_IMAGE,
-		SELECT_EXTENSION,
-		SELECT_EMPTY_SLOT,
+	enum class SelectCartridgeType : int {
+		IMAGE, EXTENSION, EMPTY,
+		NUM
 	};
 
 	struct MediaItem {
 		std::string name;
 		std::vector<std::string> ipsPatches; // only used for disk and rom images
-		RomType romType = ROM_UNKNOWN; // only used for rom images
+		RomType romType = RomType::UNKNOWN; // only used for rom images
 
+		[[nodiscard]] bool isEject() const { return romType == RomType::NUM; } // hack
 		[[nodiscard]] bool operator==(const MediaItem&) const = default;
 	};
 
@@ -85,16 +86,20 @@ public:
 	};
 
 	struct CartridgeMediaInfo {
-		std::array<ItemGroup, 2> groups;
-		int select = 0; // 0-> romImage, 1->extension
+		CartridgeMediaInfo() {
+			groups[SelectCartridgeType::EMPTY].edit.romType = RomType::NUM; // hack: indicates "eject"
+		}
+		array_with_enum_index<SelectCartridgeType, ItemGroup> groups;
+		SelectCartridgeType select = SelectCartridgeType::IMAGE;
 		bool show = false;
 	};
 	struct DiskMediaInfo {
 		DiskMediaInfo() {
-			groups[2].edit.name = "ramdsk";
+			groups[SelectDiskType::RAMDISK].edit.name = "ramdsk";
+			groups[SelectDiskType::EMPTY].edit.romType = RomType::NUM; // hack: indicates "eject"
 		}
-		std::array<ItemGroup, 3> groups;
-		int select = 0; // 0->diskImage, 1->dirAsDsk, 2->ramDisk
+		array_with_enum_index<SelectDiskType, ItemGroup> groups;
+		SelectDiskType select = SelectDiskType::IMAGE;
 		bool show = false;
 	};
 	struct CassetteMediaInfo {
@@ -111,13 +116,13 @@ public:
 	static std::string diskFilter();
 
 private:
-	bool selectRecent(ItemGroup& group, std::function<std::string(const std::string&)> displayFunc, float width);
+	bool selectRecent(ItemGroup& group, function_ref<std::string(const std::string&)> displayFunc, float width) const;
 	bool selectImage(ItemGroup& group, const std::string& title,
-	                 std::function<std::string()> createFilter, zstring_view current,
-	                 std::function<std::string(const std::string&)> displayFunc = std::identity{},
-	                 std::function<void()> createNewCallback = {});
+	                 function_ref<std::string()> createFilter, zstring_view current,
+	                 function_ref<std::string(const std::string&)> displayFunc = std::identity{},
+	                 const std::function<void()>& createNewCallback = {});
 	bool selectDirectory(ItemGroup& info, const std::string& title, zstring_view current,
-	                     std::function<void()> createNewCallback);
+	                     const std::function<void()>& createNewCallback);
 	bool selectPatches(MediaItem& item, int& patchIndex);
 	bool insertMediaButton(std::string_view mediaName, ItemGroup& group, bool* showWindow);
 	TclObject showDiskInfo(std::string_view mediaName, DiskMediaInfo& info);
@@ -125,7 +130,7 @@ private:
 	void diskMenu(int i);
 	void cartridgeMenu(int i);
 	void cassetteMenu(const TclObject& cmdResult);
-	void insertMedia(std::string_view mediaName, ItemGroup& group);
+	void insertMedia(std::string_view mediaName, const MediaItem& item);
 
 	void printExtensionInfo(ExtensionInfo& info);
 	void extensionTooltip(ExtensionInfo& info);

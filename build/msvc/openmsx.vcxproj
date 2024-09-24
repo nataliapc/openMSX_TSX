@@ -451,7 +451,6 @@
     <ClCompile Include="$(OpenMSXSrcDir)\file\LocalFile.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\file\LocalFileReference.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\file\PreCacheFile.cc" />
-    <ClCompile Include="$(OpenMSXSrcDir)\file\ReadDir.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\file\ZipFileAdapter.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\file\ZlibInflate.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\ide\AbstractIDEDevice.cc" />
@@ -499,9 +498,12 @@
     <ClCompile Include="$(OpenMSXSrcDir)\imgui\ImGuiSymbols.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\imgui\ImGuiTools.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\imgui\ImGuiTrainer.cc" />
+    <ClCompile Include="$(OpenMSXSrcDir)\imgui\ImGuiSCCViewer.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\imgui\ImGuiVdpRegs.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\imgui\ImGuiUtils.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\imgui\ImGuiWatchExpr.cc" />
+    <ClCompile Include="$(OpenMSXSrcDir)\imgui\ImGuiWaveViewer.cc" />
+    <ClCompile Include="$(OpenMSXSrcDir)\imgui\Shortcuts.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\input\ArkanoidPad.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\input\DummyJoystick.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\input\EventDelay.cc" />
@@ -512,7 +514,6 @@
     <ClCompile Include="$(OpenMSXSrcDir)\input\JoyMega.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\input\Keyboard.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\input\KeyboardSettings.cc" />
-    <ClCompile Include="$(OpenMSXSrcDir)\input\KeyJoystick.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\input\MSXJoystick.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\input\MagicKey.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\input\Mouse.cc" />
@@ -527,6 +528,7 @@
     <ClCompile Include="$(OpenMSXSrcDir)\input\Trackball.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\input\UnicodeKeymap.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\input\Touchpad.cc" />
+    <ClCompile Include="$(OpenMSXSrcDir)\input\CircuitDesignerRDDongle.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\input\ColecoJoystickIO.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\memory\RomSuperSwangi.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\memory\AmdFlash.cc" />
@@ -558,6 +560,7 @@
     <ClCompile Include="$(OpenMSXSrcDir)\memory\RomArc.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\memory\RomAscii16_2.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\memory\RomAscii16kB.cc" />
+    <ClCompile Include="$(OpenMSXSrcDir)\memory\RomAscii16X.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\memory\RomAscii8_8.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\memory\RomAscii8kB.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\memory\RomBlocks.cc" />
@@ -776,6 +779,7 @@
     <ClCompile Include="$(OpenMSXSrcDir)\serial\MidiOutWindows.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\serial\MSXFacMidiInterface.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\serial\MSXMidi.cc" />
+    <ClCompile Include="$(OpenMSXSrcDir)\serial\MSXModem.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\serial\MSXRS232.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\serial\MusicModuleMIDI.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\serial\RS232Connector.cc" />
@@ -1077,9 +1081,12 @@
     <None Include="$(OpenMSXSrcDir)\imgui\ImGuiSymbols.hh" />
     <None Include="$(OpenMSXSrcDir)\imgui\ImGuiTools.hh" />
     <None Include="$(OpenMSXSrcDir)\imgui\ImGuiTrainer.hh" />
+    <None Include="$(OpenMSXSrcDir)\imgui\ImGuiSCCViewer.hh" />
     <None Include="$(OpenMSXSrcDir)\imgui\ImGuiVdpRegs.hh" />
     <None Include="$(OpenMSXSrcDir)\imgui\ImGuiUtils.hh" />
     <None Include="$(OpenMSXSrcDir)\imgui\ImGuiWatchExpr.hh" />
+    <None Include="$(OpenMSXSrcDir)\imgui\ImGuiWaveViewer.hh" />
+    <None Include="$(OpenMSXSrcDir)\imgui\Shortcuts.hh" />
     <None Include="$(OpenMSXSrcDir)\input\ArkanoidPad.hh" />
     <None Include="$(OpenMSXSrcDir)\input\DummyJoystick.hh" />
     <None Include="$(OpenMSXSrcDir)\input\EventDelay.hh" />
@@ -1089,7 +1096,6 @@
     <None Include="$(OpenMSXSrcDir)\input\JoyTap.hh" />
     <None Include="$(OpenMSXSrcDir)\input\Keyboard.hh" />
     <None Include="$(OpenMSXSrcDir)\input\KeyboardSettings.hh" />
-    <None Include="$(OpenMSXSrcDir)\input\KeyJoystick.hh" />
     <None Include="$(OpenMSXSrcDir)\input\MSXJoystick.hh" />
     <None Include="$(OpenMSXSrcDir)\input\MagicKey.hh" />
     <None Include="$(OpenMSXSrcDir)\input\Mouse.hh" />
@@ -1107,6 +1113,7 @@
     <None Include="$(OpenMSXSrcDir)\input\Trackball.hh" />
     <None Include="$(OpenMSXSrcDir)\input\UnicodeKeymap.hh" />
     <None Include="$(OpenMSXSrcDir)\input\Touchpad.hh" />
+    <None Include="$(OpenMSXSrcDir)\input\CircuitDesignerRDDongle.hh" />
     <None Include="$(OpenMSXSrcDir)\input\ColecoJoystickIO.hh" />
     <None Include="$(OpenMSXSrcDir)\memory\RomSuperSwangi.hh" />
     <None Include="$(OpenMSXSrcDir)\memory\AmdFlash.hh" />
@@ -1138,6 +1145,7 @@
     <None Include="$(OpenMSXSrcDir)\memory\RomArc.hh" />
     <None Include="$(OpenMSXSrcDir)\memory\RomAscii16_2.hh" />
     <None Include="$(OpenMSXSrcDir)\memory\RomAscii16kB.hh" />
+    <None Include="$(OpenMSXSrcDir)\memory\RomAscii16X.hh" />
     <None Include="$(OpenMSXSrcDir)\memory\RomAscii8_8.hh" />
     <None Include="$(OpenMSXSrcDir)\memory\RomAscii8kB.hh" />
     <None Include="$(OpenMSXSrcDir)\memory\RomBlocks.hh" />
@@ -1356,7 +1364,6 @@
     <None Include="$(OpenMSXSrcDir)\video\Icon.hh" />
     <None Include="$(OpenMSXSrcDir)\video\Layer.hh" />
     <None Include="$(OpenMSXSrcDir)\video\GLContext.hh" />
-    <None Include="$(OpenMSXSrcDir)\video\LayerListener.hh" />
     <None Include="$(OpenMSXSrcDir)\video\scalers\LineScalers.hh" />
     <None Include="$(OpenMSXSrcDir)\video\OutputSurface.hh" />
     <None Include="$(OpenMSXSrcDir)\video\PixelOperations.hh" />
@@ -1433,6 +1440,7 @@
     <None Include="$(OpenMSXSrcDir)\serial\MidiOutWindows.hh" />
     <None Include="$(OpenMSXSrcDir)\serial\MSXFacMidiInterface.hh" />
     <None Include="$(OpenMSXSrcDir)\serial\MSXMidi.hh" />
+    <None Include="$(OpenMSXSrcDir)\serial\MSXModem.hh" />
     <None Include="$(OpenMSXSrcDir)\serial\MSXRS232.hh" />
     <None Include="$(OpenMSXSrcDir)\serial\MusicModuleMIDI.hh" />
     <None Include="$(OpenMSXSrcDir)\serial\RS232Connector.hh" />

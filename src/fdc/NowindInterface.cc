@@ -15,9 +15,7 @@ namespace openmsx {
 NowindInterface::NowindInterface(const DeviceConfig& config)
 	: MSXDevice(config)
 	, rom(getName() + " ROM", "rom", config)
-	, flashConfig(rom.size() / 0x10000, {0x10000, false})
-	, flash(rom, flashConfig, 0x01A4,
-	        AmdFlash::Addressing::BITS_11, config)
+	, flash(rom, AmdFlashChip::AM29F040, {}, config)
 	, host(drives)
 	, basename("nowindX")
 {
@@ -126,7 +124,7 @@ void NowindInterface::writeMem(word address, byte value, EmuTime::param time)
 	}
 }
 
-byte* NowindInterface::getWriteCacheLine(word address) const
+byte* NowindInterface::getWriteCacheLine(word address)
 {
 	if (address < 0xC000) {
 		// not cacheable

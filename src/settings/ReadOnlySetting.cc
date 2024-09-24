@@ -8,10 +8,10 @@ ReadOnlySetting::ReadOnlySetting(
 		std::string_view name_, static_string_view description_,
 		const TclObject& initialValue)
 	: Setting(commandController_, name_, description_, initialValue,
-	          Setting::DONT_TRANSFER)
+	          Setting::Save::NO_AND_DONT_TRANSFER)
 	, roValue(initialValue)
 {
-	setChecker([this](TclObject& newValue) {
+	setChecker([this](const TclObject& newValue) {
 		if (newValue != roValue) {
 			throw MSXException("Read-only setting");
 		}

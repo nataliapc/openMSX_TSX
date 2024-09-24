@@ -468,9 +468,6 @@
     <ClCompile Include="$(OpenMSXSrcDir)\file\PreCacheFile.cc">
       <Filter>file</Filter>
     </ClCompile>
-    <ClCompile Include="$(OpenMSXSrcDir)\file\ReadDir.cc">
-      <Filter>file</Filter>
-    </ClCompile>
     <ClCompile Include="$(OpenMSXSrcDir)\file\ZipFileAdapter.cc">
       <Filter>file</Filter>
     </ClCompile>
@@ -612,6 +609,9 @@
     <ClCompile Include="$(OpenMSXSrcDir)\imgui\ImGuiTrainer.cc">
       <Filter>imgui</Filter>
     </ClCompile>
+    <ClCompile Include="$(OpenMSXSrcDir)\imgui\ImGuiSCCViewer.cc">
+      <Filter>imgui</Filter>
+    </ClCompile>
     <ClCompile Include="$(OpenMSXSrcDir)\imgui\ImGuiVdpRegs.cc">
       <Filter>imgui</Filter>
     </ClCompile>
@@ -619,6 +619,12 @@
       <Filter>imgui</Filter>
     </ClCompile>
     <ClCompile Include="$(OpenMSXSrcDir)\imgui\ImGuiWatchExpr.cc">
+      <Filter>imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OpenMSXSrcDir)\imgui\ImGuiWaveViewer.cc">
+      <Filter>imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OpenMSXSrcDir)\imgui\Shortcuts.cc">
       <Filter>imgui</Filter>
     </ClCompile>
     <ClCompile Include="$(OpenMSXSrcDir)\input\ArkanoidPad.cc">
@@ -646,9 +652,6 @@
       <Filter>input</Filter>
     </ClCompile>
     <ClCompile Include="$(OpenMSXSrcDir)\input\KeyboardSettings.cc">
-      <Filter>input</Filter>
-    </ClCompile>
-    <ClCompile Include="$(OpenMSXSrcDir)\input\KeyJoystick.cc">
       <Filter>input</Filter>
     </ClCompile>
     <ClCompile Include="$(OpenMSXSrcDir)\input\MSXJoystick.cc">
@@ -772,6 +775,9 @@
       <Filter>memory</Filter>
     </ClCompile>
     <ClCompile Include="$(OpenMSXSrcDir)\memory\RomAscii16kB.cc">
+      <Filter>memory</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OpenMSXSrcDir)\memory\RomAscii16X.cc">
       <Filter>memory</Filter>
     </ClCompile>
     <ClCompile Include="$(OpenMSXSrcDir)\memory\RomAscii8_8.cc">
@@ -1335,6 +1341,9 @@
     <ClCompile Include="$(OpenMSXSrcDir)\serial\MSXMidi.cc">
       <Filter>serial</Filter>
     </ClCompile>
+    <ClCompile Include="$(OpenMSXSrcDir)\serial\MSXModem.cc">
+      <Filter>serial</Filter>
+    </ClCompile>
     <ClCompile Include="$(OpenMSXSrcDir)\serial\MusicModuleMIDI.cc">
       <Filter>serial</Filter>
     </ClCompile>
@@ -1497,6 +1506,7 @@
     <ClCompile Include="$(OpenMSXSrcDir)\video\GLContext.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\sound\SVIPSG.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\fdc\SVIFDC.cc" />
+    <ClCompile Include="$(OpenMSXSrcDir)\input\CircuitDesignerRDDongle.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\input\ColecoJoystickIO.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\SpeedManager.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\input\SG1000JoystickIO.cc" />
@@ -2098,6 +2108,9 @@
     <None Include="$(OpenMSXSrcDir)\imgui\ImGuiTrainer.hh">
       <Filter>imgui</Filter>
     </None>
+    <None Include="$(OpenMSXSrcDir)\imgui\ImGuiSCCViewer.hh">
+      <Filter>imgui</Filter>
+    </None>
     <None Include="$(OpenMSXSrcDir)\imgui\ImGuiVdpRegs.hh">
       <Filter>imgui</Filter>
     </None>
@@ -2105,6 +2118,12 @@
       <Filter>imgui</Filter>
     </None>
     <None Include="$(OpenMSXSrcDir)\imgui\ImGuiWatchExpr.hh">
+      <Filter>imgui</Filter>
+    </None>
+    <None Include="$(OpenMSXSrcDir)\imgui\ImGuiWaveViewer.hh">
+      <Filter>imgui</Filter>
+    </None>
+    <None Include="$(OpenMSXSrcDir)\imgui\Shortcuts.hh">
       <Filter>imgui</Filter>
     </None>
     <None Include="$(OpenMSXSrcDir)\input\ArkanoidPad.hh">
@@ -2132,9 +2151,6 @@
       <Filter>input</Filter>
     </None>
     <None Include="$(OpenMSXSrcDir)\input\KeyboardSettings.hh">
-      <Filter>input</Filter>
-    </None>
-    <None Include="$(OpenMSXSrcDir)\input\KeyJoystick.hh">
       <Filter>input</Filter>
     </None>
     <None Include="$(OpenMSXSrcDir)\input\MSXJoystick.hh">
@@ -2267,6 +2283,9 @@
       <Filter>memory</Filter>
     </None>
     <None Include="$(OpenMSXSrcDir)\memory\RomAscii16kB.hh">
+      <Filter>memory</Filter>
+    </None>
+    <None Include="$(OpenMSXSrcDir)\memory\RomAscii16X.hh">
       <Filter>memory</Filter>
     </None>
     <None Include="$(OpenMSXSrcDir)\memory\RomAscii8_8.hh">
@@ -2809,9 +2828,6 @@
     <None Include="$(OpenMSXSrcDir)\video\Layer.hh">
       <Filter>video</Filter>
     </None>
-    <None Include="$(OpenMSXSrcDir)\video\LayerListener.hh">
-      <Filter>video</Filter>
-    </None>
     <None Include="$(OpenMSXSrcDir)\video\OutputSurface.hh">
       <Filter>video</Filter>
     </None>
@@ -2989,6 +3005,9 @@
     <None Include="$(OpenMSXSrcDir)\serial\MSXMidi.hh">
       <Filter>serial</Filter>
     </None>
+    <None Include="$(OpenMSXSrcDir)\serial\MSXModem.hh">
+      <Filter>serial</Filter>
+    </None>
     <None Include="$(OpenMSXSrcDir)\serial\MusicModuleMIDI.hh">
       <Filter>serial</Filter>
     </None>
@@ -3159,6 +3178,7 @@
     <None Include="$(OpenMSXSrcDir)\video\SuperImposedFrame.hh" />
     <None Include="$(OpenMSXSrcDir)\fdc\SpectravideoFDC.hh" />
     <None Include="$(OpenMSXSrcDir)\video\SuperImposedFrame.hh" />
+    <None Include="$(OpenMSXSrcDir)\input\CircuitDesignerRDDongle.hh" />
     <None Include="$(OpenMSXSrcDir)\input\ColecoJoystickIO.hh" />
     <None Include="$(OpenMSXSrcDir)\video\SuperImposedFrame.hh" />
     <None Include="$(OpenMSXSrcDir)\memory\RomColecoMegaCart.hh" />

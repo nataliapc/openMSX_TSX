@@ -182,8 +182,8 @@ unsigned ZMBVEncoder::neededSize() const
 unsigned ZMBVEncoder::possibleBlock(int vx, int vy, size_t offset)
 {
 	int ret = 0;
-	auto* pOld = &(std::bit_cast<Pixel*>(oldFrame.data()))[offset + (vy * pitch) + vx];
-	auto* pNew = &(std::bit_cast<Pixel*>(newFrame.data()))[offset];
+	const auto* pOld = &(std::bit_cast<const Pixel*>(oldFrame.data()))[offset + (vy * pitch) + vx];
+	const auto* pNew = &(std::bit_cast<const Pixel*>(newFrame.data()))[offset];
 	for (unsigned y = 0; y < BLOCK_HEIGHT; y += 4) {
 		for (unsigned x = 0; x < BLOCK_WIDTH; x += 4) {
 			if (pOld[x] != pNew[x]) ++ret;
@@ -197,8 +197,8 @@ unsigned ZMBVEncoder::possibleBlock(int vx, int vy, size_t offset)
 unsigned ZMBVEncoder::compareBlock(int vx, int vy, size_t offset)
 {
 	int ret = 0;
-	auto* pOld = &(std::bit_cast<Pixel*>(oldFrame.data()))[offset + (vy * pitch) + vx];
-	auto* pNew = &(std::bit_cast<Pixel*>(newFrame.data()))[offset];
+	const auto* pOld = &(std::bit_cast<const Pixel*>(oldFrame.data()))[offset + (vy * pitch) + vx];
+	const auto* pNew = &(std::bit_cast<const Pixel*>(newFrame.data()))[offset];
 	repeat(BLOCK_HEIGHT, [&] {
 		for (auto x : xrange(BLOCK_WIDTH)) {
 			if (pOld[x] != pNew[x]) ++ret;
@@ -213,8 +213,8 @@ void ZMBVEncoder::addXorBlock(int vx, int vy, size_t offset, unsigned& workUsed)
 {
 	using LE_P = typename Endian::Little<Pixel>::type;
 
-	auto* pOld = &(std::bit_cast<Pixel*>(oldFrame.data()))[offset + (vy * pitch) + vx];
-	auto* pNew = &(std::bit_cast<Pixel*>(newFrame.data()))[offset];
+	const auto* pOld = &(std::bit_cast<const Pixel*>(oldFrame.data()))[offset + (vy * pitch) + vx];
+	const auto* pNew = &(std::bit_cast<const Pixel*>(newFrame.data()))[offset];
 	repeat(BLOCK_HEIGHT, [&] {
 		for (auto x : xrange(BLOCK_WIDTH)) {
 			auto pXor = pNew[x] ^ pOld[x];
@@ -247,8 +247,8 @@ void ZMBVEncoder::addXorFrame(unsigned& workUsed)
 			int possibles = 64;
 			for (const auto& v : vectorTable) {
 				if (possibleBlock(v.x, v.y, offset) < 4) {
-					unsigned testChange = compareBlock(v.x, v.y, offset);
-					if (testChange < bestChange) {
+					if (auto testChange = compareBlock(v.x, v.y, offset);
+					    testChange < bestChange) {
 						bestChange = testChange;
 						bestVx = narrow<int>(v.x);
 						bestVy = narrow<int>(v.y);
@@ -276,7 +276,7 @@ void ZMBVEncoder::addFullFrame(unsigned& workUsed)
 	auto* readFrame =
 		&newFrame[pixelSize * (MAX_VECTOR + MAX_VECTOR * pitch)];
 	repeat(height, [&] {
-		auto* pixelsIn  = std::bit_cast<Pixel*>(readFrame);
+		const auto* pixelsIn = std::bit_cast<const Pixel*>(readFrame);
 		auto* pixelsOut = std::bit_cast<LE_P*>(&work[workUsed]);
 		for (auto x : xrange(width)) {
 			writePixel(pixelsIn[x], pixelsOut[x]);
@@ -286,9 +286,8 @@ void ZMBVEncoder::addFullFrame(unsigned& workUsed)
 	});
 }
 
-const void* ZMBVEncoder::getScaledLine(const FrameSource* frame, unsigned y, void* workBuf_) const
+const ZMBVEncoder::Pixel* ZMBVEncoder::getScaledLine(const FrameSource* frame, unsigned y, Pixel* workBuf) const
 {
-	auto* workBuf = static_cast<uint32_t*>(workBuf_);
 	switch (height) {
 	case 240:
 		return frame->getLinePtr320_240(y, std::span<uint32_t, 320>(workBuf, 320)).data();
@@ -301,7 +300,7 @@ const void* ZMBVEncoder::getScaledLine(const FrameSource* frame, unsigned y, voi
 	}
 }
 
-std::span<const uint8_t> ZMBVEncoder::compressFrame(bool keyFrame, FrameSource* frame)
+std::span<const uint8_t> ZMBVEncoder::compressFrame(bool keyFrame, const FrameSource* frame)
 {
 	std::swap(newFrame, oldFrame); // replace oldFrame with newFrame
 
@@ -334,7 +333,8 @@ std::span<const uint8_t> ZMBVEncoder::compressFrame(bool keyFrame, FrameSource* 
 	uint8_t* dest =
 		&newFrame[pixelSize * (MAX_VECTOR + MAX_VECTOR * pitch)];
 	for (auto i : xrange(height)) {
-		const auto* scaled = getScaledLine(frame, i, dest);
+		const auto* scaled = std::bit_cast<const uint8_t*>(
+			getScaledLine(frame, i, std::bit_cast<Pixel*>(dest)));
 		if (scaled != dest) memcpy(dest, scaled, lineWidth);
 		dest += linePitch;
 	}
@@ -352,7 +352,7 @@ std::span<const uint8_t> ZMBVEncoder::compressFrame(bool keyFrame, FrameSource* 
 	zstream.avail_in = workUsed;
 	zstream.total_in = 0;
 
-	zstream.next_out = static_cast<Bytef*>(writeBuf + writeDone);
+	zstream.next_out = std::bit_cast<Bytef*>(writeBuf + writeDone);
 	zstream.avail_out = outputSize - writeDone;
 	zstream.total_out = 0;
 	auto r = deflate(&zstream, Z_SYNC_FLUSH);

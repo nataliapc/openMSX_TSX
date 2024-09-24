@@ -17,14 +17,14 @@ public:
 	[[nodiscard]] byte peekMem(word address, EmuTime::param time) const override;
 	void writeMem(word address, byte value, EmuTime::param time) override;
 	[[nodiscard]] const byte* getReadCacheLine(word address) const override;
-	[[nodiscard]] byte* getWriteCacheLine(word address) const override;
+	[[nodiscard]] byte* getWriteCacheLine(word address) override;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 private:
 	struct Blocks final : RomBlockDebuggableBase {
-		explicit Blocks(RomHolyQuran2& device);
+		explicit Blocks(const RomHolyQuran2& device);
 		[[nodiscard]] byte read(unsigned address) override;
 	} romBlocks;
 

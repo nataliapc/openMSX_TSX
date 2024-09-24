@@ -1,14 +1,15 @@
 #ifndef MSXMOTHERBOARD_HH
 #define MSXMOTHERBOARD_HH
 
-#include "EmuTime.hh"
-#include "VideoSourceSetting.hh"
 #include "BooleanSetting.hh"
+#include "EmuTime.hh"
+#include "RecordedCommand.hh"
+#include "VideoSourceSetting.hh"
 #include "hash_map.hh"
+#include "openmsx.hh"
 #include "serialize_meta.hh"
 #include "xxhash.hh"
-#include "openmsx.hh"
-#include "RecordedCommand.hh"
+
 #include <array>
 #include <cassert>
 #include <memory>
@@ -30,6 +31,7 @@ class HardwareConfig;
 class InfoCommand;
 class JoyPortDebuggable;
 class JoystickPortIf;
+class Keyboard;
 class LedStatus;
 class ListExtCmd;
 class LoadMachineCmd;
@@ -62,7 +64,9 @@ class MediaInfoProvider
 {
 public:
 	MediaInfoProvider(const MediaInfoProvider&) = delete;
+	MediaInfoProvider(MediaInfoProvider&&) = delete;
 	MediaInfoProvider& operator=(const MediaInfoProvider&) = delete;
+	MediaInfoProvider& operator=(MediaInfoProvider&&) = delete;
 
 	/** This method gets called when information is required on the
 	 * media inserted in the media slot of the provider. The provider
@@ -80,7 +84,9 @@ class MSXMotherBoard final
 {
 public:
 	MSXMotherBoard(const MSXMotherBoard&) = delete;
+	MSXMotherBoard(MSXMotherBoard&&) = delete;
 	MSXMotherBoard& operator=(const MSXMotherBoard&) = delete;
+	MSXMotherBoard& operator=(MSXMotherBoard&&) = delete;
 
 	explicit MSXMotherBoard(Reactor& reactor);
 	~MSXMotherBoard();
@@ -116,7 +122,7 @@ public:
 	[[nodiscard]] bool isActive() const { return active; }
 	[[nodiscard]] bool isFastForwarding() const { return fastForwarding; }
 
-	[[nodiscard]] byte readIRQVector();
+	[[nodiscard]] byte readIRQVector() const;
 
 	[[nodiscard]] const HardwareConfig* getMachineConfig() const { return machineConfig; }
 	[[nodiscard]] HardwareConfig* getMachineConfig() { return machineConfig; }
@@ -165,7 +171,7 @@ public:
 
 	/** Convenience method:
 	  * This is the same as getScheduler().getCurrentTime(). */
-	[[nodiscard]] EmuTime::param getCurrentTime();
+	[[nodiscard]] EmuTime::param getCurrentTime() const;
 
 	/** All MSXDevices should be registered by the MotherBoard.
 	 */
@@ -226,6 +232,23 @@ public:
 	 */
 	void registerMediaInfo(std::string_view name, MediaInfoProvider& provider);
 	void unregisterMediaInfo(MediaInfoProvider& provider);
+
+	void registerKeyboard(Keyboard& keyboard) {
+		// Typically there's only 1 keyboard, but we shouldn't crash on
+		// configurations that artificially use 2 MSXPPI devices.
+		keyboards.push_back(&keyboard);
+	}
+	void unregisterKeyboard(Keyboard& keyboard) {
+		auto it = find_unguarded(keyboards, &keyboard);
+		keyboards.erase(it);
+	}
+	[[nodiscard]] Keyboard* getKeyboard() const {
+		// Typically there's exactly 1 keyboard, except for early during
+		// machine construction, or on artificial machine configs
+		// without MSXPPI (they don't make sense, but we shouldn't crash
+		// on it).
+		return keyboards.empty() ? nullptr : keyboards.front();
+	}
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
@@ -301,6 +324,8 @@ private:
 	std::unique_ptr<SettingObserver> settingObserver;
 	friend class SettingObserver;
 	BooleanSetting& powerSetting;
+
+	std::vector<Keyboard*> keyboards; // typically contains exactly 1 item
 
 	bool powered = false;
 	bool active = false;

@@ -23,12 +23,13 @@ namespace openmsx {
 
 class MidiOutALSA final : public MidiOutDevice {
 public:
-	MidiOutALSA(
-			snd_seq_t& seq,
-			snd_seq_client_info_t& cinfo, snd_seq_port_info_t& pinfo);
-	~MidiOutALSA() override;
+	MidiOutALSA(snd_seq_t& seq,
+	            snd_seq_client_info_t& cinfo, snd_seq_port_info_t& pinfo);
 	MidiOutALSA(const MidiOutALSA&) = delete;
+	MidiOutALSA(MidiOutALSA&&) = delete;
 	MidiOutALSA& operator=(const MidiOutALSA&) = delete;
+	MidiOutALSA& operator=(MidiOutALSA&&) = delete;
+	~MidiOutALSA() override;
 
 	// Pluggable
 	void plugHelper(Connector& connector, EmuTime::param time) override;
@@ -96,8 +97,7 @@ void MidiOutALSA::connect()
 			"Failed to create ALSA port: ", snd_strerror(sourcePort));
 	}
 
-	int err = snd_seq_connect_to(&seq, sourcePort, destClient, destPort);
-	if (err) {
+	if (int err = snd_seq_connect_to(&seq, sourcePort, destClient, destPort)) {
 		snd_seq_delete_simple_port(&seq, sourcePort);
 		throw PlugException(
 			"Failed to connect to ALSA port "
@@ -140,9 +140,9 @@ void MidiOutALSA::recvMessage(
 	snd_seq_ev_set_subs(&ev);
 
 	// Set message.
-	long encodeLen = snd_midi_event_encode(
+	if (auto encodeLen = snd_midi_event_encode(
 			event_parser, message.data(), narrow<long>(message.size()), &ev);
-	if (encodeLen < 0) {
+	    encodeLen < 0) {
 		std::cerr << "Error encoding MIDI message of type "
 		          << std::hex << int(message[0]) << std::dec
 		          << ": " << snd_strerror(narrow<int>(encodeLen)) << '\n';
@@ -156,8 +156,7 @@ void MidiOutALSA::recvMessage(
 
 	// Send event.
 	snd_seq_ev_set_direct(&ev);
-	int err = snd_seq_event_output(&seq, &ev);
-	if (err < 0) {
+	if (int err = snd_seq_event_output(&seq, &ev); err < 0) {
 		std::cerr << "Error sending MIDI event: "
 		          << snd_strerror(err) << '\n';
 	}
@@ -201,7 +200,7 @@ private:
 	void disconnect();
 
 	// EventListener
-	int signalEvent(const Event& event) override;
+	bool signalEvent(const Event& event) override;
 
 private:
 	EventDistributor& eventDistributor;
@@ -250,9 +249,9 @@ MidiInALSA::~MidiInALSA()
 void MidiInALSA::plugHelper(Connector& connector_, EmuTime::param /*time*/)
 {
 	auto& midiConnector = checked_cast<MidiInConnector&>(connector_);
-	midiConnector.setDataBits(SerialDataInterface::DATA_8); // 8 data bits
-	midiConnector.setStopBits(SerialDataInterface::STOP_1); // 1 stop bit
-	midiConnector.setParityBit(false, SerialDataInterface::EVEN); // no parity
+	midiConnector.setDataBits(SerialDataInterface::DataBits::D8); // 8 data bits
+	midiConnector.setStopBits(SerialDataInterface::StopBits::S1); // 1 stop bit
+	midiConnector.setParityBit(false, SerialDataInterface::Parity::EVEN); // no parity
 
 	setConnector(&midiConnector); // base class will do this in a moment,
 	                              // but thread already needs it
@@ -276,8 +275,7 @@ void MidiInALSA::connect()
 			"Failed to create ALSA port: ", snd_strerror(destinationPort));
 	}
 
-	int err = snd_seq_connect_from(&seq, destinationPort, srcClient, srcPort);
-	if (err) {
+	if (int err = snd_seq_connect_from(&seq, destinationPort, srcClient, srcPort)) {
 		snd_seq_delete_simple_port(&seq, destinationPort);
 		throw PlugException(
 			"Failed to connect to ALSA port "
@@ -371,7 +369,7 @@ void MidiInALSA::signal(EmuTime::param time)
 }
 
 // EventListener
-int MidiInALSA::signalEvent(const Event& /*event*/)
+bool MidiInALSA::signalEvent(const Event& /*event*/)
 {
 	if (isPluggedIn()) {
 		signal(scheduler.getCurrentTime());
@@ -379,7 +377,7 @@ int MidiInALSA::signalEvent(const Event& /*event*/)
 		std::scoped_lock lock(mutex);
 		queue.clear();
 	}
-	return 0;
+	return false;
 }
 
 std::string_view MidiInALSA::getName() const
@@ -414,8 +412,8 @@ void MidiSessionALSA::registerAll(
 	if (!instance) {
 		// Open the sequencer.
 		snd_seq_t* seq;
-		int err = snd_seq_open(&seq, "default", SND_SEQ_OPEN_DUPLEX, 0);
-		if (err < 0) {
+		if (int err = snd_seq_open(&seq, "default", SND_SEQ_OPEN_DUPLEX, 0);
+		    err < 0) {
 			cliComm.printError(
 				"Could not open sequencer: ", snd_strerror(err));
 			return;
@@ -460,13 +458,13 @@ void MidiSessionALSA::scanClients(
 		snd_seq_port_info_set_client(pInfo, client);
 		snd_seq_port_info_set_port(pInfo, -1);
 		while (snd_seq_query_next_port(&seq, pInfo) >= 0) {
-			unsigned int type = snd_seq_port_info_get_type(pInfo);
-			if (!(type & SND_SEQ_PORT_TYPE_MIDI_GENERIC)) {
+			if (unsigned type = snd_seq_port_info_get_type(pInfo);
+			    !(type & SND_SEQ_PORT_TYPE_MIDI_GENERIC)) {
 				continue;
 			}
-			constexpr unsigned int wrCaps =
+			constexpr unsigned wrCaps =
 					SND_SEQ_PORT_CAP_WRITE | SND_SEQ_PORT_CAP_SUBS_WRITE;
-			constexpr unsigned int rdCaps =
+			constexpr unsigned rdCaps =
 					SND_SEQ_PORT_CAP_READ | SND_SEQ_PORT_CAP_SUBS_READ;
 			if ((snd_seq_port_info_get_capability(pInfo) & wrCaps) == wrCaps) {
 				controller.registerPluggable(std::make_unique<MidiOutALSA>(

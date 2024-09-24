@@ -23,8 +23,8 @@
 #include "ImGuiManager.hh"
 #include "InfoTopic.hh"
 #include "InputEventGenerator.hh"
+#include "Keyboard.hh"
 #include "MSXMotherBoard.hh"
-#include "MSXPPI.hh"
 #include "MessageCommand.hh"
 #include "Mixer.hh"
 #include "MsxChar2Unicode.hh"
@@ -49,7 +49,6 @@
 #include "ranges.hh"
 #include "serialize.hh"
 #include "stl.hh"
-#include "StringOp.hh"
 #include "unreachable.hh"
 #include "build-info.hh"
 
@@ -206,7 +205,7 @@ private:
 	const uint64_t reference;
 };
 
-class SoftwareInfoTopic final : InfoTopic
+class SoftwareInfoTopic final : public InfoTopic
 {
 public:
 	SoftwareInfoTopic(InfoCommand& openMSXInfoCommand, Reactor& reactor);
@@ -222,6 +221,7 @@ Reactor::Reactor() = default;
 
 void Reactor::init()
 {
+	shortcuts = make_unique<Shortcuts>();
 	rtScheduler = make_unique<RTScheduler>();
 	eventDistributor = make_unique<EventDistributor>(*this);
 	globalCliComm = make_unique<GlobalCliComm>();
@@ -234,8 +234,7 @@ void Reactor::init()
 	symbolManager = make_unique<SymbolManager>(
 		*globalCommandController);
 	imGuiManager = make_unique<ImGuiManager>(*this);
-	diskFactory = make_unique<DiskFactory>(
-		*this);
+	diskFactory = make_unique<DiskFactory>(*this);
 	diskManipulator = make_unique<DiskManipulator>(
 		*globalCommandController, *this);
 	virtualDrive = make_unique<DiskChanger>(
@@ -379,11 +378,12 @@ const MsxChar2Unicode& Reactor::getMsxChar2Unicode() const
 	// right location to store it.
 	try {
 		if (MSXMotherBoard* board = getMotherBoard()) {
-			if (auto* ppi = dynamic_cast<MSXPPI*>(board->findDevice("ppi"))) {
-				return ppi->getKeyboard().getMsxChar2Unicode();
+			if (const auto* keyb = board->getKeyboard()) {
+				return keyb->getMsxChar2Unicode();
 			}
 		}
 	} catch (MSXException&) {
+		// ignore
 	}
 	static const MsxChar2Unicode defaultMsxChars("MSXVID.TXT");
 	return defaultMsxChars;
@@ -493,7 +493,7 @@ void Reactor::switchBoard(Board newBoard)
 		activeBoard = newBoard;
 	}
 	eventDistributor->distributeEvent(MachineLoadedEvent());
-	globalCliComm->update(CliComm::HARDWARE, getMachineID(), "select");
+	globalCliComm->update(CliComm::UpdateType::HARDWARE, getMachineID(), "select");
 	if (activeBoard) {
 		activeBoard->activate(true);
 	}
@@ -533,7 +533,7 @@ void Reactor::enterMainLoop()
 	}
 }
 
-void Reactor::run(CommandLineParser& parser)
+void Reactor::runStartupScripts(const CommandLineParser& parser)
 {
 	auto& commandController = *globalCommandController;
 
@@ -572,52 +572,49 @@ void Reactor::run(CommandLineParser& parser)
 	// ...and re-emit any postponed message callbacks now that the scripts
 	// are loaded
 	tclCallbackMessages->redoPostponedCallbacks();
+}
 
-	// Run
-	if (parser.getParseStatus() == CommandLineParser::RUN) {
-		// don't use Tcl to power up the machine, we cannot pass
-		// exceptions through Tcl and ADVRAM might throw in its
-		// powerUp() method. Solution is to implement dependencies
-		// between devices so ADVRAM can check the error condition
-		// in its constructor
-		//commandController.executeCommand("set power on");
-		if (activeBoard) {
-			activeBoard->powerUp();
-		}
-	}
-
-	while (doOneIteration()) {
-		// nothing
+void Reactor::powerOn()
+{
+	// don't use Tcl to power up the machine, we cannot pass
+	// exceptions through Tcl and ADVRAM might throw in its
+	// powerUp() method. Solution is to implement dependencies
+	// between devices so ADVRAM can check the error condition
+	// in its constructor
+	//commandController.executeCommand("set power on");
+	if (activeBoard) {
+		activeBoard->powerUp();
 	}
 }
 
-bool Reactor::doOneIteration()
+void Reactor::run()
 {
-	eventDistributor->deliverEvents();
-	bool blocked = (blockedCounter > 0) || !activeBoard;
-	if (!blocked) {
-		// copy shared_ptr to keep Board alive (e.g. in case of Tcl
-		// callbacks)
-		auto copy = activeBoard;
-		blocked = !copy->execute();
+	while (running) {
+		eventDistributor->deliverEvents();
+		bool blocked = (blockedCounter > 0) || !activeBoard;
+		if (!blocked) {
+			// copy shared_ptr to keep Board alive (e.g. in case of Tcl
+			// callbacks)
+			auto copy = activeBoard;
+			blocked = !copy->execute();
+		}
+		if (blocked) {
+			// At first sight a better alternative is to use the
+			// SDL_WaitEvent() function. Though when inspecting
+			// the implementation of that function, it turns out
+			// to also use a sleep/poll loop, with even shorter
+			// sleep periods as we use here. Maybe in future
+			// SDL implementations this will be improved.
+			eventDistributor->sleep(20 * 1000);
+		}
 	}
-	if (blocked) {
-		// At first sight a better alternative is to use the
-		// SDL_WaitEvent() function. Though when inspecting
-		// the implementation of that function, it turns out
-		// to also use a sleep/poll loop, with even shorter
-		// sleep periods as we use here. Maybe in future
-		// SDL implementations this will be improved.
-		eventDistributor->sleep(20 * 1000);
-	}
-	return running;
 }
 
 void Reactor::unpause()
 {
 	if (paused) {
 		paused = false;
-		globalCliComm->update(CliComm::STATUS, "paused", "false");
+		globalCliComm->update(CliComm::UpdateType::STATUS, "paused", "false");
 		unblock();
 	}
 }
@@ -626,7 +623,7 @@ void Reactor::pause()
 {
 	if (!paused) {
 		paused = true;
-		globalCliComm->update(CliComm::STATUS, "paused", "true");
+		globalCliComm->update(CliComm::UpdateType::STATUS, "paused", "true");
 		block();
 	}
 }
@@ -649,7 +646,7 @@ void Reactor::unblock()
 // Observer<Setting>
 void Reactor::update(const Setting& setting) noexcept
 {
-	auto& pauseSetting = getGlobalSettings().getPauseSetting();
+	const auto& pauseSetting = getGlobalSettings().getPauseSetting();
 	if (&setting == &pauseSetting) {
 		if (pauseSetting.getBoolean()) {
 			pause();
@@ -660,7 +657,7 @@ void Reactor::update(const Setting& setting) noexcept
 }
 
 // EventListener
-int Reactor::signalEvent(const Event& event)
+bool Reactor::signalEvent(const Event& event)
 {
 	std::visit(overloaded{
 		[&](const QuitEvent& /*e*/) {
@@ -692,7 +689,7 @@ int Reactor::signalEvent(const Event& event)
 			UNREACHABLE; // we didn't subscribe to this event...
 		}
 	}, event);
-	return 0;
+	return false;
 }
 
 
@@ -925,25 +922,11 @@ StoreMachineCommand::StoreMachineCommand(
 
 void StoreMachineCommand::execute(std::span<const TclObject> tokens, TclObject& result)
 {
-	checkNumArgs(tokens, Between{1, 3}, Prefix{1}, "?id? ?filename?");
-	string filename;
-	string_view machineID;
-	switch (tokens.size()) {
-	case 1:
-		machineID = reactor.getMachineID();
-		filename = FileOperations::getNextNumberedFileName("savestates", "openmsxstate", ".xml.gz");
-		break;
-	case 2:
-		machineID = tokens[1].getString();
-		filename = FileOperations::getNextNumberedFileName("savestates", "openmsxstate", ".xml.gz");
-		break;
-	case 3:
-		machineID = tokens[1].getString();
-		filename = tokens[2].getString();
-		break;
-	}
+	checkNumArgs(tokens, 3, Prefix{1}, "id filename");
+	const auto& machineID = tokens[1].getString();
+	const auto& filename = tokens[2].getString();
 
-	auto& board = *reactor.getMachine(machineID);
+	const auto& board = *reactor.getMachine(machineID);
 
 	XmlOutputArchive out(filename);
 	out.serialize("machine", board);
@@ -954,8 +937,6 @@ void StoreMachineCommand::execute(std::span<const TclObject> tokens, TclObject& 
 string StoreMachineCommand::help(std::span<const TclObject> /*tokens*/) const
 {
 	return
-		"store_machine                       Save state of current machine to file \"openmsxNNNN.xml.gz\"\n"
-		"store_machine machineID             Save state of machine \"machineID\" to file \"openmsxNNNN.xml.gz\"\n"
 		"store_machine machineID <filename>  Save state of machine \"machineID\" to indicated file\n"
 		"\n"
 		"This is a low-level command, the 'savestate' script is easier to use.";
@@ -979,35 +960,11 @@ RestoreMachineCommand::RestoreMachineCommand(
 void RestoreMachineCommand::execute(std::span<const TclObject> tokens,
                                     TclObject& result)
 {
-	checkNumArgs(tokens, Between{1, 2}, Prefix{1}, "?filename?");
+	checkNumArgs(tokens, 2, Prefix{1}, "filename");
 	auto newBoard = reactor.createEmptyMotherBoard();
 
-	string filename;
-	switch (tokens.size()) {
-	case 1: {
-		// load last saved entry
-		string lastEntry;
-		time_t lastTime = 0;
-		foreach_file(
-			FileOperations::getUserOpenMSXDir() + "/savestates",
-			[&](const string& path, const FileOperations::Stat& st) {
-				time_t modTime = st.st_mtime;
-				if (modTime > lastTime) {
-					filename = path;
-					lastTime = modTime;
-				}
-			});
-		if (filename.empty()) {
-			throw CommandException("Can't find last saved state.");
-		}
-		break;
-	}
-	case 2:
-		filename = FileOperations::expandTilde(string(tokens[1].getString()));
-		break;
-	}
+	const auto filename = FileOperations::expandTilde(string(tokens[1].getString()));
 
-	//std::cerr << "Loading " << filename << '\n';
 	try {
 		XmlInputArchive in(filename);
 		in.serialize("machine", *newBoard);
@@ -1037,7 +994,6 @@ string RestoreMachineCommand::help(std::span<const TclObject> /*tokens*/) const
 
 void RestoreMachineCommand::tabCompletion(vector<string>& tokens) const
 {
-	// TODO: add the default files (state files in user's savestates dir)
 	completeFileName(tokens, userFileContext());
 }
 
@@ -1174,7 +1130,7 @@ void SoftwareInfoTopic::execute(
 	}
 
 	Sha1Sum sha1sum(tokens[2].getString());
-	auto& romDatabase = reactor.getSoftwareDatabase();
+	const auto& romDatabase = reactor.getSoftwareDatabase();
 	const RomInfo* romInfo = romDatabase.fetchRomInfo(sha1sum);
 	if (!romInfo) {
 		// no match found

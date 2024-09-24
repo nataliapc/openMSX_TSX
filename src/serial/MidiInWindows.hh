@@ -12,7 +12,7 @@
 #include "EventListener.hh"
 #include "serialize_meta.hh"
 #include "circular_buffer.hh"
-#include <Windows.h>
+#include <windows.h>
 #include <mmsystem.h>
 #include <mutex>
 #include <condition_variable>
@@ -35,7 +35,7 @@ public:
 
 	MidiInWindows(EventDistributor& eventDistributor, Scheduler& scheduler,
 	             unsigned num);
-	~MidiInWindows();
+	~MidiInWindows() override;
 
 	// Pluggable
 	void plugHelper(Connector& connector, EmuTime::param time) override;
@@ -53,7 +53,7 @@ private:
 	void run();
 
 	// EventListener
-	int signalEvent(const Event& event) override;
+	bool signalEvent(const Event& event) override;
 
 	void procShortMsg(long unsigned param);
 	void procLongMsg(LPMIDIHDR p);
@@ -64,7 +64,7 @@ private:
 	std::thread thread;
 	std::mutex devIdxMutex;
 	std::condition_variable devIdxCond;
-	unsigned devIdx;
+	unsigned devIdx = unsigned(-1);
 	std::mutex threadIdMutex;
 	std::condition_variable threadIdCond;
 	DWORD threadId;

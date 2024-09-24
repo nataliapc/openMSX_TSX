@@ -50,12 +50,6 @@ MSXMixer::MSXMixer(Mixer& mixer_, MSXMotherBoard& motherBoard_,
 	, prevTime(getCurrentTime(), 44100)
 	, soundDeviceInfo(commandController.getMachineInfoCommand())
 {
-	hostSampleRate = 44100;
-	fragmentSize = 0;
-
-	muteCount = 1;
-	unmute(); // calls Mixer::registerMixer()
-
 	reschedule2();
 
 	masterVolume.attach(*this);
@@ -106,13 +100,13 @@ void MSXMixer::registerSound(SoundDevice& device, float volume,
 		channelSettings.record = std::make_unique<StringSetting>(
 			commandController, tmpStrCat(ch_name, "_record"),
 			"filename to record this channel to",
-			std::string_view{}, Setting::DONT_SAVE);
+			std::string_view{}, Setting::Save::NO);
 		channelSettings.record->attach(*this);
 
 		channelSettings.mute = std::make_unique<BooleanSetting>(
 			commandController, tmpStrCat(ch_name, "_mute"),
 			"sets mute-status of individual sound channels",
-			false, Setting::DONT_SAVE);
+			false, Setting::Save::NO);
 		channelSettings.mute->attach(*this);
 	}
 
@@ -120,7 +114,7 @@ void MSXMixer::registerSound(SoundDevice& device, float volume,
 	auto& i = infos.emplace_back(std::move(info));
 	updateVolumeParams(i);
 
-	commandController.getCliComm().update(CliComm::SOUND_DEVICE, device.getName(), "add");
+	commandController.getCliComm().update(CliComm::UpdateType::SOUND_DEVICE, device.getName(), "add");
 }
 
 void MSXMixer::unregisterSound(SoundDevice& device)
@@ -133,7 +127,7 @@ void MSXMixer::unregisterSound(SoundDevice& device)
 		s.mute->detach(*this);
 	}
 	move_pop_back(infos, it);
-	commandController.getCliComm().update(CliComm::SOUND_DEVICE, device.getName(), "remove");
+	commandController.getCliComm().update(CliComm::UpdateType::SOUND_DEVICE, device.getName(), "remove");
 }
 
 void MSXMixer::setSynchronousMode(bool synchronous)
@@ -477,7 +471,7 @@ void MSXMixer::generate(std::span<StereoFloat> output, EmuTime::param time)
 	constexpr unsigned HAS_STEREO_FLAG = 2;
 	unsigned usedBuffers = 0;
 
-	// FIXME: The Infos should be ordered such that all the mono
+	// TODO: The Infos should be ordered such that all the mono
 	// devices are handled first
 	for (auto& info : infos) {
 		SoundDevice& device = *info.device;
@@ -733,7 +727,7 @@ void MSXMixer::update(const ThrottleManager& /*throttleManager*/) noexcept
 	// TODO Should this be removed?
 }
 
-void MSXMixer::updateVolumeParams(SoundDeviceInfo& info)
+void MSXMixer::updateVolumeParams(SoundDeviceInfo& info) const
 {
 	int mVolume = masterVolume.getInt();
 	int dVolume = info.volumeSetting->getInt();
@@ -835,10 +829,10 @@ void MSXMixer::SoundDeviceInfoTopic::execute(
 	case 2:
 		result.addListElements(view::transform(
 			msxMixer.infos,
-			[](auto& info) { return info.device->getName(); }));
+			[](const auto& info) { return info.device->getName(); }));
 		break;
 	case 3: {
-		SoundDevice* device = msxMixer.findDevice(tokens[2].getString());
+		const auto* device = msxMixer.findDevice(tokens[2].getString());
 		if (!device) {
 			throw CommandException("Unknown sound device");
 		}

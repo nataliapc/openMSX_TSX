@@ -33,6 +33,7 @@ ImGuiOsdIcons::ImGuiOsdIcons(ImGuiManager& manager_)
 void ImGuiOsdIcons::save(ImGuiTextBuffer& buf)
 {
 	savePersistent(buf, *this, persistentElements);
+	adjust.save(buf);
 	for (const auto& [i, icon] : enumerate(iconInfo)) {
 		auto n = narrow<int>(i + 1);
 		buf.appendf("icon.%d.enabled=%d\n",   n, icon.enable);
@@ -51,6 +52,8 @@ void ImGuiOsdIcons::loadStart()
 void ImGuiOsdIcons::loadLine(std::string_view name, zstring_view value)
 {
 	if (loadOnePersistent(name, value, *this, persistentElements)) {
+		// already handled
+	} else if (adjust.loadLine(name, value)) {
 		// already handled
 	} else if (name.starts_with("icon.")) {
 		auto [numStr, suffix] = StringOp::splitOnFirst(name.substr(5), '.');
@@ -160,6 +163,7 @@ void ImGuiOsdIcons::paint(MSXMotherBoard* /*motherBoard*/)
 	                             ImGuiWindowFlags_NoCollapse |
 	                             ImGuiWindowFlags_NoBackground |
 	                             ImGuiWindowFlags_NoFocusOnAppearing |
+	                             ImGuiWindowFlags_NoNav |
 	                             (iconsAllowMove ? 0 : ImGuiWindowFlags_NoMove)
 	                           : 0;
 	adjust.pre();
@@ -196,12 +200,14 @@ void ImGuiOsdIcons::paint(MSXMotherBoard* /*motherBoard*/)
 				return 1.0f - (t / iconsFadeDuration);
 			}();
 
-			auto& ic = state ? icon.on : icon.off;
-			gl::vec2 cursor = ImGui::GetCursorPos();
-			ImGui::Image(reinterpret_cast<void*>(ic.tex.get()), gl::vec2(ic.size),
-			             {0.0f, 0.0f}, {1.0f, 1.0f}, {1.0f, 1.0f, 1.0f, alpha});
+			const auto& ic = state ? icon.on : icon.off;
+			if (ic.tex.get()) {
+				gl::vec2 cursor = ImGui::GetCursorPos();
+				ImGui::Image(ic.tex.getImGui(), gl::vec2(ic.size),
+				             {0.0f, 0.0f}, {1.0f, 1.0f}, {1.0f, 1.0f, 1.0f, alpha});
+				ImGui::SetCursorPos(cursor);
+			}
 
-			ImGui::SetCursorPos(cursor);
 			auto size = gl::vec2(max(icon.on.size, icon.off.size));
 			(iconsHorizontal ? size.x : size.y) += spacing;
 			ImGui::Dummy(size);
@@ -216,6 +222,10 @@ void ImGuiOsdIcons::paint(MSXMotherBoard* /*motherBoard*/)
 					showConfigureIcons = true;
 				}
 			});
+		}
+
+		if (iconsHideTitle && ImGui::IsWindowFocused()) {
+			ImGui::SetWindowFocus(nullptr); // give-up focus
 		}
 	});
 }
@@ -276,7 +286,8 @@ void ImGuiOsdIcons::paintConfigureIcons()
 				ImGui::TableSetupColumn("Expression");
 				ImGui::TableHeadersRow();
 
-				enum Cmd { MOVE_FRONT, MOVE_FWD, MOVE_BWD, MOVE_BACK, INSERT, DELETE };
+				enum class Cmd { MOVE_FRONT, MOVE_FWD, MOVE_BWD, MOVE_BACK, INSERT, DELETE };
+				using enum Cmd;
 				std::pair<int, Cmd> cmd(-1, MOVE_FRONT);
 				auto lastRow = narrow<int>(iconInfo.size()) - 1;
 				im::ID_for_range(iconInfo.size(), [&](int row) {
@@ -322,8 +333,7 @@ void ImGuiOsdIcons::paintConfigureIcons()
 
 					auto image = [&](IconInfo::Icon& ic, const char* id) {
 						if (ic.tex.get()) {
-							ImGui::Image(reinterpret_cast<void*>(ic.tex.get()),
-									gl::vec2(ic.size));
+							ImGui::Image(ic.tex.getImGui(), gl::vec2(ic.size));
 							im::PopupContextItem(id, [&]{
 								if (ImGui::MenuItem("Remove image")) {
 									ic.filename.clear();

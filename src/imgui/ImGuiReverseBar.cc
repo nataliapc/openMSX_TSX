@@ -9,6 +9,7 @@
 #include "GLImage.hh"
 #include "MSXMotherBoard.hh"
 #include "ReverseManager.hh"
+#include "GlobalCommandController.hh"
 
 #include "foreach_file.hh"
 
@@ -22,11 +23,16 @@ namespace openmsx {
 void ImGuiReverseBar::save(ImGuiTextBuffer& buf)
 {
 	savePersistent(buf, *this, persistentElements);
+	adjust.save(buf);
 }
 
 void ImGuiReverseBar::loadLine(std::string_view name, zstring_view value)
 {
-	loadOnePersistent(name, value, *this, persistentElements);
+	if (loadOnePersistent(name, value, *this, persistentElements)) {
+		// already handled
+	} else if (adjust.loadLine(name, value)) {
+		// already handled
+	}
 }
 
 void ImGuiReverseBar::showMenu(MSXMotherBoard* motherBoard)
@@ -62,23 +68,22 @@ void ImGuiReverseBar::showMenu(MSXMotherBoard* motherBoard)
 							if (ImGui::Selectable(name.c_str())) {
 								manager.executeDelayed(makeTclList("loadstate", name));
 							}
-							if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) {
-								if (previewImage.name != name) {
-									// record name, but (so far) without image
-									// this prevents that on a missing image, we don't continue retrying
-									previewImage.name = std::string(name);
-									previewImage.texture = gl::Texture(gl::Null{});
+							if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort) &&
+							    (previewImage.name != name)) {
+								// record name, but (so far) without image
+								// this prevents that on a missing image, we don't continue retrying
+								previewImage.name = std::string(name);
+								previewImage.texture = gl::Texture(gl::Null{});
 
-									std::string filename = FileOperations::join(
-										FileOperations::getUserOpenMSXDir(),
-										"savestates", tmpStrCat(name, ".png"));
-									if (FileOperations::exists(filename)) {
-										try {
-											gl::ivec2 dummy;
-											previewImage.texture = loadTexture(filename, dummy);
-										} catch (...) {
-											// ignore
-										}
+								std::string filename = FileOperations::join(
+									FileOperations::getUserOpenMSXDir(),
+									"savestates", tmpStrCat(name, ".png"));
+								if (FileOperations::exists(filename)) {
+									try {
+										gl::ivec2 dummy;
+										previewImage.texture = loadTexture(filename, dummy);
+									} catch (...) {
+										// ignore
 									}
 								}
 							}
@@ -96,7 +101,7 @@ void ImGuiReverseBar::showMenu(MSXMotherBoard* motherBoard)
 					ImGui::TextUnformatted("Preview"sv);
 					ImVec2 size(320, 240);
 					if (previewImage.texture.get()) {
-						ImGui::Image(reinterpret_cast<void*>(previewImage.texture.get()), size);
+						ImGui::Image(previewImage.texture.getImGui(), size);
 					} else {
 						ImGui::Dummy(size);
 					}
@@ -133,14 +138,15 @@ void ImGuiReverseBar::showMenu(MSXMotherBoard* motherBoard)
 				}
 			}
 		});
+		if (ImGui::MenuItem("Open savestates folder...")) {
+			SDL_OpenURL(strCat("file://", FileOperations::getUserOpenMSXDir(), "/savestates").c_str());
+		}
 
 		ImGui::Separator();
 
-		auto& reverseManager = motherBoard->getReverseManager();
+		const auto& reverseManager = motherBoard->getReverseManager();
 		bool reverseEnabled = reverseManager.isCollecting();
-		if (ImGui::MenuItem("Enable reverse/replay", nullptr, &reverseEnabled)) {
-			manager.executeDelayed(makeTclList("reverse", reverseEnabled ? "start" : "stop"));
-		}
+
 		im::Menu("Load replay ...", reverseEnabled, [&]{
 			ImGui::TextUnformatted("Select replay"sv);
 			im::ListBox("##select-replay", [&]{
@@ -151,14 +157,11 @@ void ImGuiReverseBar::showMenu(MSXMotherBoard* motherBoard)
 					std::string displayName;
 				};
 				std::vector<Names> names;
-				auto context = userDataFileContext(ReverseManager::REPLAY_DIR);
-				for (const auto& path : context.getPaths()) {
+				for (auto context = userDataFileContext(ReverseManager::REPLAY_DIR);
+				     const auto& path : context.getPaths()) {
 					foreach_file(path, [&](const std::string& fullName, std::string_view name) {
-						if (name.ends_with(".omr")) {
-							name.remove_suffix(4);
-							names.emplace_back(fullName, std::string(name));
-						} else if (name.ends_with(".xml.gz")) {
-							name.remove_suffix(7);
+						if (name.ends_with(ReverseManager::REPLAY_EXTENSION)) {
+							name.remove_suffix(ReverseManager::REPLAY_EXTENSION.size());
 							names.emplace_back(fullName, std::string(name));
 						}
 					});
@@ -183,7 +186,7 @@ void ImGuiReverseBar::showMenu(MSXMotherBoard* motherBoard)
 		saveReplayOpen = im::Menu("Save replay ...", reverseEnabled, [&]{
 			auto exists = [&]{
 				auto filename = FileOperations::parseCommandFileArgument(
-					saveReplayName, ReverseManager::REPLAY_DIR, "", ".omr");
+					saveReplayName, ReverseManager::REPLAY_DIR, "", ReverseManager::REPLAY_EXTENSION);
 				return FileOperations::exists(filename);
 			};
 			if (!saveReplayOpen) {
@@ -192,7 +195,7 @@ void ImGuiReverseBar::showMenu(MSXMotherBoard* motherBoard)
 					saveReplayName = result->getString();
 					if (exists()) {
 						saveReplayName = stem(FileOperations::getNextNumberedFileName(
-							ReverseManager::REPLAY_DIR, result->getString(), ".omr", true));
+							ReverseManager::REPLAY_DIR, result->getString(), ReverseManager::REPLAY_EXTENSION, true));
 					}
 				}
 			}
@@ -211,7 +214,25 @@ void ImGuiReverseBar::showMenu(MSXMotherBoard* motherBoard)
 				}
 			}
 		});
-		ImGui::MenuItem("Show reverse bar", nullptr, &showReverseBar, reverseEnabled);
+		if (ImGui::MenuItem("Open replays folder...")) {
+			SDL_OpenURL(strCat("file://", FileOperations::getUserOpenMSXDir(), '/', ReverseManager::REPLAY_DIR).c_str());
+		}
+		im::Menu("Reverse/replay settings", [&]{
+			if (ImGui::MenuItem("Enable reverse/replay", nullptr, &reverseEnabled)) {
+				manager.executeDelayed(makeTclList("reverse", reverseEnabled ? "start" : "stop"));
+			}
+			simpleToolTip("Enable/disable reverse/replay right now, for the currently running machine");
+			if (auto* autoEnableReverseSetting = dynamic_cast<BooleanSetting*>(manager.getReactor().getGlobalCommandController().getSettingsManager().findSetting("auto_enable_reverse"))) {
+
+				bool autoEnableReverse = autoEnableReverseSetting->getBoolean();
+				if (ImGui::MenuItem("Auto enable reverse", nullptr, &autoEnableReverse)) {
+					autoEnableReverseSetting->setBoolean(autoEnableReverse);
+				}
+				simpleToolTip(autoEnableReverseSetting->getDescription());
+			}
+
+			ImGui::MenuItem("Show reverse bar", nullptr, &showReverseBar, reverseEnabled);
+		});
 	});
 
 	const auto popupTitle = "Confirm##reverse";
@@ -239,7 +260,7 @@ void ImGuiReverseBar::paint(MSXMotherBoard* motherBoard)
 {
 	if (!showReverseBar) return;
 	if (!motherBoard) return;
-	auto& reverseManager = motherBoard->getReverseManager();
+	const auto& reverseManager = motherBoard->getReverseManager();
 	if (!reverseManager.isCollecting()) return;
 
 	const auto& style = ImGui::GetStyle();
@@ -263,6 +284,7 @@ void ImGuiReverseBar::paint(MSXMotherBoard* motherBoard)
 	                               ImGuiWindowFlags_NoCollapse |
 	                               ImGuiWindowFlags_NoBackground |
 	                               ImGuiWindowFlags_NoFocusOnAppearing |
+	                               ImGuiWindowFlags_NoNav |
 	                               (reverseAllowMove ? 0 : ImGuiWindowFlags_NoMove)
 	                             : 0;
 	adjust.pre();
@@ -271,7 +293,6 @@ void ImGuiReverseBar::paint(MSXMotherBoard* motherBoard)
 		auto b = reverseManager.getBegin();
 		auto e = reverseManager.getEnd();
 		auto c = reverseManager.getCurrent();
-		auto snapshots = reverseManager.getSnapshotTimes();
 
 		auto totalLength = e - b;
 		auto playLength = c - b;
@@ -284,14 +305,6 @@ void ImGuiReverseBar::paint(MSXMotherBoard* motherBoard)
 		gl::vec2 outerTopLeft = pos;
 		gl::vec2 outerBottomRight = outerTopLeft + outerSize;
 
-		gl::vec2 innerSize = outerSize - gl::vec2(2, 2);
-		gl::vec2 innerTopLeft = outerTopLeft + gl::vec2(1, 1);
-		gl::vec2 innerBottomRight = innerTopLeft + innerSize;
-		gl::vec2 barBottomRight = innerTopLeft + gl::vec2(innerSize.x * fraction, innerSize.y);
-
-		gl::vec2 middleTopLeft    (barBottomRight.x - 2.0f, innerTopLeft.y);
-		gl::vec2 middleBottomRight(barBottomRight.x + 2.0f, innerBottomRight.y);
-
 		const auto& io = ImGui::GetIO();
 		bool hovered = ImGui::IsWindowHovered();
 		bool replaying = reverseManager.isReplaying();
@@ -303,44 +316,55 @@ void ImGuiReverseBar::paint(MSXMotherBoard* motherBoard)
 			auto period = hovered ? 0.5f : 5.0f; // TODO configurable speed
 			reverseAlpha = calculateFade(reverseAlpha, target, period);
 		}
-		auto color = [&](gl::vec4 col) {
-			return ImGui::ColorConvertFloat4ToU32(col * reverseAlpha);
-		};
+		if (reverseAlpha != 0.0f) {
+			gl::vec2 innerSize = outerSize - gl::vec2(2, 2);
+			gl::vec2 innerTopLeft = outerTopLeft + gl::vec2(1, 1);
+			gl::vec2 innerBottomRight = innerTopLeft + innerSize;
+			gl::vec2 barBottomRight = innerTopLeft + gl::vec2(innerSize.x * fraction, innerSize.y);
 
-		auto* drawList = ImGui::GetWindowDrawList();
-		drawList->AddRectFilled(innerTopLeft, innerBottomRight, color(gl::vec4(0.0f, 0.0f, 0.0f, 0.5f)));
+			gl::vec2 middleTopLeft    (barBottomRight.x - 2.0f, innerTopLeft.y);
+			gl::vec2 middleBottomRight(barBottomRight.x + 2.0f, innerBottomRight.y);
 
-		for (double s : snapshots) {
-			float x = narrow_cast<float>((s - b) * recipLength) * innerSize.x;
-			drawList->AddLine(gl::vec2(innerTopLeft.x + x, innerTopLeft.y),
-					gl::vec2(innerTopLeft.x + x, innerBottomRight.y),
-					color(gl::vec4(0.25f, 0.25f, 0.25f, 1.00f)));
+			auto color = [&](gl::vec4 col) {
+				return ImGui::ColorConvertFloat4ToU32(col * reverseAlpha);
+			};
+
+			auto* drawList = ImGui::GetWindowDrawList();
+			drawList->AddRectFilled(innerTopLeft, innerBottomRight, color(gl::vec4(0.0f, 0.0f, 0.0f, 0.5f)));
+
+			for (double s : reverseManager.getSnapshotTimes()) {
+				float x = narrow_cast<float>((s - b) * recipLength) * innerSize.x;
+				drawList->AddLine(gl::vec2(innerTopLeft.x + x, innerTopLeft.y),
+				                  gl::vec2(innerTopLeft.x + x, innerBottomRight.y),
+				                  color(gl::vec4(0.25f, 0.25f, 0.25f, 1.00f)));
+			}
+
+			static constexpr std::array barColors = {
+				std::array{gl::vec4(0.00f, 1.00f, 0.27f, 0.63f), gl::vec4(0.00f, 0.73f, 0.13f, 0.63f),
+				           gl::vec4(0.07f, 0.80f, 0.80f, 0.63f), gl::vec4(0.00f, 0.87f, 0.20f, 0.63f)}, // view-only
+				std::array{gl::vec4(0.00f, 0.27f, 1.00f, 0.63f), gl::vec4(0.00f, 0.13f, 0.73f, 0.63f),
+				           gl::vec4(0.07f, 0.80f, 0.80f, 0.63f), gl::vec4(0.00f, 0.20f, 0.87f, 0.63f)}, // replaying
+				std::array{gl::vec4(1.00f, 0.27f, 0.00f, 0.63f), gl::vec4(0.87f, 0.20f, 0.00f, 0.63f),
+				           gl::vec4(0.80f, 0.80f, 0.07f, 0.63f), gl::vec4(0.73f, 0.13f, 0.00f, 0.63f)}, // recording
+			};
+			int barColorsIndex = replaying ? (reverseManager.isViewOnlyMode() ? 0 : 1)
+						: 2;
+			const auto& barColor = barColors[barColorsIndex];
+			drawList->AddRectFilledMultiColor(
+				innerTopLeft, barBottomRight,
+				color(barColor[0]), color(barColor[1]), color(barColor[2]), color(barColor[3]));
+
+			drawList->AddRectFilled(middleTopLeft, middleBottomRight, color(gl::vec4(1.0f, 0.5f, 0.0f, 0.75f)));
+			drawList->AddRect(
+				outerTopLeft, outerBottomRight, color(gl::vec4(1.0f)), 0.0f, 0, 2.0f);
+
+			auto timeStr = tmpStrCat(formatTime(playLength), " / ", formatTime(totalLength));
+			auto timeSize = ImGui::CalcTextSize(timeStr).x;
+			gl::vec2 cursor = ImGui::GetCursorPos();
+			ImGui::SetCursorPos(cursor + gl::vec2(std::max(0.0f, 0.5f * (outerSize.x - timeSize)), textHeight * 0.5f));
+			ImGui::TextColored(gl::vec4(1.0f) * reverseAlpha, "%s", timeStr.c_str());
+			ImGui::SetCursorPos(cursor); // restore position (for later ImGui::Dummy())
 		}
-
-		static constexpr std::array barColors = {
-			std::array{gl::vec4(0.00f, 1.00f, 0.27f, 0.63f), gl::vec4(0.00f, 0.73f, 0.13f, 0.63f),
-			           gl::vec4(0.07f, 0.80f, 0.80f, 0.63f), gl::vec4(0.00f, 0.87f, 0.20f, 0.63f)}, // view-only
-			std::array{gl::vec4(0.00f, 0.27f, 1.00f, 0.63f), gl::vec4(0.00f, 0.13f, 0.73f, 0.63f),
-			           gl::vec4(0.07f, 0.80f, 0.80f, 0.63f), gl::vec4(0.00f, 0.20f, 0.87f, 0.63f)}, // replaying
-			std::array{gl::vec4(1.00f, 0.27f, 0.00f, 0.63f), gl::vec4(0.87f, 0.20f, 0.00f, 0.63f),
-			           gl::vec4(0.80f, 0.80f, 0.07f, 0.63f), gl::vec4(0.73f, 0.13f, 0.00f, 0.63f)}, // recording
-		};
-		int barColorsIndex = replaying ? (reverseManager.isViewOnlyMode() ? 0 : 1)
-					: 2;
-		const auto& barColor = barColors[barColorsIndex];
-		drawList->AddRectFilledMultiColor(
-			innerTopLeft, barBottomRight,
-			color(barColor[0]), color(barColor[1]), color(barColor[2]), color(barColor[3]));
-
-		drawList->AddRectFilled(middleTopLeft, middleBottomRight, color(gl::vec4(1.0f, 0.5f, 0.0f, 0.75f)));
-		drawList->AddRect(
-			outerTopLeft, outerBottomRight, color(gl::vec4(1.0f)), 0.0f, 0, 2.0f);
-
-		auto timeStr = strCat(formatTime(playLength), " / ", formatTime(totalLength));
-		auto timeSize = ImGui::CalcTextSize(timeStr).x;
-		gl::vec2 cursor = ImGui::GetCursorPos();
-		ImGui::SetCursorPos(cursor + gl::vec2(std::max(0.0f, 0.5f * (outerSize.x - timeSize)), textHeight * 0.5f));
-		ImGui::TextColored(gl::vec4(1.0f) * reverseAlpha, "%s", timeStr.c_str());
 
 		if (hovered && ImGui::IsMouseHoveringRect(outerTopLeft, outerBottomRight)) {
 			float ratio = (io.MousePos.x - pos.x) / outerSize.x;
@@ -353,7 +377,6 @@ void ImGuiReverseBar::paint(MSXMotherBoard* motherBoard)
 			}
 		}
 
-		ImGui::SetCursorPos(cursor); // cover full window for context menu
 		ImGui::Dummy(availableSize);
 		im::PopupContextItem("reverse context menu", [&]{
 			ImGui::Checkbox("Hide title", &reverseHideTitle);
@@ -364,6 +387,10 @@ void ImGuiReverseBar::paint(MSXMotherBoard* motherBoard)
 				});
 			});
 		});
+
+		if (reverseHideTitle && ImGui::IsWindowFocused()) {
+			ImGui::SetWindowFocus(nullptr); // give-up focus
+		}
 	});
 }
 

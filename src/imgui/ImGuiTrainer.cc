@@ -38,6 +38,7 @@ void ImGuiTrainer::paint(MSXMotherBoard* /*motherBoard*/)
 		// Only query/sort this list once instead of on every frame.
 		// If loading fails, use an empty dict (don't keep on retying).
 		trainers = manager.execute(TclObject("trainer::load_trainers")).value_or(TclObject{});
+		// TODO use c++23 stride_view
 		gameNames = to_vector(view::transform(xrange(trainers->size() / 2), [&](auto i) {
 			return std::string(trainers->getListIndexUnchecked(2 * i).getString());
 		}));
@@ -57,7 +58,7 @@ void ImGuiTrainer::paint(MSXMotherBoard* /*motherBoard*/)
 		zstring_view displayName = activeGame.getString();
 		if (displayName.empty()) displayName = "none";
 		bool useFilter = im::TreeNode("filter", [&]{
-			ImGui::InputText(ICON_IGFD_SEARCH, &filterString);
+			ImGui::InputText(ICON_IGFD_FILTER, &filterString);
 			HelpMarker("A list of substrings that must be part of the game name.\n"
 			           "\n"
 			           "For example: enter 'vamp' to search for 'Akumajyo Drakyula - Vampire Killer'.");

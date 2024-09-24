@@ -36,8 +36,10 @@
 
 #include "ResampledSoundDevice.hh"
 #include "EmuTimer.hh"
+
 #include "EmuTime.hh"
 #include "IRQHelper.hh"
+
 #include <array>
 #include <cstdint>
 #include <string>
@@ -133,13 +135,13 @@ private:
 	void resetStatus(uint8_t flags);
 
 	// operator methods
-	void envelopeKONKOFF(std::span<YM2151Operator, 4> op, int v);
+	void envelopeKONKOFF(std::span<YM2151Operator, 4> op, int v) const;
 	static void refreshEG(std::span<YM2151Operator, 4> op);
-	[[nodiscard]] int opCalc(YM2151Operator& op, unsigned env, int pm);
-	[[nodiscard]] int opCalc1(YM2151Operator& op, unsigned env, int pm);
-	[[nodiscard]] inline unsigned volumeCalc(YM2151Operator& op, unsigned AM);
-	inline void keyOn(YM2151Operator& op, unsigned keySet);
-	inline void keyOff(YM2151Operator& op, unsigned keyClear);
+	[[nodiscard]] int opCalc(const YM2151Operator& op, unsigned env, int pm) const;
+	[[nodiscard]] int opCalc1(const YM2151Operator& op, unsigned env, int pm) const;
+	[[nodiscard]] inline unsigned volumeCalc(const YM2151Operator& op, unsigned AM) const;
+	inline void keyOn(YM2151Operator& op, unsigned keySet) const;
+	inline void keyOff(YM2151Operator& op, unsigned keyClear) const;
 
 	// general chip methods
 	void chanCalc(unsigned chan);

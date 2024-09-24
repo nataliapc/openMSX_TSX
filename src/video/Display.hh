@@ -6,7 +6,6 @@
 #include "InfoTopic.hh"
 #include "OSDGUI.hh"
 #include "EventListener.hh"
-#include "LayerListener.hh"
 #include "RTSchedulable.hh"
 #include "Observer.hh"
 #include "CircularBuffer.hh"
@@ -28,8 +27,12 @@ class OutputSurface;
   * A display contains several layers.
   */
 class Display final : public EventListener, private Observer<Setting>
-                    , private LayerListener, private RTSchedulable
+                    , private RTSchedulable
 {
+public:
+	static constexpr std::string_view SCREENSHOT_DIR = "screenshots";
+	static constexpr std::string_view SCREENSHOT_EXTENSION = ".png";
+
 public:
 	using Layers = std::vector<Layer*>;
 
@@ -53,6 +56,7 @@ public:
 
 	void addLayer(Layer& layer);
 	void removeLayer(Layer& layer);
+	void updateZ(Layer& layer);
 
 	void attach(VideoSystemChangeListener& listener);
 	void detach(VideoSystemChangeListener& listener);
@@ -72,11 +76,16 @@ public:
 	void storeWindowPosition(gl::ivec2 pos);
 	[[nodiscard]] gl::ivec2 retrieveWindowPosition();
 
+	[[nodiscard]] gl::ivec2 getWindowSize() const;
+
+	// Get the latest fps value
+	[[nodiscard]] float getFps() const;
+
 private:
 	void resetVideoSystem();
 
 	// EventListener interface
-	int signalEvent(const Event& event) override;
+	bool signalEvent(const Event& event) override;
 
 	// RTSchedulable
 	void executeRT() override;
@@ -91,9 +100,6 @@ private:
 	/** Find front most opaque layer.
 	  */
 	[[nodiscard]] Layers::iterator baseLayer();
-
-	// LayerListener interface
-	void updateZ(Layer& layer) noexcept override;
 
 private:
 	Layers layers; // sorted on z
@@ -127,7 +133,7 @@ private:
 	RenderSettings renderSettings;
 
 	// the current renderer
-	RenderSettings::RendererID currentRenderer = RenderSettings::UNINITIALIZED;
+	RenderSettings::RendererID currentRenderer = RenderSettings::RendererID::UNINITIALIZED;
 
 	bool renderFrozen = false;
 	bool switchInProgress = false;

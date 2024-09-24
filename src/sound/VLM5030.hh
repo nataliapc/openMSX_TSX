@@ -2,8 +2,10 @@
 #define VLM5030_HH
 
 #include "ResampledSoundDevice.hh"
-#include "Rom.hh"
+
 #include "EmuTime.hh"
+#include "Rom.hh"
+
 #include <array>
 #include <cstdint>
 #include <string>
@@ -32,6 +34,16 @@ public:
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
+	enum class Phase : uint8_t {
+		RESET,
+		IDLE,
+		SETUP,
+		WAIT,
+		RUN,
+		STOP,
+		END
+	};
+
 private:
 	void setRST(bool pin);
 	void setVCU(bool pin);
@@ -42,7 +54,7 @@ private:
 	[[nodiscard]] float getAmplificationFactorImpl() const override;
 
 	void setupParameter(uint8_t param);
-	[[nodiscard]] unsigned getBits(unsigned sBit, unsigned bits);
+	[[nodiscard]] unsigned getBits(unsigned sBit, unsigned bits) const;
 	[[nodiscard]] int parseFrame();
 
 private:
@@ -80,12 +92,13 @@ private:
 
 	uint8_t latch_data{0};
 	uint8_t parameter;
-	uint8_t phase;
+	Phase phase;
 	bool pin_BSY{false};
 	bool pin_ST{false};
 	bool pin_VCU{false};
 	bool pin_RST{false};
 };
+SERIALIZE_CLASS_VERSION(VLM5030, 2);
 
 } // namespace openmsx
 

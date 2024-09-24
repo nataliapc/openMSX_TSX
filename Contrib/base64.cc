@@ -11,16 +11,18 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <memory>
 #include <span>
 #include <sys/stat.h>
 #include <vector>
 
-std::string encode(const void* data, unsigned len)
+std::string encode(std::span<const char> src)
 {
+	auto len = src.size();
 	uLongf dstLen = len + len / 1000 + 12 + 1; // worst-case
 	std::vector<unsigned char> buf(dstLen);
 	if (compress2(buf.data(), &dstLen,
-	              std::bit_cast<const Bytef*>(data), len, 9)
+	              std::bit_cast<const Bytef*>(src.data()), len, 9)
 	    != Z_OK) {
 		std::cerr << "Error while compressing blob.\n";
 		exit(1);
@@ -28,10 +30,10 @@ std::string encode(const void* data, unsigned len)
 	return Base64::encode(std::span(buf.data(), dstLen));
 }
 
-std::string decode(const char* data, unsigned len)
+std::string decode(std::span<const char> src)
 {
 	static const unsigned MAX_SIZE = 1024 * 1024; // 1MB
-	const auto& [decBuf, decBufSize] = Base64::decode(std::string_view(data, len));
+	const auto& [decBuf, decBufSize] = Base64::decode(std::string_view(src.data(), src.size()));
 	std::vector<char> buf(MAX_SIZE);
 	uLongf dstLen = MAX_SIZE;
 	if (uncompress(std::bit_cast<Bytef*>(buf.data()), &dstLen,
@@ -50,41 +52,40 @@ int main(int argc, const char** argv)
 		std::cerr << "Usage: " << arg[0] << " <input> <output>\n";
 		exit(1);
 	}
-	FILE* inf = fopen(arg[1], "rb");
+	using FILE_t = std::unique_ptr<FILE, decltype([](FILE* f) { fclose(f); })>;
+	FILE_t inf(fopen(arg[1], "rb"));
 	if (!inf) {
 		std::cerr << "Error while opening " << arg[1] << '\n';
 		exit(1);
 	}
 	struct stat st;
-	fstat(fileno(inf), &st);
+	fstat(fileno(inf.get()), &st);
 	size_t size = st.st_size;
 	std::vector<char> inBuf(size);
-	if (fread(inBuf.data(), size, 1, inf) != 1) {
+	if (fread(inBuf.data(), size, 1, inf.get()) != 1) {
 		std::cerr << "Error while reading " << arg[1] << '\n';
 		exit(1);
 	}
-	fclose(inf);
 
 	std::string result;
 	if        (strstr(arg[0], "encode-gz-base64")) {
-		result = encode(inBuf.data(), inBuf.size());
+		result = encode(inBuf);
 	} else if (strstr(arg[0], "decode-gz-base64")) {
-		result = decode(inBuf.data(), inBuf.size());
+		result = decode(inBuf);
 	} else {
 		std::cerr << "This executable should be named 'encode-gz-base64' or "
 		             "'decode-gz-base64'.\n";
 		exit(1);
 	}
 
-	FILE* outf = fopen(arg[2], "wb+");
+	FILE_t outf(fopen(arg[2], "wb+"));
 	if (!outf) {
 		std::cerr << "Error while opening " << arg[2] << '\n';
 		exit(1);
 	}
 
-	if (fwrite(result.data(), result.size(), 1, outf) != 1) {
+	if (fwrite(result.data(), result.size(), 1, outf.get()) != 1) {
 		std::cerr << "Error while writing " << arg[2] << '\n';
 		exit(1);
 	}
-	fclose(outf);
 }

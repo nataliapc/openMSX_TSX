@@ -2,8 +2,10 @@
 #define SRAM_HH
 
 #include "TrackedRam.hh"
+
 #include "DeviceConfig.hh"
 #include "RTSchedulable.hh"
+
 #include <optional>
 
 namespace openmsx {
@@ -33,9 +35,6 @@ public:
 	[[nodiscard]] size_t size() const {
 		return ram.size();
 	}
-	[[nodiscard]] const std::string& getLoadedFilename() const {
-		return loadedFilename;
-	}
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
@@ -51,13 +50,11 @@ private:
 	std::optional<SRAMSchedulable> schedulable;
 
 	void load(bool* loaded);
-	void save();
+	void save() const;
 
 	const DeviceConfig config;
 	TrackedRam ram;
-	const char* const header;
-
-	std::string loadedFilename;
+	const char* const header = nullptr;
 };
 
 } // namespace openmsx

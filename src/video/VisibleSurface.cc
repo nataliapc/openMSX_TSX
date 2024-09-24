@@ -22,7 +22,6 @@
 #include "VideoSystem.hh"
 
 #include "narrow.hh"
-#include "one_of.hh"
 #include "outer.hh"
 #include "vla.hh"
 
@@ -91,8 +90,8 @@ VisibleSurface::VisibleSurface(
 
 	int flags = SDL_WINDOW_OPENGL;
 	//flags |= SDL_RESIZABLE;
-	auto [width, height] = getWindowSize();
-	createSurface(width, height, flags);
+	auto size = display.getWindowSize();
+	createSurface(size, flags);
 	WindowEvent::setMainWindowId(SDL_GetWindowID(window.get()));
 
 	glContext = SDL_GL_CreateContext(window.get());
@@ -119,14 +118,13 @@ VisibleSurface::VisibleSurface(
 	glewExperimental = GL_TRUE;
 
 	// Initialise GLEW library.
-	GLenum glew_error = glewInit();
-
 	// GLEW fails to initialise on Wayland because it has no GLX, since the
 	// one provided by the distros was built to use GLX instead of EGL. We
 	// ignore the GLEW_ERROR_NO_GLX_DISPLAY error with this temporary fix
 	// until it is fixed by GLEW upstream and released by major distros.
 	// See https://github.com/nigels-com/glew/issues/172
-	if (glew_error != GLEW_OK && glew_error != GLEW_ERROR_NO_GLX_DISPLAY) {
+	if (GLenum glew_error = glewInit();
+	    glew_error != GLEW_OK && glew_error != GLEW_ERROR_NO_GLX_DISPLAY) {
 		throw InitException(
 			"Failed to init GLEW: ",
 			std::bit_cast<const char*>(glewGetErrorString(glew_error)));
@@ -138,7 +136,7 @@ VisibleSurface::VisibleSurface(
 	gl::context.emplace();
 
 	bool fullScreen = renderSettings.getFullScreen();
-	setViewPort(gl::ivec2(width, height), fullScreen); // set initial values
+	setViewPort(size, fullScreen); // set initial values
 
 	renderSettings.getVSyncSetting().attach(vSyncObserver);
 	// set initial value
@@ -200,7 +198,7 @@ void VisibleSurface::setWindowPosition(gl::ivec2 pos)
 // TODO: The video subsystem is not de-initialized on errors.
 //       While it would be consistent to do so, doing it in this class is
 //       not ideal since the init doesn't happen here.
-void VisibleSurface::createSurface(int width, int height, unsigned flags)
+void VisibleSurface::createSurface(gl::ivec2 size, unsigned flags)
 {
 	if (getDisplay().getRenderSettings().getFullScreen()) {
 		flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
@@ -215,7 +213,7 @@ void VisibleSurface::createSurface(int width, int height, unsigned flags)
 	window.reset(SDL_CreateWindow(
 			getDisplay().getWindowTitle().c_str(),
 			pos.x, pos.y,
-			width, height,
+			size.x, size.y,
 			flags));
 	if (!window) {
 		std::string err = SDL_GetError();
@@ -270,19 +268,19 @@ void VisibleSurface::executeRT()
 	inputEventGenerator.updateGrab(grab);
 }
 
-int VisibleSurface::signalEvent(const Event& event)
+bool VisibleSurface::signalEvent(const Event& event)
 {
 	if (getType(event) == EventType::IMGUI_ACTIVE) {
 		guiActive = get_event<ImGuiActiveEvent>(event).getActive();
 	}
 	updateCursor();
-	return 0;
+	return false;
 }
 
 void VisibleSurface::updateCursor()
 {
 	cancelRT();
-	auto& renderSettings = display.getRenderSettings();
+	const auto& renderSettings = display.getRenderSettings();
 	grab = !guiActive &&
 	       (renderSettings.getFullScreen() ||
 	        inputEventGenerator.getGrabInput().getBoolean());
@@ -309,8 +307,8 @@ bool VisibleSurface::setFullScreen(bool fullscreen)
 	auto flags = SDL_GetWindowFlags(window.get());
 	// Note: SDL_WINDOW_FULLSCREEN_DESKTOP also has the SDL_WINDOW_FULLSCREEN
 	//       bit set.
-	bool currentState = (flags & SDL_WINDOW_FULLSCREEN) != 0;
-	if (currentState == fullscreen) {
+	if (bool currentState = (flags & SDL_WINDOW_FULLSCREEN) != 0;
+	    currentState == fullscreen) {
 		// already wanted stated
 		return true;
 	}
@@ -323,16 +321,9 @@ bool VisibleSurface::setFullScreen(bool fullscreen)
 	return true; // success
 }
 
-gl::ivec2 VisibleSurface::getWindowSize() const
-{
-	auto& renderSettings = display.getRenderSettings();
-	int factor = renderSettings.getScaleFactor();
-	return {320 * factor, 240 * factor};
-}
-
 void VisibleSurface::resize()
 {
-	auto size = getWindowSize();
+	auto size = display.getWindowSize();
 	SDL_SetWindowSize(window.get(), size.x, size.y);
 
 	bool fullScreen = display.getRenderSettings().getFullScreen();
@@ -357,12 +348,12 @@ void VisibleSurface::saveScreenshotGL(
 	auto [w, h] = output.getViewSize();
 
 	// OpenGL ES only supports reading RGBA (not RGB)
-	MemBuffer<uint8_t> buffer(4 * size_t(w) * size_t(h));
+	MemBuffer<uint32_t> buffer(size_t(w) * size_t(h));
 	glReadPixels(x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, buffer.data());
 
-	VLA(const void*, rowPointers, h);
+	VLA(const uint32_t*, rowPointers, h);
 	for (auto i : xrange(size_t(h))) {
-		rowPointers[h - 1 - i] = &buffer[4 * size_t(w) * i];
+		rowPointers[h - 1 - i] = &buffer[size_t(w) * i];
 	}
 
 	PNG::saveRGBA(w, rowPointers, filename);
@@ -395,8 +386,8 @@ std::unique_ptr<OutputSurface> VisibleSurface::createOffScreenSurface()
 
 void VisibleSurface::VSyncObserver::update(const Setting& setting) noexcept
 {
-	auto& visSurface = OUTER(VisibleSurface, vSyncObserver);
-	auto& syncSetting = visSurface.getDisplay().getRenderSettings().getVSyncSetting();
+	const auto& visSurface = OUTER(VisibleSurface, vSyncObserver);
+	const auto& syncSetting = visSurface.getDisplay().getRenderSettings().getVSyncSetting();
 	assert(&setting == &syncSetting); (void)setting;
 
 	// for now, we assume that adaptive vsync is the best kind of vsync, so when

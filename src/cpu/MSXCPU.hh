@@ -10,6 +10,7 @@
 #include "TclCallback.hh"
 #include "serialize_meta.hh"
 #include "openmsx.hh"
+
 #include <array>
 #include <memory>
 #include <span>
@@ -29,7 +30,7 @@ class Interpreter;
 class MSXCPU final : private Observer<Setting>
 {
 public:
-	enum CPUType { CPU_Z80, CPU_R800 };
+	enum class Type { Z80, R800 };
 
 	explicit MSXCPU(MSXMotherBoard& motherboard);
 	~MSXCPU();
@@ -41,7 +42,7 @@ public:
 	void doReset(EmuTime::param time);
 
 	/** Switch between Z80/R800. */
-	void setActiveCPU(CPUType cpu);
+	void setActiveCPU(Type cpu);
 
 	/** Sets DRAM or ROM mode (influences memory access speed for R800). */
 	void setDRAMmode(bool dram);
@@ -134,10 +135,6 @@ public:
 	void setZ80Freq(unsigned freq);
 
 	void setInterface(MSXCPUInterface* interface);
-
-	void disasmCommand(Interpreter& interp,
-	                   std::span<const TclObject> tokens,
-	                   TclObject& result) const;
 
 	/** (un)pause CPU. During pause the CPU executes NOP instructions
 	  * continuously (just like during HALT). Used by turbor hw pause. */

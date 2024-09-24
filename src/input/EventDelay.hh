@@ -37,7 +37,7 @@ public:
 
 private:
 	// EventListener
-	int signalEvent(const Event& event) override;
+	bool signalEvent(const Event& event) override;
 
 	// Schedulable
 	void executeUntil(EmuTime::param time) override;
@@ -53,7 +53,7 @@ private:
 	std::vector<std::pair<int, Event>> nonMatchedKeyPresses;
 #endif
 
-	EmuTime prevEmu;
+	EmuTime prevEmu = EmuTime::zero();
 	uint64_t prevReal;
 	FloatSetting delaySetting;
 };

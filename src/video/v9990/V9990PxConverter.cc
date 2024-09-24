@@ -26,13 +26,13 @@ V9990P2Converter::V9990P2Converter(V9990& vdp_, std::span<const Pixel, 64> palet
 }
 
 struct P1Policy {
-	static byte readNameTable(V9990VRAM& vram, unsigned addr) {
+	static byte readNameTable(const V9990VRAM& vram, unsigned addr) {
 		return vram.readVRAMP1(addr);
 	}
-	static byte readPatternTable(V9990VRAM& vram, unsigned addr) {
+	static byte readPatternTable(const V9990VRAM& vram, unsigned addr) {
 		return vram.readVRAMP1(addr);
 	}
-	static byte readSpriteAttr(V9990VRAM& vram, unsigned addr) {
+	static byte readSpriteAttr(const V9990VRAM& vram, unsigned addr) {
 		return vram.readVRAMP1(addr);
 	}
 	static unsigned spritePatOfst(byte spriteNo, byte spriteY) {
@@ -64,13 +64,13 @@ struct P1ForegroundPolicy : P1Policy {
 	static constexpr bool DRAW_BACKDROP = false;
 };
 struct P2Policy {
-	static byte readNameTable(V9990VRAM& vram, unsigned addr) {
+	static byte readNameTable(const V9990VRAM& vram, unsigned addr) {
 		return vram.readVRAMDirect(addr);
 	}
-	static byte readPatternTable(V9990VRAM& vram, unsigned addr) {
+	static byte readPatternTable(const V9990VRAM& vram, unsigned addr) {
 		return vram.readVRAMBx(addr);
 	}
-	static byte readSpriteAttr(V9990VRAM& vram, unsigned addr) {
+	static byte readSpriteAttr(const V9990VRAM& vram, unsigned addr) {
 		return vram.readVRAMDirect(addr);
 	}
 	static unsigned spritePatOfst(byte spriteNo, byte spriteY) {
@@ -222,8 +222,8 @@ static void renderSprites(
 		byte spriteY = Policy::readSpriteAttr(vram, spriteInfo) + 1;
 		auto posY = narrow_cast<byte>(displayY - spriteY);
 		if (posY < 16) {
-			byte attr = Policy::readSpriteAttr(vram, spriteInfo + 3);
-			if (attr & 0x10) {
+			if (byte attr = Policy::readSpriteAttr(vram, spriteInfo + 3);
+			    attr & 0x10) {
 				// Invisible sprites do contribute towards the
 				// 16-sprites-per-line limit.
 				index_max--;
@@ -315,7 +315,7 @@ void V9990P1Converter::convertLine(
 
 	// combined back+front sprite plane
 	if (drawSprites) {
-		unsigned spritePatternTable = vdp.getSpritePatternAddress(P1);
+		unsigned spritePatternTable = vdp.getSpritePatternAddress(V9990DisplayMode::P1);
 		renderSprites<P1Policy>( // uses and updates 'info'
 			vram, spritePatternTable, palette64,
 			linePtr, info, displayX, displayEnd, displayY);
@@ -351,7 +351,7 @@ void V9990P2Converter::convertLine(
 
 	// combined back+front sprite plane
 	if (drawSprites) {
-		unsigned spritePatternTable = vdp.getSpritePatternAddress(P2);
+		unsigned spritePatternTable = vdp.getSpritePatternAddress(V9990DisplayMode::P2);
 		renderSprites<P2Policy>(
 			vram, spritePatternTable, palette64,
 			linePtr, info, displayX, displayEnd, displayY);

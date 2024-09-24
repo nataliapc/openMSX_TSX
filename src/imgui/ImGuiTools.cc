@@ -7,11 +7,16 @@
 #include "ImGuiKeyboard.hh"
 #include "ImGuiManager.hh"
 #include "ImGuiMessages.hh"
+#include "ImGuiSCCViewer.hh"
 #include "ImGuiTrainer.hh"
 #include "ImGuiUtils.hh"
+#include "ImGuiWaveViewer.hh"
 
 #include "AviRecorder.hh"
+#include "Display.hh"
 
+#include "enumerate.hh"
+#include "escape_newline.hh"
 #include "ranges.hh"
 #include "FileOperations.hh"
 #include "StringOp.hh"
@@ -29,11 +34,30 @@ using namespace std::literals;
 void ImGuiTools::save(ImGuiTextBuffer& buf)
 {
 	savePersistent(buf, *this, persistentElements);
+
+	for (const auto& note : notes) {
+		buf.appendf("note.show=%d\n", note.show);
+		buf.appendf("note.text=%s\n", escape_newline::encode(note.text).c_str());
+	}
+}
+
+void ImGuiTools::loadStart()
+{
+	notes.clear();
 }
 
 void ImGuiTools::loadLine(std::string_view name, zstring_view value)
 {
-	loadOnePersistent(name, value, *this, persistentElements);
+	if (loadOnePersistent(name, value, *this, persistentElements)) {
+		// already handled
+	} else if (name.starts_with("note.")) {
+		if (name.ends_with(".show")) {
+			auto& note = notes.emplace_back();
+			note.show = StringOp::stringToBool(value);
+		} else if (name.ends_with(".text") && !notes.empty()) {
+			notes.back().text = escape_newline::decode(value);
+		}
+	}
 }
 
 static const std::vector<std::string>& getAllToyScripts(ImGuiManager& manager)
@@ -68,6 +92,7 @@ void ImGuiTools::showMenu(MSXMotherBoard* motherBoard)
 		ImGui::MenuItem("Show console", consoleShortCut.c_str(), &manager.console->show);
 		ImGui::MenuItem("Show message log ...", nullptr, &manager.messages->logWindow.open);
 		ImGui::Separator();
+
 		std::string_view copyCommand = "copy_screen_to_clipboard";
 		auto copyShortCut = getShortCutForCommand(hotKey, copyCommand);
 		if (ImGui::MenuItem("Copy screen text to clipboard", copyShortCut.c_str(), nullptr, motherBoard != nullptr)) {
@@ -78,16 +103,35 @@ void ImGuiTools::showMenu(MSXMotherBoard* motherBoard)
 		if (ImGui::MenuItem("Paste clipboard into MSX", pasteShortCut.c_str(), nullptr, motherBoard != nullptr)) {
 			manager.executeDelayed(TclObject(pasteCommand));
 		}
+		if (ImGui::MenuItem("Simple notes widget ...")) {
+			if (auto it = ranges::find(notes, false, &Note::show);
+			    it != notes.end()) {
+				// reopen a closed note
+				it->show = true;
+			} else {
+				// create a new note
+				auto& note = notes.emplace_back();
+				note.show = true;
+			}
+		}
+		simpleToolTip("Typical use: dock into a larger layout to add free text.");
 		ImGui::Separator();
+
 		im::Menu("Capture", [&]{
 			ImGui::MenuItem("Screenshot ...", nullptr, &showScreenshot);
 			ImGui::MenuItem("Audio/Video ...", nullptr, &showRecord);
 		});
 		ImGui::Separator();
+
 		ImGui::MenuItem("Disk Manipulator ...", nullptr, &manager.diskManipulator->show);
 		ImGui::Separator();
+
 		ImGui::MenuItem("Trainer Selector ...", nullptr, &manager.trainer->show);
 		ImGui::MenuItem("Cheat Finder ...", nullptr, &manager.cheatFinder->show);
+		ImGui::Separator();
+
+		ImGui::MenuItem("SCC viewer ...", nullptr, &manager.sccViewer->show);
+		ImGui::MenuItem("Audio channel viewer ...", nullptr, &manager.waveViewer->show);
 		ImGui::Separator();
 
 		im::Menu("Toys", [&]{
@@ -111,6 +155,7 @@ void ImGuiTools::paint(MSXMotherBoard* /*motherBoard*/)
 {
 	if (showScreenshot) paintScreenshot();
 	if (showRecord) paintRecord();
+	paintNotes();
 
 	const auto popupTitle = "Confirm##Tools";
 	if (openConfirmPopup) {
@@ -142,7 +187,7 @@ static std::string_view stem(std::string_view fullName)
 bool ImGuiTools::screenshotNameExists() const
 {
 	auto filename = FileOperations::parseCommandFileArgument(
-		screenshotName, "screenshots", "", ".png");
+		screenshotName, Display::SCREENSHOT_DIR, "", Display::SCREENSHOT_EXTENSION);
 	return FileOperations::exists(filename);
 }
 
@@ -162,7 +207,7 @@ void ImGuiTools::generateScreenshotName()
 void ImGuiTools::nextScreenshotName()
 {
 	std::string_view prefix = screenshotName;
-	if (prefix.ends_with(".png")) prefix.remove_suffix(4);
+	if (prefix.ends_with(Display::SCREENSHOT_EXTENSION)) prefix.remove_suffix(Display::SCREENSHOT_EXTENSION.size());
 	if (prefix.size() > 4) {
 		auto counter = prefix.substr(prefix.size() - 4);
 		if (ranges::all_of(counter, [](char c) { return ('0' <= c) && (c <= '9'); })) {
@@ -173,7 +218,7 @@ void ImGuiTools::nextScreenshotName()
 		}
 	}
 	screenshotName = stem(FileOperations::getNextNumberedFileName(
-		"screenshots", prefix, ".png", true));
+		Display::SCREENSHOT_DIR, prefix, Display::SCREENSHOT_EXTENSION, true));
 }
 
 void ImGuiTools::paintScreenshot()
@@ -237,14 +282,19 @@ void ImGuiTools::paintScreenshot()
 				                       [&](const TclObject&) { nextScreenshotName(); });
 			}
 		}
+		ImGui::Separator();
+		if (ImGui::Button("Open screenshots folder...")) {
+			SDL_OpenURL(strCat("file://", FileOperations::getUserOpenMSXDir(), '/', Display::SCREENSHOT_DIR).c_str());
+		}
+
 	});
 }
 
 std::string ImGuiTools::getRecordFilename() const
 {
 	bool recordVideo = recordSource != static_cast<int>(Source::AUDIO);
-	std::string_view directory = recordVideo ? "videos" : "soundlogs";
-	std::string_view extension = recordVideo ? ".avi"   : ".wav";
+	std::string_view directory = recordVideo ? AviRecorder::VIDEO_DIR : AviRecorder::AUDIO_DIR;
+	std::string_view extension = recordVideo ? AviRecorder::VIDEO_EXTENSION : AviRecorder::AUDIO_EXTENSION;
 	return FileOperations::parseCommandFileArgument(
 		recordName, directory, "openmsx", extension);
 }
@@ -336,7 +386,24 @@ void ImGuiTools::paintRecord()
 		if (recording && ImGui::Button("Stop")) {
 			manager.executeDelayed(makeTclList("record", "stop"));
 		}
+		ImGui::Separator();
+		if (ImGui::Button("Open recordings folder...")) {
+			bool recordVideo = recordSource != static_cast<int>(Source::AUDIO);
+			std::string_view directory = recordVideo ? AviRecorder::VIDEO_DIR : AviRecorder::AUDIO_DIR;
+			SDL_OpenURL(strCat("file://", FileOperations::getUserOpenMSXDir(), '/', directory).c_str());
+		}
 	});
+}
+
+void ImGuiTools::paintNotes()
+{
+	for (auto [i, note] : enumerate(notes)) {
+		if (!note.show) continue;
+
+		im::Window(tmpStrCat("Note ", i + 1).c_str(), &note.show, [&]{
+			ImGui::InputTextMultiline("##text", &note.text, {-FLT_MIN, -FLT_MIN});
+		});
+	}
 }
 
 } // namespace openmsx

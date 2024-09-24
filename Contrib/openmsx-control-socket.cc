@@ -3,8 +3,8 @@
  *
  *  requires: libxml2
  *  compile:
- *    *nix:  g++ `xml2-config --cflags` `xml2-config --libs` openmsx-control-socket.cc
- *    win32: g++ `xml2-config --cflags` `xml2-config --libs` openmsx-control-socket.cc -lwsock32
+ *    *nix:  g++ -std=c++20 `xml2-config --cflags` `xml2-config --libs` openmsx-control-socket.cc
+ *    win32: g++ -std=c++20 `xml2-config --cflags` `xml2-config --libs` openmsx-control-socket.cc -lwsock32
  */
 
 #include <libxml/parser.h>
@@ -13,6 +13,7 @@
 #include <deque>
 #include <dirent.h>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <sys/select.h>
 #include <sys/stat.h>
@@ -35,29 +36,20 @@
 class ReadDir
 {
 public:
-	ReadDir(const ReadDir&) = delete;
-	ReadDir(ReadDir&&) = delete;
-	ReadDir& operator=(const ReadDir&) = delete;
-	ReadDir& operator=(ReadDir&&) = delete;
-
 	explicit ReadDir(const std::string& directory)
 		: dir(opendir(directory.c_str())) {}
 
-	~ReadDir() {
-		if (dir) {
-			closedir(dir);
-		}
-	}
-
 	dirent* getEntry() {
-		if (!dir) {
-			return nullptr;
-		}
-		return readdir(dir);
+		if (!dir) return nullptr;
+		return readdir(dir.get());
 	}
 
 private:
-	DIR* dir;
+	struct CloseDir {
+		void operator()(DIR* d) const { if (d) closedir(d); }
+	};
+	using DIR_t = std::unique_ptr<DIR, CloseDir>;
+	DIR_t dir;
 };
 
 static std::string getTempDir()
@@ -81,7 +73,7 @@ static std::string getUserName()
 #ifdef _WIN32
 	return "default";
 #else
-	struct passwd* pw = getpwuid(getuid());
+	const struct passwd* pw = getpwuid(getuid());
 	return pw->pw_name ? pw->pw_name : "";
 #endif
 }
@@ -108,8 +100,8 @@ private:
 	void parseUpdate(const char** attrs);
 
 	void doReply();
-	void doLog();
-	void doUpdate();
+	void doLog() const;
+	void doUpdate() const;
 
 	// commands being executed
 	std::deque<std::string> commandStack;
@@ -186,14 +178,13 @@ void OpenMSXComm::cb_start_element(OpenMSXComm* comm, const xmlChar* name,
 void OpenMSXComm::parseReply(const char** attrs)
 {
 	replyStatus = REPLY_UNKNOWN;
-	if (attrs) {
-		for ( ; *attrs; attrs += 2) {
-			if (strcmp(attrs[0], "result") == 0) {
-				if (strcmp(attrs[1], "ok") == 0) {
-					replyStatus = REPLY_OK;
-				} else if (strcmp(attrs[1], "nok") == 0) {
-					replyStatus = REPLY_NOK;
-				}
+	if (!attrs) return;
+	for ( ; *attrs; attrs += 2) {
+		if (strcmp(attrs[0], "result") == 0) {
+			if (strcmp(attrs[1], "ok") == 0) {
+				replyStatus = REPLY_OK;
+			} else if (strcmp(attrs[1], "nok") == 0) {
+				replyStatus = REPLY_NOK;
 			}
 		}
 	}
@@ -202,14 +193,13 @@ void OpenMSXComm::parseReply(const char** attrs)
 void OpenMSXComm::parseLog(const char** attrs)
 {
 	logLevel = LOG_UNKNOWN;
-	if (attrs) {
-		for ( ; *attrs; attrs += 2) {
-			if (strcmp(attrs[0], "level") == 0) {
-				if (strcmp(attrs[1], "info") == 0) {
-					logLevel = LOG_INFO;
-				} else if (strcmp(attrs[1], "warning") == 0) {
-					logLevel = LOG_WARNING;
-				}
+	if (!attrs) return;
+	for ( ; *attrs; attrs += 2) {
+		if (strcmp(attrs[0], "level") == 0) {
+			if (strcmp(attrs[1], "info") == 0) {
+				logLevel = LOG_INFO;
+			} else if (strcmp(attrs[1], "warning") == 0) {
+				logLevel = LOG_WARNING;
 			}
 		}
 	}
@@ -218,13 +208,12 @@ void OpenMSXComm::parseLog(const char** attrs)
 void OpenMSXComm::parseUpdate(const char** attrs)
 {
 	updateType = "unknown";
-	if (attrs) {
-		for ( ; *attrs; attrs += 2) {
-			if (strcmp(attrs[0], "type") == 0) {
-				updateType = attrs[1];
-			} else if (strcmp(attrs[0], "name") == 0) {
-				updateName = attrs[1];
-			}
+	if (!attrs) return;
+	for ( ; *attrs; attrs += 2) {
+		if (strcmp(attrs[0], "type") == 0) {
+			updateType = attrs[1];
+		} else if (strcmp(attrs[0], "name") == 0) {
+			updateName = attrs[1];
 		}
 	}
 }
@@ -277,7 +266,7 @@ void OpenMSXComm::doReply()
 	std::cout << std::flush;
 }
 
-void OpenMSXComm::doLog()
+void OpenMSXComm::doLog() const
 {
 	switch (logLevel) {
 		case LOG_INFO:
@@ -293,7 +282,7 @@ void OpenMSXComm::doLog()
 	std::cout << content << '\n' << std::flush;
 }
 
-void OpenMSXComm::doUpdate()
+void OpenMSXComm::doUpdate() const
 {
 	std::cout << "UPDATE: " << updateType << " " << updateName << " " << content << '\n' << std::flush;
 }
@@ -506,7 +495,7 @@ void collectServers(std::vector<std::string>& servers)
 		return;
 	}
 	ReadDir readDir(dir);
-	while (dirent* entry = readDir.getEntry()) {
+	while (const dirent* entry = readDir.getEntry()) {
 		std::string socketName = dir + '/' + entry->d_name;
 		int sd = openSocket(socketName);
 		if (sd != -1) {

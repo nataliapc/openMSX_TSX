@@ -29,6 +29,10 @@ class CassettePlayer final : public CassetteDevice, public ResampledSoundDevice
                            , private EventListener
 {
 public:
+	static constexpr std::string_view TAPE_RECORDING_DIR = "taperecordings";
+	static constexpr std::string_view TAPE_RECORDING_EXTENSION = ".wav";
+
+public:
 	explicit CassettePlayer(const HardwareConfig& hwConf);
 	~CassettePlayer() override;
 
@@ -118,7 +122,7 @@ private:
 	void autoRun();
 
 	// EventListener
-	int signalEvent(const Event& event) override;
+	bool signalEvent(const Event& event) override;
 
 	// Schedulable
 	struct SyncEndOfTape final : Schedulable {

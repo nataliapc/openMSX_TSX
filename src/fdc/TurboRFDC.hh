@@ -11,7 +11,7 @@ namespace openmsx {
 class TurboRFDC final : public MSXFDC
 {
 public:
-	enum Type { BOTH, R7FF2, R7FF8 };
+	enum class Type { BOTH, R7FF2, R7FF8 };
 
 	explicit TurboRFDC(const DeviceConfig& config);
 
@@ -20,7 +20,7 @@ public:
 	[[nodiscard]] byte peekMem(word address, EmuTime::param time) const override;
 	void writeMem(word address, byte value, EmuTime::param time) override;
 	[[nodiscard]] const byte* getReadCacheLine(word start) const override;
-	[[nodiscard]] byte* getWriteCacheLine(word address) const override;
+	[[nodiscard]] byte* getWriteCacheLine(word address) override;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);

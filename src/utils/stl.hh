@@ -242,7 +242,7 @@ template<typename InputRange, typename Proj = std::identity>
 // Assumes: elements can be summed via operator+, with a default constructed
 // value being the identity-element for this operator.
 template<typename InputRange, typename Proj = std::identity>
-[[nodiscard]] /*constexpr*/ auto sum(InputRange&& range, Proj proj = {})
+[[nodiscard]] constexpr auto sum(InputRange&& range, Proj proj = {})
 {
 	using Iter = decltype(std::begin(range));
 	using VT = typename std::iterator_traits<Iter>::value_type;
@@ -339,8 +339,8 @@ void append(std::vector<T>& v, Tail&&... tail)
 {
 	auto extra = detail::sum_of_sizes(std::forward<Tail>(tail)...);
 	auto current = v.size();
-	auto required = current + extra;
-	if (v.capacity() < required) {
+	if (auto required = current + extra;
+	    v.capacity() < required) {
 		v.reserve(current + std::max(current, extra));
 	}
 	detail::append(v, std::forward<Tail>(tail)...);
@@ -459,4 +459,46 @@ template<size_t N, typename F>
     return generate_array<T>(f, std::make_index_sequence<N>{});
 }
 
+
+// c++23 std::to_underlying
+template<typename E>
+[[nodiscard]] constexpr auto to_underlying(E e) noexcept {
+	return static_cast<std::underlying_type_t<E>>(e);
+}
+
+// Like std::array, but operator[] takes an enum
+template<typename Enum, typename T, size_t S = size_t(-1)>
+struct array_with_enum_index {
+private:
+	[[nodiscard]] static constexpr size_t get_size_helper() {
+		if constexpr (requires { Enum::NUM; }) {
+			return (S == size_t(-1)) ? static_cast<size_t>(Enum::NUM) : S;
+		} else {
+			assert(S != -1);
+			return S;
+		}
+	}
+
+public:
+	std::array<T, get_size_helper()> storage;
+
+	// Note: explicitly NO constructors, we want aggregate initialization
+
+	[[nodiscard]] constexpr const auto& operator[](Enum e) const { return storage[to_underlying(e)]; }
+	[[nodiscard]] constexpr auto& operator[](Enum e) { return storage[to_underlying(e)]; }
+
+	// This list is incomplete. Add more when needed.
+	[[nodiscard]] constexpr auto begin() const { return storage.begin(); }
+	[[nodiscard]] constexpr auto begin() { return storage.begin(); }
+	[[nodiscard]] constexpr auto end() const { return storage.end(); }
+	[[nodiscard]] constexpr auto end() { return storage.end(); }
+
+	[[nodiscard]] constexpr auto empty() const { return storage.empty(); }
+	[[nodiscard]] constexpr auto size() const { return storage.size(); }
+
+	[[nodiscard]] constexpr const auto* data() const { return storage.data(); }
+	[[nodiscard]] constexpr auto* data() { return storage.data(); }
+
+	[[nodiscard]] friend constexpr auto operator<=>(const array_with_enum_index& x, const array_with_enum_index& y) = default;
+};
 #endif

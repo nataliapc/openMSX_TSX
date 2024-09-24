@@ -2,8 +2,11 @@
 #define GLOBALCLICOMM_HH
 
 #include "CliComm.hh"
+
 #include "hash_map.hh"
+#include "stl.hh"
 #include "xxhash.hh"
+
 #include <array>
 #include <memory>
 #include <mutex>
@@ -16,10 +19,11 @@ class CliListener;
 class GlobalCliComm final : public CliComm
 {
 public:
-	GlobalCliComm(const GlobalCliComm&) = delete;
-	GlobalCliComm& operator=(const GlobalCliComm&) = delete;
-
 	GlobalCliComm() = default;
+	GlobalCliComm(const GlobalCliComm&) = delete;
+	GlobalCliComm(GlobalCliComm&&) = delete;
+	GlobalCliComm& operator=(const GlobalCliComm&) = delete;
+	GlobalCliComm& operator=(GlobalCliComm&&) = delete;
 	~GlobalCliComm();
 
 	CliListener* addListener(std::unique_ptr<CliListener> listener);
@@ -41,7 +45,7 @@ private:
 	                  std::string_view name, std::string_view value);
 
 private:
-	std::array<hash_map<std::string, std::string, XXHasher>, NUM_UPDATES> prevValues;
+	array_with_enum_index<CliComm::UpdateType, hash_map<std::string, std::string, XXHasher>> prevValues;
 
 	std::vector<std::unique_ptr<CliListener>> listeners; // unordered
 	std::mutex mutex; // lock access to listeners member

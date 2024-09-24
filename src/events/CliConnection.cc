@@ -47,12 +47,11 @@ CliConnection::~CliConnection()
 
 void CliConnection::log(CliComm::LogLevel level, std::string_view message, float fraction) noexcept
 {
-	auto levelStr = CliComm::getLevelStrings();
 	std::string fullMessage{message};
-	if (level == CliComm::PROGRESS && fraction >= 0.0f) {
+	if (level == CliComm::LogLevel::PROGRESS && fraction >= 0.0f) {
 		strAppend(fullMessage, "... ", int(100.0f * fraction), '%');
 	}
-	output(tmpStrCat("<log level=\"", levelStr[level], "\">",
+	output(tmpStrCat("<log level=\"", toString(level), "\">",
 	                 XMLEscape(fullMessage), "</log>\n"));
 }
 
@@ -61,8 +60,7 @@ void CliConnection::update(CliComm::UpdateType type, std::string_view machine,
 {
 	if (!getUpdateEnable(type)) return;
 
-	auto updateStr = CliComm::getUpdateStrings();
-	auto tmp = strCat("<update type=\"", updateStr[type], '\"');
+	auto tmp = strCat("<update type=\"", toString(type), '\"');
 	if (!machine.empty()) {
 		strAppend(tmp, " machine=\"", machine, '\"');
 	}
@@ -107,11 +105,11 @@ static TemporaryString reply(std::string_view message, bool status)
 	                 XMLEscape(message), "</reply>\n");
 }
 
-int CliConnection::signalEvent(const Event& event)
+bool CliConnection::signalEvent(const Event& event)
 {
 	assert(getType(event) == EventType::CLICOMMAND);
-	const auto& commandEvent = get_event<CliCommandEvent>(event);
-	if (commandEvent.getId() == this) {
+	if (const auto& commandEvent = get_event<CliCommandEvent>(event);
+	    commandEvent.getId() == this) {
 		try {
 			auto result = commandController.executeCommand(
 				commandEvent.getCommand(), this).getString();
@@ -121,7 +119,7 @@ int CliConnection::signalEvent(const Event& event)
 			output(reply(result, false));
 		}
 	}
-	return 0;
+	return false;
 }
 
 

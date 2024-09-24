@@ -131,16 +131,6 @@ public:
 #endif
 	}
 
-	/** Swap the managed memory block of two MemBuffers.
-	 */
-	void swap(MemBuffer& other) noexcept
-	{
-		std::swap(dat, other.dat);
-#ifdef DEBUG
-		std::swap(sz , other.sz );
-#endif
-	}
-
 private:
 	// If the requested alignment is less or equally strict than the
 	// guaranteed alignment by the standard malloc()-like functions
@@ -152,7 +142,7 @@ private:
 	// to realloc memory with bigger than default alignment).
 	static constexpr bool SIMPLE_MALLOC = ALIGNMENT <= alignof(std::max_align_t);
 
-	[[nodiscard]] void* my_malloc(size_t bytes)
+	[[nodiscard]] static void* my_malloc(size_t bytes)
 	{
 		void* result;
 		if constexpr (SIMPLE_MALLOC) {
@@ -165,7 +155,7 @@ private:
 		return result;
 	}
 
-	void my_free(void* p)
+	static void my_free(void* p)
 	{
 		if constexpr (SIMPLE_MALLOC) {
 			free(p);
@@ -196,13 +186,5 @@ private:
 };
 
 } // namespace openmsx
-
-namespace std {
-	template<typename T>
-	void swap(openmsx::MemBuffer<T>& l, openmsx::MemBuffer<T>& r) noexcept
-	{
-		l.swap(r);
-	}
-}
 
 #endif

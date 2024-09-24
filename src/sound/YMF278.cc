@@ -30,16 +30,19 @@
 // in the MSXMoonSound class.
 
 #include "YMF278.hh"
+
 #include "DeviceConfig.hh"
-#include "MSXMotherBoard.hh"
 #include "MSXException.hh"
+#include "MSXMotherBoard.hh"
+#include "serialize.hh"
+
 #include "enumerate.hh"
 #include "narrow.hh"
 #include "one_of.hh"
 #include "outer.hh"
 #include "ranges.hh"
-#include "serialize.hh"
 #include "xrange.hh"
+
 #include <algorithm>
 
 namespace openmsx {
@@ -422,7 +425,7 @@ void YMF278::advance()
 	}
 }
 
-int16_t YMF278::getSample(Slot& slot, uint16_t pos) const
+int16_t YMF278::getSample(const Slot& slot, uint16_t pos) const
 {
 	// TODO How does this behave when R#2 bit 0 = 1?
 	//      As-if read returns 0xff? (Like for CPU memory reads.) Or is
@@ -458,7 +461,7 @@ int16_t YMF278::getSample(Slot& slot, uint16_t pos) const
 	}
 }
 
-uint16_t YMF278::nextPos(Slot& slot, uint16_t pos, uint16_t increment)
+uint16_t YMF278::nextPos(const Slot& slot, uint16_t pos, uint16_t increment)
 {
 	// If there is a 4-sample loop and you advance 12 samples per step,
 	// it may exceed the end offset.
@@ -559,7 +562,7 @@ void YMF278::generateChannels(std::span<float*> bufs, unsigned num)
 	}
 }
 
-void YMF278::keyOnHelper(YMF278::Slot& slot)
+void YMF278::keyOnHelper(YMF278::Slot& slot) const
 {
 	// Unlike FM, the envelope level is reset. (And it makes sense, because you restart the sample.)
 	slot.env_vol = MAX_ATT_INDEX;
@@ -851,6 +854,8 @@ void YMF278::reset(EmuTime::param time)
 	for (int i = 0xf7; i >= 0; --i) { // reverse order to avoid UMR
 		writeRegDirect(narrow<uint8_t>(i), 0, time);
 	}
+	regs[0xf8] = 0x1b; // FM mix-level, see also YMF262 reset
+	regs[0xf9] = 0x00; // Wave mix-level
 	memAdr = 0;
 	setMixLevel(0, time);
 }
@@ -1130,7 +1135,7 @@ YMF278::DebugRegisters::DebugRegisters(MSXMotherBoard& motherBoard_,
 
 uint8_t YMF278::DebugRegisters::read(unsigned address)
 {
-	auto& ymf278 = OUTER(YMF278, debugRegisters);
+	const auto& ymf278 = OUTER(YMF278, debugRegisters);
 	return ymf278.peekReg(narrow<uint8_t>(address));
 }
 
@@ -1152,7 +1157,7 @@ YMF278::DebugMemory::DebugMemory(MSXMotherBoard& motherBoard_,
 
 uint8_t YMF278::DebugMemory::read(unsigned address)
 {
-	auto& ymf278 = OUTER(YMF278, debugMemory);
+	const auto& ymf278 = OUTER(YMF278, debugMemory);
 	return ymf278.readMem(address);
 }
 

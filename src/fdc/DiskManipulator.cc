@@ -1,23 +1,21 @@
 #include "DiskManipulator.hh"
 
-#include "DiskContainer.hh"
-#include "MSXtar.hh"
-#include "DiskImageUtils.hh"
-#include "DSKDiskImage.hh"
-#include "DiskPartition.hh"
 #include "CommandException.hh"
-#include "Reactor.hh"
+#include "DSKDiskImage.hh"
+#include "DiskContainer.hh"
+#include "DiskImageUtils.hh"
+#include "DiskPartition.hh"
 #include "File.hh"
-#include "Filename.hh"
 #include "FileContext.hh"
 #include "FileException.hh"
 #include "FileOperations.hh"
-#include "SectorBasedDisk.hh"
-#include "MsxChar2Unicode.hh"
+#include "Filename.hh"
+#include "Keyboard.hh"
 #include "MSXDevice.hh"
 #include "MSXMotherBoard.hh"
-#include "MSXPPI.hh"
-#include "Keyboard.hh"
+#include "MSXtar.hh"
+#include "Reactor.hh"
+#include "SectorBasedDisk.hh"
 
 #include "StringOp.hh"
 #include "TclArgParser.hh"
@@ -25,7 +23,6 @@
 #include "narrow.hh"
 #include "one_of.hh"
 #include "ranges.hh"
-#include "static_vector.hh"
 #include "stl.hh"
 #include "strCat.hh"
 #include "view.hh"
@@ -80,7 +77,7 @@ void DiskManipulator::unregisterDrive(DiskContainer& drive)
 std::vector<std::string> DiskManipulator::getDriveNamesForCurrentMachine() const
 {
 	std::vector<std::string> result;
-	result.push_back("virtual_drive"); // always available
+	result.emplace_back("virtual_drive"); // always available
 
 	auto prefix = getMachinePrefix();
 	if (prefix.empty()) return result;
@@ -88,7 +85,7 @@ std::vector<std::string> DiskManipulator::getDriveNamesForCurrentMachine() const
 	for (const auto& drive : drives) {
 		if (!drive.driveName.starts_with(prefix)) continue;
 
-		auto* disk = drive.drive->getSectorAccessibleDisk();
+		const auto* disk = drive.drive->getSectorAccessibleDisk();
 		if (disk && DiskImageUtils::hasPartitionTable(*disk)) {
 			for (unsigned i = 1; true; ++i) {
 				try {
@@ -201,7 +198,7 @@ DiskManipulator::DriveSettings& DiskManipulator::getDriveSettings(
 		}
 	}
 
-	auto* disk = it->drive->getSectorAccessibleDisk();
+	const auto* disk = it->drive->getSectorAccessibleDisk();
 	if (!disk) {
 		// not a SectorBasedDisk
 		throw CommandException("Unsupported disk type.");
@@ -296,9 +293,7 @@ void DiskManipulator::execute(std::span<const TclObject> tokens, TclObject& resu
 			throw CommandException(dir, " is not a directory");
 		}
 		auto& settings = getDriveSettings(tokens[2].getString());
-		// Workaround clang-13/libc++ bug
-		//std::span<const TclObject> lists(std::begin(tokens) + 4, std::end(tokens));
-		std::span<const TclObject> lists(std::to_address(std::begin(tokens) + 4), std::end(tokens) - (std::begin(tokens) + 4));
+		std::span<const TclObject> lists(std::begin(tokens) + 4, std::end(tokens));
 		exprt(settings, directory, lists);
 
 	} else if (subCmd == "import") {
@@ -309,10 +304,10 @@ void DiskManipulator::execute(std::span<const TclObject> tokens, TclObject& resu
 		auto lists = parseTclArgs(getInterpreter(), tokens.subspan(3), info);
 		if (lists.empty()) throw SyntaxError();
 
-		result = import(settings, lists, overwrite);
+		result = imprt(settings, lists, overwrite);
 
 	} else if (subCmd == "savedsk") {
-		auto& settings = getDriveSettings(tokens[2].getString());
+		const auto& settings = getDriveSettings(tokens[2].getString());
 		savedsk(settings, FileOperations::expandTilde(string(tokens[3].getString())));
 
 	} else if (subCmd == "chdir") {
@@ -477,7 +472,7 @@ void DiskManipulator::tabCompletion(std::vector<string>& tokens) const
 			append(names, {name1, std::string(name2)});
 			// if it has partitions then we also add the partition
 			// numbers to the autocompletion
-			if (auto* disk = d.drive->getSectorAccessibleDisk()) {
+			if (const auto* disk = d.drive->getSectorAccessibleDisk()) {
 				for (unsigned i = 1; true; ++i) {
 					try {
 						SectorBuffer buf;
@@ -512,11 +507,11 @@ void DiskManipulator::tabCompletion(std::vector<string>& tokens) const
 }
 
 void DiskManipulator::savedsk(const DriveSettings& driveData,
-                              string filename)
+                              string filename) const
 {
 	auto partition = getPartition(driveData);
 	SectorBuffer buf;
-	File file(std::move(filename), File::CREATE);
+	File file(std::move(filename), File::OpenMode::CREATE);
 	for (auto i : xrange(partition.getNbSectors())) {
 		partition.readSector(i, buf);
 		file.write(buf.raw);
@@ -542,14 +537,14 @@ static std::pair<MSXBootSectorType, std::vector<unsigned>> parsePartitionSizes(a
 	return {bootType, sizes};
 }
 
-void DiskManipulator::create(std::span<const TclObject> tokens)
+void DiskManipulator::create(std::span<const TclObject> tokens) const
 {
 	auto [bootType, sizes] = parsePartitionSizes(view::drop(tokens, 3));
 	auto filename = FileOperations::expandTilde(string(tokens[2].getString()));
 	create(filename, bootType, sizes);
 }
 
-void DiskManipulator::create(const std::string& filename_, MSXBootSectorType bootType, const std::vector<unsigned>& sizes)
+void DiskManipulator::create(const std::string& filename_, MSXBootSectorType bootType, const std::vector<unsigned>& sizes) const
 {
 	size_t totalSectors = sum(sizes, [](size_t s) { return s; });
 	if (totalSectors == 0) {
@@ -559,7 +554,7 @@ void DiskManipulator::create(const std::string& filename_, MSXBootSectorType boo
 	// create file with correct size
 	Filename filename(filename_);
 	try {
-		File file(filename, File::CREATE);
+		File file(filename, File::OpenMode::CREATE);
 		file.truncate(totalSectors * SectorBasedDisk::SECTOR_SIZE);
 	} catch (FileException& e) {
 		throw CommandException("Couldn't create image: ", e.getMessage());
@@ -629,7 +624,7 @@ void DiskManipulator::format(std::span<const TclObject> tokens)
 }
 
 MSXtar DiskManipulator::getMSXtar(
-	SectorAccessibleDisk& disk, DriveSettings& driveData)
+	SectorAccessibleDisk& disk, DriveSettings& driveData) const
 {
 	if (DiskImageUtils::hasPartitionTable(disk)) {
 		throw CommandException("Please select partition number.");
@@ -649,28 +644,28 @@ MSXtar DiskManipulator::getMSXtar(
 	return result;
 }
 
-string DiskManipulator::dir(DriveSettings& driveData)
+string DiskManipulator::dir(DriveSettings& driveData) const
 {
 	auto partition = getPartition(driveData);
 	auto workhorse = getMSXtar(partition, driveData);
 	return workhorse.dir();
 }
 
-std::string DiskManipulator::deleteEntry(DriveSettings& driveData, std::string_view entry)
+std::string DiskManipulator::deleteEntry(DriveSettings& driveData, std::string_view entry) const
 {
 	auto partition = getPartition(driveData);
 	auto workhorse = getMSXtar(partition, driveData);
 	return workhorse.deleteItem(entry);
 }
 
-std::string DiskManipulator::rename(DriveSettings& driveData, std::string_view oldName, std::string_view newName)
+std::string DiskManipulator::rename(DriveSettings& driveData, std::string_view oldName, std::string_view newName) const
 {
 	auto partition = getPartition(driveData);
 	auto workhorse = getMSXtar(partition, driveData);
 	return workhorse.renameItem(oldName, newName);
 }
 
-string DiskManipulator::chdir(DriveSettings& driveData, string_view filename)
+string DiskManipulator::chdir(DriveSettings& driveData, string_view filename) const
 {
 	auto partition = getPartition(driveData);
 	auto workhorse = getMSXtar(partition, driveData);
@@ -691,7 +686,7 @@ string DiskManipulator::chdir(DriveSettings& driveData, string_view filename)
 	return "New working directory: " + cwd;
 }
 
-void DiskManipulator::mkdir(DriveSettings& driveData, string_view filename)
+void DiskManipulator::mkdir(DriveSettings& driveData, string_view filename) const
 {
 	auto partition = getPartition(driveData);
 	auto workhorse = getMSXtar(partition, driveData);
@@ -702,8 +697,8 @@ void DiskManipulator::mkdir(DriveSettings& driveData, string_view filename)
 	}
 }
 
-string DiskManipulator::import(DriveSettings& driveData,
-                               std::span<const TclObject> lists, bool overwrite)
+string DiskManipulator::imprt(DriveSettings& driveData,
+                              std::span<const TclObject> lists, bool overwrite) const
 {
 	auto partition = getPartition(driveData);
 	auto workhorse = getMSXtar(partition, driveData);
@@ -737,7 +732,7 @@ string DiskManipulator::import(DriveSettings& driveData,
 }
 
 void DiskManipulator::exprt(DriveSettings& driveData, string_view dirname,
-                            std::span<const TclObject> lists)
+                            std::span<const TclObject> lists) const
 {
 	auto partition = getPartition(driveData);
 	auto workhorse = getMSXtar(partition, driveData);

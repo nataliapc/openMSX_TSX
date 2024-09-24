@@ -76,10 +76,10 @@ MSXJoystick::MSXJoystick(CommandController& commandController_,
 	, description(strCat("MSX joystick ", id_, ". Mapping is fully configurable."))
 	, id(id_)
 {
-	configSetting.setChecker([this](TclObject& newValue) {
+	configSetting.setChecker([this](const TclObject& newValue) {
 		this->checkJoystickConfig(newValue); });
 	// fill in 'bindings'
-	checkJoystickConfig(const_cast<TclObject&>(configSetting.getValue()));
+	checkJoystickConfig(configSetting.getValue());
 }
 
 MSXJoystick::~MSXJoystick()
@@ -89,7 +89,7 @@ MSXJoystick::~MSXJoystick()
 	}
 }
 
-void MSXJoystick::checkJoystickConfig(TclObject& newValue)
+void MSXJoystick::checkJoystickConfig(const TclObject& newValue)
 {
 	std::array<std::vector<BooleanInput>, 6> newBindings;
 
@@ -174,7 +174,7 @@ void MSXJoystick::signalMSXEvent(const Event& event,
 	uint8_t release = 0;
 
 	auto getJoyDeadZone = [&](JoystickId joyId) {
-		auto* setting = joystickManager.getJoyDeadZoneSetting(joyId);
+		const auto* setting = joystickManager.getJoyDeadZoneSetting(joyId);
 		return setting ? setting->getInt() : 0;
 	};
 	for (int i : xrange(6)) {

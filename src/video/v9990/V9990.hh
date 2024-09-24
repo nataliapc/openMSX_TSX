@@ -134,7 +134,7 @@ public:
 	/** Returns true iff in overscan mode
 	  */
 	[[nodiscard]] inline bool isOverScan() const {
-		return mode == one_of(B0, B2, B4);
+		return mode == one_of(V9990DisplayMode::B0, V9990DisplayMode::B2, V9990DisplayMode::B4);
 	}
 
 	/** Should this frame be superimposed?
@@ -175,6 +175,7 @@ public:
 		int x;
 		ticks = ticks % V9990DisplayTiming::UC_TICKS_PER_LINE;
 		switch (mode) {
+		using enum V9990DisplayMode;
 		case P1: x = ticks / 8;  break;
 		case P2: x = ticks / 4;  break;
 		case B0: x = ticks /12;  break;
@@ -272,6 +273,7 @@ public:
 	  */
 	[[nodiscard]] inline unsigned getLineWidth() const {
 		switch (getDisplayMode()) {
+		using enum V9990DisplayMode;
 		case B0:          return  213;
 		case P1: case B1: return  320;
 		case B2:          return  426;
@@ -294,9 +296,9 @@ public:
 	  */
 	[[nodiscard]] inline int getSpritePatternAddress(V9990DisplayMode m) const {
 		switch (m) {
-		case P1:
+		case V9990DisplayMode::P1:
 			return (int(regs[SPRITE_PATTERN_ADDRESS] & 0x0E) << 14);
-		case P2:
+		case V9990DisplayMode::P2:
 			return (int(regs[SPRITE_PATTERN_ADDRESS] & 0x0F) << 15);
 		default:
 			return 0;
@@ -362,7 +364,7 @@ private:
 
 	// Scheduler stuff
 	struct SyncBase : Schedulable {
-		explicit SyncBase(V9990& v9990) : Schedulable(v9990.getScheduler()) {}
+		explicit SyncBase(const V9990& v9990) : Schedulable(v9990.getScheduler()) {}
 		using Schedulable::setSyncPoint;
 		using Schedulable::removeSyncPoint;
 	protected:
@@ -370,7 +372,7 @@ private:
 	};
 
 	struct SyncVSync final : SyncBase {
-		explicit SyncVSync(V9990& v9990) : SyncBase(v9990) {}
+		using SyncBase::SyncBase;
 		void executeUntil(EmuTime::param time) override {
 			auto& v9990 = OUTER(V9990, syncVSync);
 			v9990.execVSync(time);
@@ -378,7 +380,7 @@ private:
 	} syncVSync;
 
 	struct SyncDisplayStart final : SyncBase {
-		explicit SyncDisplayStart(V9990& v9990) : SyncBase(v9990) {}
+		using SyncBase::SyncBase;
 		void executeUntil(EmuTime::param time) override {
 			auto& v9990 = OUTER(V9990, syncDisplayStart);
 			v9990.execDisplayStart(time);
@@ -386,7 +388,7 @@ private:
 	} syncDisplayStart;
 
 	struct SyncVScan final : SyncBase {
-		explicit SyncVScan(V9990& v9990) : SyncBase(v9990) {}
+		using SyncBase::SyncBase;
 		void executeUntil(EmuTime::param time) override {
 			auto& v9990 = OUTER(V9990, syncVScan);
 			v9990.execVScan(time);
@@ -394,7 +396,7 @@ private:
 	} syncVScan;
 
 	struct SyncHScan final : SyncBase {
-		explicit SyncHScan(V9990& v9990) : SyncBase(v9990) {}
+		using SyncBase::SyncBase;
 		void executeUntil(EmuTime::param /*time*/) override {
 			auto& v9990 = OUTER(V9990, syncHScan);
 			v9990.execHScan();
@@ -402,7 +404,7 @@ private:
 	} syncHScan;
 
 	struct SyncSetMode final : SyncBase {
-		explicit SyncSetMode(V9990& v9990) : SyncBase(v9990) {}
+		using SyncBase::SyncBase;
 		void executeUntil(EmuTime::param time) override {
 			auto& v9990 = OUTER(V9990, syncSetMode);
 			v9990.execSetMode(time);
@@ -410,7 +412,7 @@ private:
 	} syncSetMode;
 
 	struct SyncCmdEnd final : SyncBase {
-		explicit SyncCmdEnd(V9990& v9990) : SyncBase(v9990) {}
+		using SyncBase::SyncBase;
 		void executeUntil(EmuTime::param time) override {
 			auto& v9990 = OUTER(V9990, syncCmdEnd);
 			v9990.execCheckCmdEnd(time);
@@ -515,13 +517,13 @@ private:
 	// --- members ----------------------------------------------------
 
 	struct RegDebug final : SimpleDebuggable {
-		explicit RegDebug(V9990& v9990);
+		explicit RegDebug(const V9990& v9990);
 		[[nodiscard]] byte read(unsigned address) override;
 		void write(unsigned address, byte value, EmuTime::param time) override;
 	} v9990RegDebug;
 
 	struct PalDebug final : SimpleDebuggable {
-		explicit PalDebug(V9990& v9990);
+		explicit PalDebug(const V9990& v9990);
 		[[nodiscard]] byte read(unsigned address) override;
 		void write(unsigned address, byte value, EmuTime::param time) override;
 	} v9990PalDebug;
@@ -671,7 +673,7 @@ private:
 
 	/** Schedule a sync point at the start of the next line
 	 */
-	void syncAtNextLine(SyncBase& type, EmuTime::param time);
+	void syncAtNextLine(SyncBase& type, EmuTime::param time) const;
 
 	/** Create a new renderer.
 	  * @param time  Moment in emulated time to create the renderer

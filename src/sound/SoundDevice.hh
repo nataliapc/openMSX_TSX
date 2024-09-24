@@ -22,7 +22,9 @@ public:
 	static constexpr unsigned MAX_CHANNELS = 24;
 
 	SoundDevice(const SoundDevice&) = delete;
+	SoundDevice(SoundDevice&&) = delete;
 	SoundDevice& operator=(const SoundDevice&) = delete;
+	SoundDevice& operator=(SoundDevice&&) = delete;
 
 	/** Get the unique name that identifies this sound device.
 	  * Used to create setting names.
@@ -34,10 +36,21 @@ public:
 	  */
 	[[nodiscard]] std::string_view getDescription() const { return description; }
 
-	/** Is this a stereo device?
-	  * This is set in the constructor and cannot be changed anymore
+	/** How many channels does this device have?
+	 */
+	[[nodiscard]] unsigned getNumChannels() const { return numChannels; }
+
+	/** Are the individual channels of this device stereo?
+	 */
+	[[nodiscard]] bool hasStereoChannels() const {
+		return stereo == 2;
+	}
+
+	/** Is the full output of this device stereo?
 	  */
-	[[nodiscard]] bool isStereo() const;
+	[[nodiscard]] bool isStereo() const {
+		return hasStereoChannels() || !balanceCenter;
+	}
 
 	/** Gets this device its 'amplification factor'.
 	  *
@@ -75,6 +88,40 @@ public:
 
 	void recordChannel(unsigned channel, const Filename& filename);
 	void muteChannel  (unsigned channel, bool muted);
+
+	/** Query the last generated audio signal for a specific channel.
+	  * The length of this buffer is fixed (for a specific sound device),
+	  * see getLastBufferSize().
+	  * It's possible that no data is available yet. In that case an empty
+	  * buffer will be returned. For example this will be the case the first
+	  * time you call this method. Collecting this data is not free, so by
+	  * default we don't do it.
+	  * Requesting this data will automatically start the
+	  * collecting-process. So, some time later, when you call this method
+	  * again, there is a good chance that it will succeed.
+	  * And similarly, if you stop calling this method for some time, we
+	  * will automatically stop collecting this data.
+	  * This method is meant to be used by the GUI. There it's acceptable
+	  * that the first few frames no data is available yet.
+	  */
+	[[nodiscard]] std::span<const float> getLastBuffer(unsigned channel);
+
+	/** The samples returned by 'getLastBuffer()' have this sample rate.
+	  */
+	[[nodiscard]] float getNativeSampleRate() const { return float(inputSampleRate); }
+
+	/** getLastBuffer() with return buffers containing this many samples.
+	  * This number depends on the native-sample-rate of the device. For all
+	  * devices it will be (approximately) represent the same time duration.
+	  */
+	[[nodiscard]] unsigned getLastMonoBufferSize() const {
+		// Tuned so that both the ImGui waveform and spectrum viewer
+		// look 'nice' (and aren't too expensive to calculate).
+		return inputSampleRate / 7; // ~0.14 seconds
+	}
+	[[nodiscard]] unsigned getLastBufferSize() const {
+		return getLastMonoBufferSize() * stereo;
+	}
 
 protected:
 	/** Constructor.
@@ -208,6 +255,17 @@ private:
 	std::array<int,  MAX_CHANNELS> channelBalance;
 	std::array<bool, MAX_CHANNELS> channelMuted;
 	bool balanceCenter = true;
+
+	// When channel data needs to be collected separately (e.g. because
+	// we're recording the channel, or because we want to present it in the
+	// GUI), we store that data in this struct.
+	struct PerChannelBuffer {
+		std::vector<float> buffer; // dynamically grows when needed
+		unsigned stopIdx = 0; // buffer only contains valid data at indices [0, stopIdx)
+		unsigned requestCounter = 0; // != 0 means we're interested in collecting this data
+		unsigned silent = 999999; // how many 0 samples are at the end of the buffer
+	};
+	std::array<PerChannelBuffer, MAX_CHANNELS> channelBuffers = {};
 };
 
 } // namespace openmsx

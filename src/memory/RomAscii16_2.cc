@@ -24,8 +24,8 @@ namespace openmsx {
 RomAscii16_2::RomAscii16_2(const DeviceConfig& config, Rom&& rom_, SubType subType)
 	: RomAscii16kB(config, std::move(rom_))
 {
-	unsigned size = (subType == ASCII16_8) ? 0x2000 // 8kB
-					       : 0x0800; // 2kB
+	unsigned size = (subType == SubType::ASCII16_8) ? 0x2000 // 8kB
+	                                                : 0x0800; // 2kB
 	sram = std::make_unique<SRAM>(getName() + " SRAM", size, config);
 	reset(EmuTime::dummy());
 }
@@ -76,7 +76,7 @@ void RomAscii16_2::writeMem(word address, byte value, EmuTime::param /*time*/)
 	}
 }
 
-byte* RomAscii16_2::getWriteCacheLine(word address) const
+byte* RomAscii16_2::getWriteCacheLine(word address)
 {
 	if ((1 << (address >> 14)) & sramEnabled & 0x04) {
 		// write sram

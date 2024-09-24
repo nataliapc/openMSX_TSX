@@ -3,7 +3,9 @@
 
 #include "OSDImageBasedWidget.hh"
 #include "TTFFont.hh"
+
 #include "stl.hh"
+
 #include <array>
 #include <memory>
 
@@ -11,7 +13,7 @@ namespace openmsx {
 
 class OSDText final : public OSDImageBasedWidget
 {
-protected:
+private:
 	static constexpr auto textProperties = [] {
 		using namespace std::literals;
 		return concatArray(

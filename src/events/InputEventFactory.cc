@@ -152,19 +152,20 @@ namespace openmsx::InputEventFactory {
 {
 	if (str.getListLength(interp) == 3) {
 		auto buttonName = str.getListIndex(interp, 1).getString();
-		unsigned button = [&] {
+		auto button = [&] {
+			using enum OsdControlEvent::Button;
 			if (buttonName == "LEFT") {
-				return OsdControlEvent::LEFT_BUTTON;
+				return LEFT;
 			} else if (buttonName == "RIGHT") {
-				return OsdControlEvent::RIGHT_BUTTON;
+				return RIGHT;
 			} else if (buttonName == "UP") {
-				return OsdControlEvent::UP_BUTTON;
+				return UP;
 			} else if (buttonName == "DOWN") {
-				return OsdControlEvent::DOWN_BUTTON;
+				return DOWN;
 			} else if (buttonName == "A") {
-				return OsdControlEvent::A_BUTTON;
+				return A;
 			} else if (buttonName == "B") {
-				return OsdControlEvent::B_BUTTON;
+				return B;
 			} else {
 				throw CommandException(
 					"Invalid OSDcontrol event, invalid button name: ",
@@ -189,17 +190,18 @@ namespace openmsx::InputEventFactory {
 		auto comp1 = str.getListIndex(interp, 1).getString();
 
 		if (len == 2) {
+			using enum EventType;
 			if (comp1.starts_with("button")) {
 				return GroupEvent(
-					std::initializer_list<EventType>{EventType::JOY_BUTTON_UP, EventType::JOY_BUTTON_DOWN},
+					std::initializer_list<EventType>{JOY_BUTTON_UP, JOY_BUTTON_DOWN},
 					makeTclList("joy", "button"));
 			} else if (comp1.starts_with("axis")) {
 				return GroupEvent(
-					std::initializer_list<EventType>{EventType::JOY_AXIS_MOTION},
+					std::initializer_list<EventType>{JOY_AXIS_MOTION},
 					makeTclList("joy", "axis"));
 			} else if (comp1.starts_with("hat")) {
 				return GroupEvent(
-					std::initializer_list<EventType>{EventType::JOY_HAT},
+					std::initializer_list<EventType>{JOY_HAT},
 					makeTclList("joy", "hat"));
 			}
 		} else if (len == 3) {

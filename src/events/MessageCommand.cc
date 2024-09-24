@@ -13,8 +13,8 @@ MessageCommand::MessageCommand(CommandController& controller)
 
 [[nodiscard]] static CliComm::LogLevel getLevel(std::string_view level)
 {
-	auto levels = CliComm::getLevelStrings();
-	for (auto i : xrange(levels.size())) {
+	for (auto levels = CliComm::getLevelStrings();
+	     auto i : xrange(levels.size())) {
 		if (level == levels[i]) {
 			return static_cast<CliComm::LogLevel>(i);
 		}
@@ -26,7 +26,7 @@ void MessageCommand::execute(std::span<const TclObject> tokens, TclObject& /*res
 {
 	checkNumArgs(tokens, Between{2, 3}, "string ?level?");
 	CliComm& cliComm = getCliComm();
-	CliComm::LogLevel level = CliComm::INFO;
+	CliComm::LogLevel level = CliComm::LogLevel::INFO;
 	switch (tokens.size()) {
 	case 3:
 		level = getLevel(tokens[2].getString());

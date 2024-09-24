@@ -1,17 +1,20 @@
 #include "OSDText.hh"
-#include "TTFFont.hh"
-#include "Display.hh"
+
 #include "CommandException.hh"
+#include "Display.hh"
 #include "FileContext.hh"
 #include "FileOperations.hh"
 #include "GLImage.hh"
+#include "TTFFont.hh"
 #include "TclObject.hh"
+
 #include "StringOp.hh"
 #include "join.hh"
 #include "narrow.hh"
 #include "stl.hh"
 #include "unreachable.hh"
 #include "utf8_core.hh"
+
 #include <cassert>
 #include <cmath>
 #include <memory>
@@ -276,8 +279,7 @@ size_t OSDText::split(const string& line, unsigned maxWidth,
 		return 0;
 	}
 
-	unsigned width = font.getSize(line).x;
-	if (width <= maxWidth) {
+	if (unsigned width = font.getSize(line).x; width <= maxWidth) {
 		// whole line fits
 		return line.size();
 	}
@@ -334,7 +336,7 @@ size_t OSDText::splitAtChar(const std::string& line, unsigned maxWidth) const
 
 struct SplitAtChar {
 	explicit SplitAtChar(const OSDText& osdText_) : osdText(osdText_) {}
-	size_t operator()(const string& line, unsigned maxWidth) {
+	[[nodiscard]] size_t operator()(const string& line, unsigned maxWidth) const {
 		return osdText.splitAtChar(line, maxWidth);
 	}
 	const OSDText& osdText;

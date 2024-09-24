@@ -37,7 +37,7 @@ private:
 	[[nodiscard]] bool acceptsData() override;
 	void setDataBits(DataBits bits) override;
 	void setStopBits(StopBits bits) override;
-	void setParityBit(bool enable, ParityBit parity) override;
+	void setParityBit(bool enable, Parity parity) override;
 	void recvByte(byte value, EmuTime::param time) override;
 
 	// Schedulable
@@ -62,7 +62,7 @@ private:
 
 	// External clock, divided by 1, 16 or 64.
 	// Transmitted bits are synced to this clock
-	DynamicClock txClock;
+	DynamicClock txClock{EmuTime::zero()};
 	const unsigned clockFreq;
 
 	IRQHelper rxIRQ;

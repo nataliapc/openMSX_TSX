@@ -3,8 +3,10 @@
 
 #include "SettingsManager.hh"
 #include "Command.hh"
+
 #include "hash_map.hh"
 #include "xxhash.hh"
+
 #include <string>
 #include <string_view>
 
@@ -14,12 +16,13 @@ class FileContext;
 class HotKey;
 class GlobalCommandController;
 class CommandController;
+class Shortcuts;
 
 class SettingsConfig
 {
 public:
 	SettingsConfig(GlobalCommandController& globalCommandController,
-	               HotKey& hotKey);
+	               HotKey& hotKey, Shortcuts& shortcuts);
 	~SettingsConfig();
 
 	void loadSetting(const FileContext& context, std::string_view filename);
@@ -54,6 +57,7 @@ private:
 	SettingsManager settingsManager;
 	hash_map<std::string, std::string, XXHasher> settingValues;
 	HotKey& hotKey;
+	Shortcuts& shortcuts;
 	std::string saveName;
 	bool mustSaveSettings = false;
 };

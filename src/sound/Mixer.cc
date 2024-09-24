@@ -1,13 +1,17 @@
 #include "Mixer.hh"
+
 #include "MSXMixer.hh"
 #include "NullSoundDriver.hh"
 #include "SDLSoundDriver.hh"
-#include "CommandController.hh"
+
 #include "CliComm.hh"
+#include "CommandController.hh"
 #include "MSXException.hh"
+
 #include "one_of.hh"
 #include "stl.hh"
 #include "unreachable.hh"
+
 #include <cassert>
 #include <memory>
 
@@ -22,8 +26,8 @@ static constexpr int defaultSamples = 1024;
 static EnumSetting<Mixer::SoundDriverType>::Map getSoundDriverMap()
 {
 	EnumSetting<Mixer::SoundDriverType>::Map soundDriverMap = {
-		{ "null", Mixer::SND_NULL },
-		{ "sdl",  Mixer::SND_SDL } };
+		{ "null", Mixer::SoundDriverType::NONE },
+		{ "sdl",  Mixer::SoundDriverType::SDL } };
 	return soundDriverMap;
 }
 
@@ -33,10 +37,10 @@ Mixer::Mixer(Reactor& reactor_, CommandController& commandController_)
 	, soundDriverSetting(
 		commandController, "sound_driver",
 		"select the sound output driver",
-		Mixer::SND_SDL, getSoundDriverMap())
+		Mixer::SoundDriverType::SDL, getSoundDriverMap())
 	, muteSetting(
 		commandController, "mute",
-		"(un)mute the emulation sound", false, Setting::DONT_SAVE)
+		"(un)mute the emulation sound", false, Setting::Save::NO)
 	, masterVolume(
 		commandController, "master_volume",
 		"master volume", 75, 0, 100)
@@ -55,7 +59,7 @@ Mixer::Mixer(Reactor& reactor_, CommandController& commandController_)
 	// Set correct initial mute state.
 	if (muteSetting.getBoolean()) ++muteCount;
 
-	reloadDriver();
+	assert(!driver);
 }
 
 Mixer::~Mixer()
@@ -79,23 +83,19 @@ void Mixer::reloadDriver()
 
 	try {
 		switch (soundDriverSetting.getEnum()) {
-		case SND_NULL:
-			driver = std::make_unique<NullSoundDriver>();
-			break;
-		case SND_SDL:
+		case SoundDriverType::SDL:
 			driver = std::make_unique<SDLSoundDriver>(
 				reactor,
 				frequencySetting.getInt(),
 				samplesSetting.getInt());
 			break;
 		default:
-			UNREACHABLE;
+			// nothing, NullSoundDriver already created
+			break;
 		}
 	} catch (MSXException& e) {
 		commandController.getCliComm().printWarning(e.getMessage());
 	}
-
-	muteHelper();
 }
 
 void Mixer::registerMixer(MSXMixer& mixer)
@@ -129,6 +129,8 @@ void Mixer::unmute()
 
 void Mixer::muteHelper()
 {
+	if (!driver) reloadDriver();
+
 	bool isMuted = muteCount || msxMixers.empty();
 	unsigned samples = isMuted ? 0 : driver->getSamples();
 	unsigned frequency = driver->getFrequency();
@@ -145,6 +147,11 @@ void Mixer::muteHelper()
 
 void Mixer::uploadBuffer(MSXMixer& /*msxMixer*/, std::span<const StereoFloat> buffer)
 {
+	if (!driver) {
+		reloadDriver();
+		muteHelper();
+	}
+
 	// can only handle one MSXMixer ATM
 	assert(!msxMixers.empty());
 
@@ -161,6 +168,7 @@ void Mixer::update(const Setting& setting) noexcept
 		}
 	} else if (&setting == one_of(&samplesSetting, &soundDriverSetting, &frequencySetting)) {
 		reloadDriver();
+		muteHelper();
 	} else {
 		UNREACHABLE;
 	}

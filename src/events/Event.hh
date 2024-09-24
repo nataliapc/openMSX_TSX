@@ -41,6 +41,8 @@ protected:
 class KeyEvent : public SdlEvent
 {
 public:
+	using SdlEvent::SdlEvent;
+
 	[[nodiscard]] bool         getRepeat()    const { return evt.key.repeat; }
 	[[nodiscard]] SDL_Keycode  getKeyCode()   const { return evt.key.keysym.sym; }
 	[[nodiscard]] SDL_Scancode getScanCode()  const { return evt.key.keysym.scancode; }
@@ -50,15 +52,12 @@ public:
 		return evt.key.keysym.unused;
 	}
 	[[nodiscard]] SDLKey getKey() const { return SDLKey{evt.key.keysym, evt.type == SDL_KEYDOWN}; }
-
-protected:
-	explicit KeyEvent(const SDL_Event& e) : SdlEvent(e) {}
 };
 
 class KeyUpEvent final : public KeyEvent
 {
 public:
-	explicit KeyUpEvent(const SDL_Event& e) : KeyEvent(e) {}
+	using KeyEvent::KeyEvent;
 
 	[[nodiscard]] static KeyUpEvent create(SDL_Keycode code, SDL_Keymod mod = KMOD_NONE) {
 		SDL_Event evt;
@@ -77,7 +76,7 @@ public:
 class KeyDownEvent final : public KeyEvent
 {
 public:
-	explicit KeyDownEvent(const SDL_Event& e) : KeyEvent(e) {}
+	using KeyEvent::KeyEvent;
 
 	[[nodiscard]] static KeyDownEvent create(SDL_Keycode code, SDL_Keymod mod = KMOD_NONE) {
 		SDL_Event evt;
@@ -110,32 +109,27 @@ public:
 class MouseButtonEvent : public SdlEvent
 {
 public:
-	[[nodiscard]] auto getButton() const { return evt.button.button; }
+	using SdlEvent::SdlEvent;
 
-protected:
-	explicit MouseButtonEvent(const SDL_Event& e)
-		: SdlEvent(e) {}
+	[[nodiscard]] auto getButton() const { return evt.button.button; }
 };
 
 class MouseButtonUpEvent final : public MouseButtonEvent
 {
 public:
-	explicit MouseButtonUpEvent(const SDL_Event& e)
-		: MouseButtonEvent(e) {}
+	using MouseButtonEvent::MouseButtonEvent;
 };
 
 class MouseButtonDownEvent final : public MouseButtonEvent
 {
 public:
-	explicit MouseButtonDownEvent(const SDL_Event& e)
-		: MouseButtonEvent(e) {}
+	using MouseButtonEvent::MouseButtonEvent;
 };
 
 class MouseWheelEvent final : public SdlEvent
 {
 public:
-	explicit MouseWheelEvent(const SDL_Event& e)
-		: SdlEvent(e) {}
+	using SdlEvent::SdlEvent;
 
 	[[nodiscard]] int getX() const { return normalize(evt.wheel.x); }
 	[[nodiscard]] int getY() const { return normalize(evt.wheel.y); }
@@ -149,8 +143,7 @@ private:
 class MouseMotionEvent final : public SdlEvent
 {
 public:
-	explicit MouseMotionEvent(const SDL_Event& e)
-		: SdlEvent(e) {}
+	using SdlEvent::SdlEvent;
 
 	[[nodiscard]] int getX() const    { return evt.motion.xrel; }
 	[[nodiscard]] int getY() const    { return evt.motion.yrel; }
@@ -162,38 +155,32 @@ public:
 class JoystickEvent : public SdlEvent
 {
 public:
+	using SdlEvent::SdlEvent;
+
 	[[nodiscard]] JoystickId getJoystick() const {
 		// SDL joystick instance ID has already been translated to an openMSX JoystickID
 		return JoystickId(evt.jbutton.which);
 	}
-
-protected:
-	explicit JoystickEvent(const SDL_Event& e)
-		: SdlEvent(e) {}
 };
 
 class JoystickButtonEvent : public JoystickEvent
 {
 public:
-	[[nodiscard]] unsigned getButton() const { return evt.jbutton.button; }
+	using JoystickEvent::JoystickEvent;
 
-protected:
-	explicit JoystickButtonEvent(const SDL_Event& e)
-		: JoystickEvent(e) {}
+	[[nodiscard]] unsigned getButton() const { return evt.jbutton.button; }
 };
 
 class JoystickButtonUpEvent final : public JoystickButtonEvent
 {
 public:
-	explicit JoystickButtonUpEvent(const SDL_Event& e)
-		: JoystickButtonEvent(e) {}
+	using JoystickButtonEvent::JoystickButtonEvent;
 };
 
 class JoystickButtonDownEvent final : public JoystickButtonEvent
 {
 public:
-	explicit JoystickButtonDownEvent(const SDL_Event& e)
-		: JoystickButtonEvent(e) {}
+	using JoystickButtonEvent::JoystickButtonEvent;
 };
 
 class JoystickAxisMotionEvent final : public JoystickEvent
@@ -202,8 +189,7 @@ public:
 	static constexpr uint8_t X_AXIS = 0;
 	static constexpr uint8_t Y_AXIS = 1;
 
-	explicit JoystickAxisMotionEvent(const SDL_Event& e)
-		: JoystickEvent(e) {}
+	using JoystickEvent::JoystickEvent;
 
 	[[nodiscard]] uint8_t getAxis() const { return evt.jaxis.axis; }
 	[[nodiscard]] int16_t getValue() const { return evt.jaxis.value; }
@@ -212,8 +198,7 @@ public:
 class JoystickHatEvent final : public JoystickEvent
 {
 public:
-	explicit JoystickHatEvent(const SDL_Event& e)
-		: JoystickEvent(e) {}
+	using JoystickEvent::JoystickEvent;
 
 	[[nodiscard]] uint8_t getHat()   const { return evt.jhat.hat; }
 	[[nodiscard]] uint8_t getValue() const { return evt.jhat.value; }
@@ -223,8 +208,8 @@ public:
 class WindowEvent : public SdlEvent
 {
 public:
-	explicit WindowEvent(const SDL_Event& e)
-		: SdlEvent(e) {}
+	using SdlEvent::SdlEvent;
+
 	[[nodiscard]] const SDL_WindowEvent& getSdlWindowEvent() const { return evt.window; }
 	[[nodiscard]] bool isMainWindow() const { return isMainWindow(evt.window.windowID); }
 
@@ -240,8 +225,7 @@ private:
 class TextEvent : public SdlEvent
 {
 public:
-	explicit TextEvent(const SDL_Event& e)
-		: SdlEvent(e) {}
+	using SdlEvent::SdlEvent;
 };
 
 
@@ -254,6 +238,7 @@ public:
 	FileDropEvent& operator=(const FileDropEvent&) { assert(false); return *this; }
 	FileDropEvent(FileDropEvent&&) = default;
 	FileDropEvent& operator=(FileDropEvent&&) = default;
+	~FileDropEvent() = default;
 
 	[[nodiscard]] zstring_view getFileName() const { return fileName.get(); }
 
@@ -272,30 +257,29 @@ class QuitEvent final : public EventBase {};
 class OsdControlEvent : public EventBase
 {
 public:
-	enum { LEFT_BUTTON, RIGHT_BUTTON, UP_BUTTON, DOWN_BUTTON,
-		A_BUTTON, B_BUTTON };
-
-	[[nodiscard]] unsigned getButton() const { return button; }
+	enum class Button {LEFT, RIGHT, UP, DOWN, A, B,
+	                   NUM};
+	[[nodiscard]] Button getButton() const { return button; }
 
 protected:
-	explicit OsdControlEvent(unsigned button_)
+	explicit OsdControlEvent(Button button_)
 		: button(button_) {}
 
 private:
-	unsigned button;
+	Button button;
 };
 
 class OsdControlReleaseEvent final : public OsdControlEvent
 {
 public:
-	explicit OsdControlReleaseEvent(unsigned button_)
+	explicit OsdControlReleaseEvent(Button button_)
 		: OsdControlEvent(button_) {}
 };
 
 class OsdControlPressEvent final : public OsdControlEvent
 {
 public:
-	explicit OsdControlPressEvent(unsigned button_)
+	explicit OsdControlPressEvent(Button button_)
 		: OsdControlEvent(button_) {}
 };
 
@@ -357,6 +341,7 @@ public:
 	CliCommandEvent& operator=(const CliCommandEvent&) { assert(false); return *this; }
 	CliCommandEvent(CliCommandEvent&&) = default;
 	CliCommandEvent& operator=(CliCommandEvent&&) = default;
+	~CliCommandEvent() = default;
 
 	[[nodiscard]] zstring_view getCommand() const { return command.get(); }
 	[[nodiscard]] const CliConnection* getId() const { return id; }
@@ -543,45 +528,48 @@ struct GetIfEventHelper { // standard std::get_if() behavior
 };
 template<>
 struct GetIfEventHelper<SdlEvent> { // extension for base-classes
-	const SdlEvent* operator()(const Event& event) {
+	[[nodiscard]] const SdlEvent* operator()(const Event& event) const {
 		const auto& var = event;
 		switch (EventType(var.index())) {
-		case EventType::KEY_UP:              return &std::get<KeyUpEvent>(var);
-		case EventType::KEY_DOWN:            return &std::get<KeyDownEvent>(var);
-		case EventType::MOUSE_BUTTON_UP:     return &std::get<MouseButtonUpEvent>(var);
-		case EventType::MOUSE_BUTTON_DOWN:   return &std::get<MouseButtonDownEvent>(var);
-		case EventType::MOUSE_WHEEL:         return &std::get<MouseWheelEvent>(var);
-		case EventType::MOUSE_MOTION:        return &std::get<MouseMotionEvent>(var);
-		case EventType::JOY_BUTTON_UP:       return &std::get<JoystickButtonUpEvent>(var);
-		case EventType::JOY_BUTTON_DOWN:     return &std::get<JoystickButtonDownEvent>(var);
-		case EventType::JOY_AXIS_MOTION:     return &std::get<JoystickAxisMotionEvent>(var);
-		case EventType::JOY_HAT:             return &std::get<JoystickHatEvent>(var);
-		case EventType::WINDOW:              return &std::get<WindowEvent>(var);
-		case EventType::TEXT:                return &std::get<TextEvent>(var);
+		using enum EventType;
+		case KEY_UP:            return &std::get<KeyUpEvent>(var);
+		case KEY_DOWN:          return &std::get<KeyDownEvent>(var);
+		case MOUSE_BUTTON_UP:   return &std::get<MouseButtonUpEvent>(var);
+		case MOUSE_BUTTON_DOWN: return &std::get<MouseButtonDownEvent>(var);
+		case MOUSE_WHEEL:       return &std::get<MouseWheelEvent>(var);
+		case MOUSE_MOTION:      return &std::get<MouseMotionEvent>(var);
+		case JOY_BUTTON_UP:     return &std::get<JoystickButtonUpEvent>(var);
+		case JOY_BUTTON_DOWN:   return &std::get<JoystickButtonDownEvent>(var);
+		case JOY_AXIS_MOTION:   return &std::get<JoystickAxisMotionEvent>(var);
+		case JOY_HAT:           return &std::get<JoystickHatEvent>(var);
+		case WINDOW:            return &std::get<WindowEvent>(var);
+		case TEXT:              return &std::get<TextEvent>(var);
 		default: return nullptr;
 		}
 	}
 };
 template<>
 struct GetIfEventHelper<KeyEvent> {
-	const KeyEvent* operator()(const Event& event) {
+	[[nodiscard]] const KeyEvent* operator()(const Event& event) const {
 		const auto& var = event;
 		switch (EventType(var.index())) {
-		case EventType::KEY_UP:   return &std::get<KeyUpEvent>(var);
-		case EventType::KEY_DOWN: return &std::get<KeyDownEvent>(var);
+		using enum EventType;
+		case KEY_UP:   return &std::get<KeyUpEvent>(var);
+		case KEY_DOWN: return &std::get<KeyDownEvent>(var);
 		default: return nullptr;
 		}
 	}
 };
 template<>
 struct GetIfEventHelper<JoystickEvent> {
-	const JoystickEvent* operator()(const Event& event) {
+	[[nodiscard]] const JoystickEvent* operator()(const Event& event) const {
 		const auto& var = event;
 		switch (EventType(var.index())) {
-		case EventType::JOY_BUTTON_UP:   return &std::get<JoystickButtonUpEvent>(var);
-		case EventType::JOY_BUTTON_DOWN: return &std::get<JoystickButtonDownEvent>(var);
-		case EventType::JOY_AXIS_MOTION: return &std::get<JoystickAxisMotionEvent>(var);
-		case EventType::JOY_HAT:         return &std::get<JoystickHatEvent>(var);
+		using enum EventType;
+		case JOY_BUTTON_UP:   return &std::get<JoystickButtonUpEvent>(var);
+		case JOY_BUTTON_DOWN: return &std::get<JoystickButtonDownEvent>(var);
+		case JOY_AXIS_MOTION: return &std::get<JoystickAxisMotionEvent>(var);
+		case JOY_HAT:         return &std::get<JoystickHatEvent>(var);
 		default: return nullptr;
 		}
 	}

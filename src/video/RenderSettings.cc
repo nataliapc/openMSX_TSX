@@ -1,10 +1,14 @@
 #include "RenderSettings.hh"
+
 #include "CommandController.hh"
 #include "CommandException.hh"
 #include "Version.hh"
+
 #include "stl.hh"
 #include "unreachable.hh"
+
 #include "build-info.hh"
+
 #include <algorithm>
 #include <iostream>
 #include <cmath>
@@ -15,33 +19,36 @@ namespace openmsx {
 
 EnumSetting<RenderSettings::ScaleAlgorithm>::Map RenderSettings::getScalerMap()
 {
+	using enum ScaleAlgorithm;
 	EnumSetting<ScaleAlgorithm>::Map scalerMap = {
-		{"simple",     SCALER_SIMPLE},
-		{"ScaleNx",    SCALER_SCALE},
-		{"hq",         SCALER_HQ},
-		{"hqlite",     SCALER_HQLITE},
-		{"RGBtriplet", SCALER_RGBTRIPLET},
-		{"TV",         SCALER_TV}
+		{"simple",     SIMPLE},
+		{"ScaleNx",    SCALE},
+		{"hq",         HQ},
+		{"hqlite",     HQLITE},
+		{"RGBtriplet", RGBTRIPLET},
+		{"TV",         TV}
 	};
 	return scalerMap;
 }
 
 EnumSetting<RenderSettings::RendererID>::Map RenderSettings::getRendererMap()
 {
+	using enum RendererID;
 	EnumSetting<RendererID>::Map rendererMap = {
-		{"none",     DUMMY},// TODO: only register when in CliComm mode
-		{"SDLGL-PP", SDLGL_PP}
+		{"uninitialized", UNINITIALIZED},
+		{"none",          DUMMY},
+		{"SDLGL-PP",      SDLGL_PP}
 	};
 	return rendererMap;
 }
 
 RenderSettings::RenderSettings(CommandController& commandController)
 	: accuracySetting(commandController,
-		"accuracy", "rendering accuracy", ACC_PIXEL,
+		"accuracy", "rendering accuracy", Accuracy::PIXEL,
 		EnumSetting<Accuracy>::Map{
-			{"screen", ACC_SCREEN},
-			{"line",   ACC_LINE},
-			{"pixel",  ACC_PIXEL}})
+			{"screen", Accuracy::SCREEN},
+			{"line",   Accuracy::LINE},
+			{"pixel",  Accuracy::PIXEL}})
 
 	, deinterlaceSetting(commandController,
 		"deinterlace", "deinterlacing on/off", true)
@@ -86,7 +93,7 @@ RenderSettings::RenderSettings(CommandController& commandController)
 
 	, rendererSetting(commandController,
 		"renderer", "rendering back-end used to display the MSX screen",
-		SDLGL_PP, getRendererMap(), Setting::DONT_SAVE)
+		RendererID::SDLGL_PP, getRendererMap(), Setting::Save::NO)
 
 	, horizontalBlurSetting(commandController,
 		"blur", "amount of horizontal blur effect: 0 = none, 100 = full",
@@ -94,7 +101,7 @@ RenderSettings::RenderSettings(CommandController& commandController)
 
 	, scaleAlgorithmSetting(
 		commandController, "scale_algorithm", "scale algorithm",
-		SCALER_SIMPLE, getScalerMap())
+		ScaleAlgorithm::SIMPLE, getScalerMap())
 
 	, scaleFactorSetting(commandController,
 		"scale_factor", "scale factor",
@@ -110,12 +117,12 @@ RenderSettings::RenderSettings(CommandController& commandController)
 
 	, disableSpritesSetting(commandController,
 		"disablesprites", "disable sprite rendering",
-		false, Setting::DONT_SAVE)
+		false, Setting::Save::NO)
 
 	, cmdTimingSetting(commandController,
 		"cmdtiming", "VDP command timing", false,
 		EnumSetting<bool>::Map{{"real", false}, {"broken", true}},
-		Setting::DONT_SAVE)
+		Setting::Save::NO)
 
 	, tooFastAccessSetting(commandController,
 		"too_fast_vram_access",
@@ -125,14 +132,14 @@ RenderSettings::RenderSettings(CommandController& commandController)
 		" ignore -> access speed is ignored, all accesses are executed",
 		false,
 		EnumSetting<bool>::Map{{"real", false }, {"ignore", true}},
-		Setting::DONT_SAVE)
+		Setting::Save::NO)
 
 	, displayDeformSetting(
 		commandController,
-		"display_deform", "Display deform", DEFORM_NORMAL,
+		"display_deform", "Display deform", DisplayDeform::NORMAL,
 		EnumSetting<DisplayDeform>::Map{
-			{"normal", DEFORM_NORMAL},
-			{"3d",     DEFORM_3D}})
+			{"normal", DisplayDeform::NORMAL},
+			{"3d",     DisplayDeform::_3D}})
 
 	, vSyncSetting(commandController,
 		"vsync", "Synchronize page flip with the host screen vertical sync:\n"
@@ -175,7 +182,7 @@ RenderSettings::RenderSettings(CommandController& commandController)
 	updateBrightnessAndContrast();
 
 	auto& interp = commandController.getInterpreter();
-	colorMatrixSetting.setChecker([this, &interp](TclObject& newValue) {
+	colorMatrixSetting.setChecker([this, &interp](const TclObject& newValue) {
 		try {
 			parseColorMatrix(interp, newValue);
 		} catch (CommandException& e) {
@@ -190,7 +197,14 @@ RenderSettings::RenderSettings(CommandController& commandController)
 		cmIdentity = true;
 	}
 
-	rendererSetting.setEnum(DUMMY); // always start hidden
+	rendererSetting.setEnum(RendererID::UNINITIALIZED); // always start hidden
+	rendererSetting.setChecker([this](const TclObject& newValue) {
+		if (newValue.getString() == "uninitialized") {
+			throw CommandException("can't set special value 'uninitialized'");
+		}
+		// the default enum check
+		(void)rendererSetting.fromStringBase(newValue.getString());
+	});
 }
 
 RenderSettings::~RenderSettings()

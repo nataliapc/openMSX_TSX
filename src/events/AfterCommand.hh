@@ -4,6 +4,7 @@
 #include "Command.hh"
 #include "EventListener.hh"
 #include "Event.hh"
+
 #include <concepts>
 #include <vector>
 
@@ -39,11 +40,11 @@ private:
 	void afterTime    (std::span<const TclObject> tokens, TclObject& result);
 	void afterRealTime(std::span<const TclObject> tokens, TclObject& result);
 	void afterIdle    (std::span<const TclObject> tokens, TclObject& result);
-	void afterInfo    (std::span<const TclObject> tokens, TclObject& result);
+	void afterInfo    (std::span<const TclObject> tokens, TclObject& result) const;
 	void afterCancel  (std::span<const TclObject> tokens, TclObject& result);
 
 	// EventListener
-	int signalEvent(const Event& event) override;
+	bool signalEvent(const Event& event) override;
 
 private:
 	std::vector<Index> afterCmds;

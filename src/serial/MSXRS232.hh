@@ -1,11 +1,12 @@
 #ifndef MSXRS232_HH
 #define MSXRS232_HH
 
-#include "MSXDevice.hh"
-#include "IRQHelper.hh"
-#include "RS232Connector.hh"
 #include "I8251.hh"
 #include "I8254.hh"
+#include "IRQHelper.hh"
+#include "MSXDevice.hh"
+#include "RS232Connector.hh"
+
 #include <memory>
 
 namespace openmsx {
@@ -29,13 +30,13 @@ public:
 	// TODO: implement peekMem, because the default isn't OK anymore
 	[[nodiscard]] const byte *getReadCacheLine(word start) const override;
 	void writeMem(word address, byte value, EmuTime::param time) override;
-	[[nodiscard]] byte* getWriteCacheLine(word start) const override;
+	[[nodiscard]] byte* getWriteCacheLine(word start) override;
 	[[nodiscard]] bool allowUnaligned() const override;
 
 	// RS232Connector  (input)
 	void setDataBits(DataBits bits) override;
 	void setStopBits(StopBits bits) override;
-	void setParityBit(bool enable, ParityBit parity) override;
+	void setParityBit(bool enable, Parity parity) override;
 	void recvByte(byte value, EmuTime::param time) override;
 	[[nodiscard]] bool ready() override;
 	[[nodiscard]] bool acceptsData() override;
@@ -72,7 +73,7 @@ private:
 		[[nodiscard]] bool getCTS(EmuTime::param time) override;
 		void setDataBits(DataBits bits) override;
 		void setStopBits(StopBits bits) override;
-		void setParityBit(bool enable, ParityBit parity) override;
+		void setParityBit(bool enable, Parity parity) override;
 		void recvByte(byte value, EmuTime::param time) override;
 		void signal(EmuTime::param time) override;
 	} interface;

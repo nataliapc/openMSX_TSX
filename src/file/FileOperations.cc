@@ -4,8 +4,8 @@
 #endif
 #include "utf8_checked.hh"
 #include "vla.hh"
-#include <Windows.h>
-#include <ShlObj.h>
+#include <windows.h>
+#include <shlobj.h>
 #include <shellapi.h>
 #include <io.h>
 #include <direct.h>
@@ -346,7 +346,7 @@ string getCurrentWorkingDirectory()
 {
 #ifdef _WIN32
 	std::array<wchar_t, MAXPATHLEN> bufW;
-	wchar_t* result = _wgetcwd(bufW.data(), bufW.size());
+	const wchar_t* result = _wgetcwd(bufW.data(), bufW.size());
 	if (!result) {
 		throw FileException("Couldn't get current working directory.");
 	}
@@ -439,7 +439,7 @@ const string& getUserDataDir()
 	static std::optional<string> result;
 	if (!result) {
 		const char* const NAME = "OPENMSX_USER_DATA";
-		char* value = getenv(NAME);
+		const char* value = getenv(NAME);
 		result = value ? value : getUserOpenMSXDir() + "/share";
 	}
 	return *result;
@@ -449,13 +449,13 @@ const string& getSystemDataDir()
 {
 	static std::optional<string> result;
 	if (!result) result = []() -> string {
-		if (char* value = getenv("OPENMSX_SYSTEM_DATA")) {
+		if (const char* value = getenv("OPENMSX_SYSTEM_DATA")) {
 			return value;
 		}
 #ifdef _WIN32
 		std::array<wchar_t, MAXPATHLEN + 1> bufW;
-		int res = GetModuleFileNameW(nullptr, bufW.data(), DWORD(bufW.size()));
-		if (!res) {
+		if (int res = GetModuleFileNameW(nullptr, bufW.data(), DWORD(bufW.size()));
+		    !res) {
 			throw FatalError(
 				"Cannot detect openMSX directory. GetModuleFileNameW failed: ",
 				GetLastError());
@@ -485,8 +485,8 @@ const string& getSystemDocDir()
 	if (!result) result = []() -> string {
 #ifdef _WIN32
 		std::array<wchar_t, MAXPATHLEN + 1> bufW;
-		int res = GetModuleFileNameW(nullptr, bufW.data(), DWORD(bufW.size()));
-		if (!res) {
+		if (int res = GetModuleFileNameW(nullptr, bufW.data(), DWORD(bufW.size()));
+		    !res) {
 			throw FatalError(
 				"Cannot detect openMSX directory. GetModuleFileNameW failed: ",
 				GetLastError());
@@ -598,7 +598,7 @@ bool exists(zstring_view filename)
 	return static_cast<bool>(getStat(filename));
 }
 
-static unsigned getNextNum(dirent* d, string_view prefix, string_view extension,
+static unsigned getNextNum(const dirent* d, string_view prefix, string_view extension,
                            unsigned nofDigits)
 {
 	auto extensionLen = extension.size();
@@ -678,8 +678,7 @@ string parseCommandFileArgument(
 string getTempDir()
 {
 #ifdef _WIN32
-	DWORD len = GetTempPathW(0, nullptr);
-	if (len) {
+	if (DWORD len = GetTempPathW(0, nullptr)) {
 		VLA(wchar_t, bufW, (len + 1));
 		len = GetTempPathW(len, bufW.data());
 		if (len) {

@@ -30,11 +30,11 @@ Creating a release candidate
   use a version number that ends with -rc1, so 1.2.3-rc1. Only the final
   release will be without the -rc suffix (in both tag and version
   numbers.)
-- Update the copyright year in src/resource/openmsx.rc
 - Edit the version number in build/version.py:
     packageVersionNumber = '1.2.3'
   And set releaseFlag to True.
   Additionally, increase the androidReleaseVersionCode with 1.
+  And update the copyright year in build/version.py
 - Update the release date in "doc/release-notes.txt" and
   "doc/release-history.txt".
 - Don't forget to commit and push all these last changes before tagging!
@@ -110,6 +110,10 @@ https://help.github.com/articles/creating-releases/):
 - At "Attach binaries" select the files to upload, including our own
   tarballs.
   In short: all the files we used to upload for an SF.net release.
+  Upload the relevant binaries that came out of the GitHub Actions build done
+  based on the tarball, as described above. For some reason, these results are
+  zipped or get an extra zip extension. Make sure to unzip (e.g. the dmg files)
+  or strip the extra .zip file extension (e.g. the Linux build).
 - Note: GitHub also generates a tarball and a zip file. Just ignore it for
   now. Do not use these in any links on our website or somewhere else.
   They contain a lot of unnecessary stuff.

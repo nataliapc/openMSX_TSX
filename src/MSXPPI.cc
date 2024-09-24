@@ -23,7 +23,7 @@ MSXPPI::MSXPPI(const DeviceConfig& config)
 		config.getMotherBoard().getReactor().getEventDistributor(),
 		config.getMotherBoard().getMSXEventDistributor(),
 		config.getMotherBoard().getStateChangeDistributor(),
-		Keyboard::MATRIX_MSX, config)
+		Keyboard::Matrix::MSX, config)
 {
 	reset(getCurrentTime());
 }
@@ -31,10 +31,6 @@ MSXPPI::MSXPPI(const DeviceConfig& config)
 MSXPPI::~MSXPPI()
 {
 	powerDown(EmuTime::dummy());
-}
-
-const Keyboard& MSXPPI::getKeyboard() const {
-	return keyboard;
 }
 
 void MSXPPI::reset(EmuTime::param time)
@@ -91,12 +87,11 @@ byte MSXPPI::readB(EmuTime::param time)
 }
 byte MSXPPI::peekB(EmuTime::param time) const
 {
-	auto& keyb = const_cast<Keyboard&>(keyboard);
-	if (selectedRow != 8) {
-		return keyb.getKeys()[selectedRow];
-	} else {
-		return keyb.getKeys()[8] | (renshaTurbo.getSignal(time) ? 1:0);
+	auto row = keyboard.getKeys()[selectedRow];
+	if (selectedRow == 8) {
+		row |= renshaTurbo.getSignal(time) ? 1 : 0;
 	}
+	return row;
 }
 void MSXPPI::writeB(byte /*value*/, EmuTime::param /*time*/)
 {

@@ -352,7 +352,7 @@ void Y8950::Slot::reset()
 	phase = 0;
 	output = 0;
 	feedback = 0;
-	eg_mode = FINISH;
+	eg_mode = EnvelopeState::FINISH;
 	eg_phase = EG_DP_MAX;
 	key = 0;
 	patch.reset();
@@ -390,6 +390,7 @@ void Y8950::Slot::updateRKS(unsigned freq)
 void Y8950::Slot::updateEG()
 {
 	switch (eg_mode) {
+	using enum EnvelopeState;
 	case ATTACK:
 		eg_dPhase = dPhaseARTableRks[patch.AR];
 		break;
@@ -416,14 +417,14 @@ void Y8950::Slot::updateAll(unsigned freq)
 
 bool Y8950::Slot::isActive() const
 {
-	return eg_mode != FINISH;
+	return eg_mode != EnvelopeState::FINISH;
 }
 
 // Slot key on
 void Y8950::Slot::slotOn(KeyPart part)
 {
 	if (!key) {
-		eg_mode = ATTACK;
+		eg_mode = EnvelopeState::ATTACK;
 		phase = 0;
 		eg_phase = Y8950::EnvPhaseIndex(adjustRA[eg_phase.toInt()]);
 	}
@@ -436,10 +437,10 @@ void Y8950::Slot::slotOff(KeyPart part)
 	if (key) {
 		key &= ~part;
 		if (!key) {
-			if (eg_mode == ATTACK) {
+			if (eg_mode == EnvelopeState::ATTACK) {
 				eg_phase = Y8950::EnvPhaseIndex(adjustAR[eg_phase.toInt()]);
 			}
-			eg_mode = RELEASE;
+			eg_mode = EnvelopeState::RELEASE;
 		}
 	}
 }
@@ -665,6 +666,7 @@ unsigned Y8950::Slot::calc_envelope(int lfo_am)
 {
 	unsigned egOut = 0;
 	switch (eg_mode) {
+	using enum EnvelopeState;
 	case ATTACK:
 		eg_phase += eg_dPhase;
 		if (eg_phase >= EG_DP_MAX) {
@@ -1028,8 +1030,7 @@ void Y8950::writeReg(uint8_t rg, uint8_t data, EmuTime::param time)
 		break;
 	}
 	case 0x20: {
-		int s = sTbl[rg & 0x1f];
-		if (s >= 0) {
+		if (int s = sTbl[rg & 0x1f]; s >= 0) {
 			auto& chan = ch[s / 2];
 			auto& slot = chan.slot[s & 1];
 			slot.patch.AM = (data >> 7) &  1;
@@ -1043,8 +1044,7 @@ void Y8950::writeReg(uint8_t rg, uint8_t data, EmuTime::param time)
 		break;
 	}
 	case 0x40: {
-		int s = sTbl[rg & 0x1f];
-		if (s >= 0) {
+		if (int s = sTbl[rg & 0x1f]; s >= 0) {
 			auto& chan = ch[s / 2];
 			auto& slot = chan.slot[s & 1];
 			slot.patch.KL = (data >> 6) &  3;
@@ -1055,8 +1055,7 @@ void Y8950::writeReg(uint8_t rg, uint8_t data, EmuTime::param time)
 		break;
 	}
 	case 0x60: {
-		int s = sTbl[rg & 0x1f];
-		if (s >= 0) {
+		if (int s = sTbl[rg & 0x1f]; s >= 0) {
 			auto& slot = ch[s / 2].slot[s & 1];
 			slot.patch.AR = (data >> 4) & 15;
 			slot.patch.DR = (data >> 0) & 15;
@@ -1066,8 +1065,7 @@ void Y8950::writeReg(uint8_t rg, uint8_t data, EmuTime::param time)
 		break;
 	}
 	case 0x80: {
-		int s = sTbl[rg & 0x1f];
-		if (s >= 0) {
+		if (int s = sTbl[rg & 0x1f]; s >= 0) {
 			auto& slot = ch[s / 2].slot[s & 1];
 			slot.patch.SL = (data >> 4) & 15;
 			slot.patch.RR = (data >> 0) & 15;
@@ -1183,9 +1181,7 @@ uint8_t Y8950::peekReg(uint8_t rg, EmuTime::param time) const
 
 uint8_t Y8950::readStatus(EmuTime::param time) const
 {
-	uint8_t result = peekStatus(time);
-	//std::cout << "status: " << (int)result << '\n';
-	return result;
+	return peekStatus(time);
 }
 
 uint8_t Y8950::peekStatus(EmuTime::param time) const
@@ -1251,11 +1247,11 @@ void Y8950::Patch::serialize(Archive& ar, unsigned /*version*/)
 }
 
 static constexpr std::initializer_list<enum_string<Y8950::EnvelopeState>> envelopeStateInfo = {
-	{ "ATTACK",  Y8950::ATTACK  },
-	{ "DECAY",   Y8950::DECAY   },
-	{ "SUSTAIN", Y8950::SUSTAIN },
-	{ "RELEASE", Y8950::RELEASE },
-	{ "FINISH",  Y8950::FINISH  }
+	{ "ATTACK",  Y8950::EnvelopeState::ATTACK  },
+	{ "DECAY",   Y8950::EnvelopeState::DECAY   },
+	{ "SUSTAIN", Y8950::EnvelopeState::SUSTAIN },
+	{ "RELEASE", Y8950::EnvelopeState::RELEASE },
+	{ "FINISH",  Y8950::EnvelopeState::FINISH  }
 };
 SERIALIZE_ENUM(Y8950::EnvelopeState, envelopeStateInfo);
 
@@ -1279,6 +1275,7 @@ void Y8950::Slot::serialize(Archive& ar, unsigned version)
 		int tmp = 0; // dummy init to avoid warning
 		ar.serialize("eg_mode", tmp);
 		switch (tmp) {
+			using enum EnvelopeState;
 			case 0:  eg_mode = ATTACK;  break;
 			case 1:  eg_mode = DECAY;   break;
 			case 2:  eg_mode = SUSTAIN; break; // was SUSHOLD
@@ -1358,7 +1355,7 @@ Y8950::Debuggable::Debuggable(MSXMotherBoard& motherBoard_,
 
 uint8_t Y8950::Debuggable::read(unsigned address, EmuTime::param time)
 {
-	auto& y8950 = OUTER(Y8950, debuggable);
+	const auto& y8950 = OUTER(Y8950, debuggable);
 	return y8950.peekReg(narrow<uint8_t>(address), time);
 }
 

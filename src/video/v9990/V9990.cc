@@ -67,12 +67,12 @@ V9990::V9990(const DeviceConfig& config)
 		tmpStrCat(getName(), "_invalid_register_read_callback"),
 		"Tcl proc to call when a write-only register was read from. "
 		"Input: register number (0-63)",
-                {}, Setting::SAVE)
+                {}, Setting::Save::YES)
 	, invalidRegisterWriteCallback(getCommandController(),
 		tmpStrCat(getName(), "_invalid_register_write_callback"),
 		"Tcl proc to call when a read-only register was written to. "
 		"Input: register number (0-63), 8-bit data",
-		{}, Setting::SAVE)
+		{}, Setting::Save::YES)
 	, vram(*this, getCurrentTime())
 	, cmdEngine(*this, getCurrentTime(), display.getRenderSettings())
 	, frameStartTime(getCurrentTime())
@@ -367,8 +367,8 @@ void V9990::writeIO(word port, byte val, EmuTime::param time)
 			status = byte((status & 0xFB) | ((val & 1) << 2));
 			syncAtNextLine(syncSetMode, time);
 
-			bool newSystemReset = (val & 2) != 0;
-			if (newSystemReset != systemReset) {
+			if (bool newSystemReset = (val & 2) != 0;
+			    newSystemReset != systemReset) {
 				systemReset = newSystemReset;
 				if (systemReset) {
 					// Enter systemReset mode
@@ -477,7 +477,7 @@ void V9990::postVideoSystemChange() noexcept
 // RegDebug
 // -------------------------------------------------------------------------
 
-V9990::RegDebug::RegDebug(V9990& v9990_)
+V9990::RegDebug::RegDebug(const V9990& v9990_)
 	: SimpleDebuggable(v9990_.getMotherBoard(),
 	                   v9990_.getName() + " regs", "V9990 registers", 0x40)
 {
@@ -499,7 +499,7 @@ void V9990::RegDebug::write(unsigned address, byte value, EmuTime::param time)
 // PalDebug
 // -------------------------------------------------------------------------
 
-V9990::PalDebug::PalDebug(V9990& v9990_)
+V9990::PalDebug::PalDebug(const V9990& v9990_)
 	: SimpleDebuggable(v9990_.getMotherBoard(),
 	                   v9990_.getName() + " palette",
 	                   "V9990 palette (format is R, G, B, 0).", 0x100)
@@ -558,7 +558,7 @@ byte V9990::readRegister(byte reg, EmuTime::param time) const
 	}
 }
 
-void V9990::syncAtNextLine(SyncBase& type, EmuTime::param time)
+void V9990::syncAtNextLine(SyncBase& type, EmuTime::param time) const
 {
 	int line = getUCTicksThisFrame(time) / V9990DisplayTiming::UC_TICKS_PER_LINE;
 	int ticks = (line + 1) * V9990DisplayTiming::UC_TICKS_PER_LINE;
@@ -709,8 +709,8 @@ void V9990::frameStart(EmuTime::param time)
 	setVerticalTiming();
 	status ^= 0x02; // flip EO bit
 
-	bool newSuperimposing = (regs[CONTROL] & 0x20) && externalVideoSource;
-	if (superimposing != newSuperimposing) {
+	if (bool newSuperimposing = (regs[CONTROL] & 0x20) && externalVideoSource;
+	    superimposing != newSuperimposing) {
 		superimposing = newSuperimposing;
 		renderer->updateSuperimposing(superimposing, time);
 	}
@@ -743,6 +743,7 @@ void V9990::raiseIRQ(IRQType irqType)
 void V9990::setHorizontalTiming()
 {
 	switch (mode) {
+	using enum V9990DisplayMode;
 	case P1: case P2:
 	case B1: case B3: case B7:
 		horTiming = &V9990DisplayTiming::lineMCLK;
@@ -759,6 +760,7 @@ void V9990::setHorizontalTiming()
 void V9990::setVerticalTiming()
 {
 	switch (mode) {
+	using enum V9990DisplayMode;
 	case P1: case P2:
 	case B1: case B3: case B7:
 		verTiming = isPalTiming()
@@ -778,6 +780,7 @@ void V9990::setVerticalTiming()
 
 V9990ColorMode V9990::getColorMode(byte pal_ctrl) const
 {
+	using enum V9990ColorMode;
 	if (!(regs[SCREEN_MODE_0] & 0x80)) {
 		return BP4;
 	} else {
@@ -805,6 +808,7 @@ V9990ColorMode V9990::getColorMode() const
 
 V9990DisplayMode V9990::calcDisplayMode() const
 {
+	using enum V9990DisplayMode;
 	switch (regs[SCREEN_MODE_0] & 0xC0) {
 		case 0x00:
 			return P1;
@@ -871,10 +875,11 @@ void V9990::scheduleHscan(EmuTime::param time)
 }
 
 static constexpr std::initializer_list<enum_string<V9990DisplayMode>> displayModeInfo = {
-	{ "INVALID", INVALID_DISPLAY_MODE },
-	{ "P1", P1 }, { "P2", P2 },
-	{ "B0", B0 }, { "B1", B1 }, { "B2", B2 }, { "B3", B3 },
-	{ "B4", B4 }, { "B5", B5 }, { "B6", B6 }, { "B7", B7 }
+	{ "P1", V9990DisplayMode::P1 }, { "P2", V9990DisplayMode::P2 },
+	{ "B0", V9990DisplayMode::B0 }, { "B1", V9990DisplayMode::B1 },
+	{ "B2", V9990DisplayMode::B2 }, { "B3", V9990DisplayMode::B3 },
+	{ "B4", V9990DisplayMode::B4 }, { "B5", V9990DisplayMode::B5 },
+	{ "B6", V9990DisplayMode::B6 }, { "B7", V9990DisplayMode::B7 }
 };
 SERIALIZE_ENUM(V9990DisplayMode, displayModeInfo);
 

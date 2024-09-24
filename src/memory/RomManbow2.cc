@@ -15,47 +15,43 @@
 
 namespace openmsx {
 
-using Info = AmdFlash::SectorInfo;
+[[nodiscard]] static const AmdFlash::ValidatedChip& getFlashChip(RomType type)
+{
+	switch(type) {
+	using enum RomType;
+	case MANBOW2:
+	case MANBOW2_2:
+	case HAMARAJANIGHT:
+	case MEGAFLASHROMSCC:
+		return AmdFlashChip::AM29F040;
+	case RBSC_FLASH_KONAMI_SCC:
+		return AmdFlashChip::AM29F016;
+	default:
+		UNREACHABLE;
+	}
+}
 
-// 512kB, only last 64kB writable
-static constexpr auto config1 = [] {
-	std::array<Info, 512 / 64> result = {};
-	ranges::fill(result, Info{64 * 1024, true}); // read-only
-	result[7].writeProtected = false;
-	return result;
-}();
-// 512kB, only 128kB writable
-static constexpr auto config2 = [] {
-	std::array<Info, 512 / 64> result = {};
-	ranges::fill(result, Info{64 * 1024, true}); // read-only
-	result[4].writeProtected = false;
-	result[5].writeProtected = false;
-	return result;
-}();
-// fully writeable, 512kB
-static constexpr auto config3 = [] {
-	std::array<Info, 512 / 64> result = {};
-	ranges::fill(result, Info{64 * 1024, false});
-	return result;
-}();
-// fully writeable, 2MB
-static constexpr auto config4 = [] {
-	std::array<Info, 2048 / 64> result = {};
-	ranges::fill(result, Info{64 * 1024, false});
-	return result;
-}();
-[[nodiscard]] static constexpr std::span<const Info> getSectorInfo(RomType type)
+[[nodiscard]] static std::span<const bool> getWriteProtectSectors(RomType type)
 {
 	switch (type) {
-	case ROM_MANBOW2:
-	case ROM_MANBOW2_2:
-		return config1;
-	case ROM_HAMARAJANIGHT:
-		return config2;
-	case ROM_MEGAFLASHROMSCC:
-		return config3;
-	case ROM_RBSC_FLASH_KONAMI_SCC:
-		return config4;
+	using enum RomType;
+	case MANBOW2:
+	case MANBOW2_2:
+		{
+			static constexpr std::array<const bool, 8> writeProtectSectors =
+				{true, true, true, true, true, true, true, false};
+			return writeProtectSectors;  // only last 64kB writable
+		}
+	case HAMARAJANIGHT:
+		{
+			static constexpr std::array<const bool, 8> writeProtectSectors =
+				{true, true, true, true, false, false, true, true};
+			return writeProtectSectors;  // only 128kB writable
+		}
+	case MEGAFLASHROMSCC:
+		return {};  // fully writeable
+	case RBSC_FLASH_KONAMI_SCC:
+		return {};  // fully writeable
 	default:
 		UNREACHABLE;
 	}
@@ -64,18 +60,16 @@ static constexpr auto config4 = [] {
 RomManbow2::RomManbow2(const DeviceConfig& config, Rom&& rom_,
                        RomType type)
 	: MSXRom(config, std::move(rom_))
-	, scc((type != ROM_RBSC_FLASH_KONAMI_SCC)
+	, scc((type != RomType::RBSC_FLASH_KONAMI_SCC)
 		? std::make_unique<SCC>(
 			getName() + " SCC", config, getCurrentTime())
 		: nullptr)
-	, psg((type == one_of(ROM_MANBOW2_2, ROM_HAMARAJANIGHT))
+	, psg((type == one_of(RomType::MANBOW2_2, RomType::HAMARAJANIGHT))
 		? std::make_unique<AY8910>(
 			getName() + " PSG", DummyAY8910Periphery::instance(),
 			config, getCurrentTime())
 		: nullptr)
-	, flash(rom, getSectorInfo(type),
-	        type == ROM_RBSC_FLASH_KONAMI_SCC ? 0x01AD : 0x01A4,
-		AmdFlash::Addressing::BITS_11, config)
+	, flash(rom, getFlashChip(type), getWriteProtectSectors(type), config)
 	, romBlockDebug(*this, bank, 0x4000, 0x8000, 13)
 {
 	powerUp(getCurrentTime());
@@ -83,7 +77,7 @@ RomManbow2::RomManbow2(const DeviceConfig& config, Rom&& rom_,
 	if (psg) {
 		auto& cpuInterface = getCPUInterface();
 		for (auto port : {0x10, 0x11}) {
-			cpuInterface.register_IO_Out(port, this);
+			cpuInterface.register_IO_Out(narrow_cast<byte>(port), this);
 		}
 		cpuInterface.register_IO_In(0x12, this);
 	}
@@ -94,7 +88,7 @@ RomManbow2::~RomManbow2()
 	if (psg) {
 		auto& cpuInterface = getCPUInterface();
 		for (auto port : {0x10, 0x11}) {
-			cpuInterface.unregister_IO_Out(port, this);
+			cpuInterface.unregister_IO_Out(narrow_cast<byte>(port), this);
 		}
 		cpuInterface.unregister_IO_In(0x12, this);
 	}
@@ -199,7 +193,7 @@ void RomManbow2::writeMem(word address, byte value, EmuTime::param time)
 	}
 }
 
-byte* RomManbow2::getWriteCacheLine(word address) const
+byte* RomManbow2::getWriteCacheLine(word address)
 {
 	if ((0x4000 <= address) && (address < 0xC000)) {
 		return nullptr;
@@ -233,7 +227,7 @@ void RomManbow2::writeIO(word port, byte value, EmuTime::param time)
 
 // version 1: initial version
 // version 2: added optional built-in PSG
-// version 3: made SCC optional (for ROM_RBSC_FLASH_KONAMI_SCC)
+// version 3: made SCC optional (for RomType::RBSC_FLASH_KONAMI_SCC)
 template<typename Archive>
 void RomManbow2::serialize(Archive& ar, unsigned version)
 {

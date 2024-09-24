@@ -158,9 +158,8 @@ static int analyzeTrack(std::vector<uint8_t>& buffer)
 		updateCrc(addrCrc, h);
 		updateCrc(addrCrc, r);
 		updateCrc(addrCrc, n);
-		uint16_t onDiskAddrCrc = 256 * ch + cl;
-
-		if (onDiskAddrCrc != addrCrc) {
+		if (uint16_t onDiskAddrCrc = 256 * ch + cl;
+		    onDiskAddrCrc != addrCrc) {
 			// only mark address mark as in-use
 			gaps.addInterval(addrIdx, addrIdx + 10);
 			continue;
@@ -203,7 +202,7 @@ int main()
 			name[5] = char((t % 10) + '0');
 			name[7] = char(h + '0');
 
-			FILE* file = fopen(name.c_str(), "rb");
+			FILE_t file(fopen(name.c_str(), "rb"));
 			if (!file) {
 				if (h == 0) goto done_read;
 				fprintf(stderr,
@@ -215,7 +214,7 @@ int main()
 			}
 
 			struct stat st;
-			fstat(fileno(file), &st);
+			fstat(fileno(file.get()), &st);
 			size_t size = st.st_size;
 			if (size < 128) {
 				fprintf(stderr, "File %s is too small.\n",
@@ -224,12 +223,11 @@ int main()
 			}
 
 			std::vector<uint8_t> dat(size);
-			if (fread(dat.data(), size, 1, file) != 1) {
+			if (fread(dat.data(), size, 1, file.get()) != 1) {
 				fprintf(stderr, "Error reading file %s.\n",
 				        name.c_str());
 				exit(1);
 			}
-			fclose(file);
 			data.push_back(dat);
 		}
 	}
@@ -244,8 +242,8 @@ done_read:
 			name[5] = char((t % 10) + '0');
 			name[7] = char(h + '0');
 
-			FILE* file = fopen(name.c_str(), "rb");
-			if (!file) continue; // ok, we should have this file
+			if (FILE_t file(fopen(name.c_str(), "rb"));
+			    !file) continue; // ok, we should not have this file
 
 			std::string name2 = "DMK-tt-0.DAT";
 			name2[4] = char((numTracks / 10) + '0');
@@ -269,15 +267,15 @@ done_read:
 	// most often).
 	unsigned maxCount = 0;
 	unsigned trackSize = 0;
-	for (const auto& p : sizes) {
-		if (p.second >= maxCount) {
-			maxCount = p.second;
-			trackSize = p.first;
+	for (const auto& [length, count] : sizes) {
+		if (count >= maxCount) {
+			maxCount = count;
+			trackSize = length;
 		}
 	}
 
 	// Open output file.
-	FILE* file = fopen("out.dmk", "wb+");
+	FILE_t file(fopen("out.dmk", "wb+"));
 	if (!file) {
 		fprintf(stderr, "Couldn't open output file out.dmk.\n");
 		exit(1);
@@ -289,7 +287,7 @@ done_read:
 	header.numTracks = numTracks;
 	header.trackLen[0] = trackSize % 256;
 	header.trackLen[1] = trackSize / 256;
-	if (fwrite(&header, sizeof(header), 1, file) != 1) {
+	if (fwrite(&header, sizeof(header), 1, file.get()) != 1) {
 		fprintf(stderr, "Error writing out.dmk.\n");
 		exit(1);
 	}
@@ -335,15 +333,10 @@ done_read:
 		}
 
 		// Write track to DMK file.
-		if (fwrite(v.data(), v.size(), 1, file) != 1) {
+		if (fwrite(v.data(), v.size(), 1, file.get()) != 1) {
 			fprintf(stderr, "Error writing out.dmk.\n");
 			exit(1);
 		}
-	}
-
-	if (fclose(file)) {
-		fprintf(stderr, "Error closing out.dmk.\n");
-		exit(1);
 	}
 
 	printf("Successfully wrote out.dmk.\n");

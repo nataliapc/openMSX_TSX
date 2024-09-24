@@ -20,9 +20,11 @@ Deflicker::Deflicker(std::span<std::unique_ptr<RawFrame>, 4> lastFrames_)
 {
 }
 
+Deflicker::~Deflicker() = default;
+
 void Deflicker::init()
 {
-	FrameSource::init(FIELD_NONINTERLACED);
+	FrameSource::init(FieldType::NONINTERLACED);
 	setHeight(lastFrames[0]->getHeight());
 }
 
@@ -59,8 +61,8 @@ static __m128i compare(__m128i x, __m128i y)
 }
 #endif
 
-const void* Deflicker::getLineInfo(
-	unsigned line, unsigned& width, void* buf_, unsigned bufWidth) const
+std::span<const Pixel> Deflicker::getUnscaledLine(
+	unsigned line, std::span<Pixel> helpBuf) const
 {
 	unsigned width0 = lastFrames[0]->getLineWidthDirect(line);
 	unsigned width1 = lastFrames[1]->getLineWidthDirect(line);
@@ -72,15 +74,14 @@ const void* Deflicker::getLineInfo(
 	const Pixel* line3 = lastFrames[3]->getLineDirect(line).data();
 	if ((width0 != width3) || (width0 != width2) || (width0 != width1)) {
 		// Not all the same width.
-		width = width0;
-		return line0;
+		return std::span{line0, width0};
 	}
 
 	// Prefer to write directly to the output buffer, if that's not
 	// possible store the intermediate result in a temp buffer.
 	VLA_SSE_ALIGNED(Pixel, buf2, width0);
-	auto* buf = static_cast<Pixel*>(buf_);
-	Pixel* out = (width0 <= bufWidth) ? buf : buf2.data();
+	auto* buf = helpBuf.data();
+	Pixel* out = (width0 <= helpBuf.size()) ? buf : buf2.data();
 
 	// Detect pixels that alternate between two different color values and
 	// replace those with the average color. We search for an alternating
@@ -126,15 +127,14 @@ const void* Deflicker::getLineInfo(
 	               : line0[x];
 	}
 
-	if (width0 <= bufWidth) {
-		// It it already fits, we're done
-		width = width0;
+	if (width0 <= helpBuf.size()) {
+		// If it already fits, we're done
+		return std::span{buf, width0};
 	} else {
 		// Otherwise scale so that it does fit.
-		width = bufWidth;
-		scaleLine(std::span<const Pixel>{out, width0}, std::span{buf, bufWidth});
+		scaleLine(std::span{out, width0}, helpBuf);
+		return helpBuf;
 	}
-	return buf;
 }
 
 } // namespace openmsx

@@ -130,7 +130,6 @@ vec2 OSDRectangle::getSize(const OutputSurface& output) const
 		return (size * float(getScaleFactor(output)) * scale) +
 		       (getParent()->getSize(output) * relSize);
 	}
-	//std::cout << "rectangle getWH " << getName() << "  " << width << " x " << height << '\n';
 }
 
 uint8_t OSDRectangle::getFadedAlpha() const
@@ -141,8 +140,7 @@ uint8_t OSDRectangle::getFadedAlpha() const
 std::unique_ptr<GLImage> OSDRectangle::create(OutputSurface& output)
 {
 	if (imageName.empty()) {
-		bool constAlpha = hasConstantAlpha();
-		if (constAlpha && ((getRGBA(0) & 0xff) == 0) &&
+		if (hasConstantAlpha() && ((getRGBA(0) & 0xff) == 0) &&
 		    (((borderRGBA & 0xFF) == 0) || (borderSize == 0.0f))) {
 			// optimization: Sometimes it's useful to have a
 			//   rectangle that will never be drawn, it only exists

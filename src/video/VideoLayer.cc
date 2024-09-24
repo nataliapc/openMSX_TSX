@@ -12,7 +12,8 @@ namespace openmsx {
 
 VideoLayer::VideoLayer(MSXMotherBoard& motherBoard_,
                        const std::string& videoSource_)
-	: motherBoard(motherBoard_)
+	: Layer(Layer::Coverage::NONE, Layer::ZIndex::BACKGROUND)
+	, motherBoard(motherBoard_)
 	, display(motherBoard.getReactor().getDisplay())
 	, videoSourceSetting(motherBoard.getVideoSource())
 	, videoSourceActivator(videoSourceSetting, videoSource_)
@@ -57,15 +58,15 @@ void VideoLayer::update(const Setting& setting) noexcept
 void VideoLayer::calcZ()
 {
 	setZ((videoSourceSetting.getSource() == getVideoSource())
-		? Z_MSX_ACTIVE
-		: Z_MSX_PASSIVE);
+		? ZIndex::MSX_ACTIVE
+		: ZIndex::MSX_PASSIVE);
 }
 
 void VideoLayer::calcCoverage()
 {
 	auto cov = (!powerSetting.getBoolean() || !motherBoard.isActive())
-	         ? COVER_NONE
-	         : COVER_FULL;
+	         ? Coverage::NONE
+	         : Coverage::FULL;
 	setCoverage(cov);
 }
 
@@ -85,7 +86,7 @@ bool VideoLayer::needRender() const
 	// (superimposed) image.
 	int current = videoSourceSetting.getSource();
 	return (current == getVideoSource()) ||
-	      ((current == video9000Source) && (activeVideo9000 != INACTIVE));
+	      ((current == video9000Source) && (activeVideo9000 != Video9000Active::NO));
 }
 
 bool VideoLayer::needRecord() const
@@ -95,7 +96,7 @@ bool VideoLayer::needRecord() const
 	// (superimposed) image
 	int current = videoSourceSetting.getSource();
 	return (current == getVideoSource()) ||
-	      ((current == video9000Source) && (activeVideo9000 == ACTIVE_FRONT));
+	      ((current == video9000Source) && (activeVideo9000 == Video9000Active::FRONT));
 }
 
 } // namespace openmsx

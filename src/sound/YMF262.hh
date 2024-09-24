@@ -2,12 +2,15 @@
 #define YMF262_HH
 
 #include "ResampledSoundDevice.hh"
-#include "SimpleDebuggable.hh"
+
 #include "EmuTimer.hh"
+
 #include "EmuTime.hh"
 #include "FixedPoint.hh"
 #include "IRQHelper.hh"
+#include "SimpleDebuggable.hh"
 #include "serialize_meta.hh"
+
 #include <array>
 #include <cstdint>
 #include <memory>
@@ -34,7 +37,7 @@ public:
 	void reset(EmuTime::param time);
 	void writeReg   (unsigned r, uint8_t v, EmuTime::param time);
 	void writeReg512(unsigned r, uint8_t v, EmuTime::param time);
-	[[nodiscard]] uint8_t readReg(unsigned reg);
+	[[nodiscard]] uint8_t readReg(unsigned reg) const;
 	[[nodiscard]] uint8_t peekReg(unsigned reg) const;
 	[[nodiscard]] uint8_t readStatus();
 	[[nodiscard]] uint8_t peekStatus() const;
@@ -48,8 +51,8 @@ public:
 	/** 16.16 fixed point type for frequency calculations */
 	using FreqIndex = FixedPoint<16>;
 
-	enum EnvelopeState {
-		EG_ATTACK, EG_DECAY, EG_SUSTAIN, EG_RELEASE, EG_OFF
+	enum class EnvelopeState {
+		ATTACK, DECAY, SUSTAIN, RELEASE, OFF
 	};
 
 private:
@@ -62,7 +65,7 @@ private:
 		void FM_KEYON(uint8_t key_set);
 		void FM_KEYOFF(uint8_t key_clr);
 		void advanceEnvelopeGenerator(unsigned egCnt);
-		void advancePhaseGenerator(Channel& ch, unsigned lfo_pm);
+		void advancePhaseGenerator(const Channel& ch, unsigned lfo_pm);
 		void update_ar_dr();
 		void update_rr();
 		void calc_fc(const Channel& ch);
@@ -90,7 +93,7 @@ private:
 
 		std::span<const unsigned, SIN_LEN> waveTable; // waveform select
 
-		EnvelopeState state{EG_OFF}; // EG: phase type
+		EnvelopeState state{EnvelopeState::OFF}; // EG: phase type
 		unsigned eg_m_ar{0};  // (attack state)
 		unsigned eg_m_dr{0};  // (decay state)
 		unsigned eg_m_rr{0};  // (release state)
@@ -170,7 +173,7 @@ private:
 	void set_ksl_tl(unsigned sl, uint8_t v);
 	void set_ar_dr(unsigned sl, uint8_t v);
 	void set_sl_rr(unsigned sl, uint8_t v);
-	bool checkMuteHelper();
+	[[nodiscard]] bool checkMuteHelper() const;
 
 	[[nodiscard]] bool isExtended(unsigned ch) const;
 	[[nodiscard]] Channel& getFirstOfPair(unsigned ch);

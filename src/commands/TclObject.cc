@@ -39,8 +39,7 @@ void TclObject::addListElement(Tcl_Obj* element)
 
 void TclObject::addListElementsImpl(std::initializer_list<Tcl_Obj*> l)
 {
-	Tcl_Obj* const* objv = l.begin();
-	addListElementsImpl(int(l.size()), objv);
+	addListElementsImpl(int(l.size()), l.begin());
 }
 
 void TclObject::addListElementsImpl(int objc, Tcl_Obj* const* objv)
@@ -142,14 +141,14 @@ std::optional<double> TclObject::getOptionalDouble() const
 zstring_view TclObject::getString() const
 {
 	int length;
-	char* buf = Tcl_GetStringFromObj(obj, &length);
+	const char* buf = Tcl_GetStringFromObj(obj, &length);
 	return {buf, size_t(length)};
 }
 
 std::span<const uint8_t> TclObject::getBinary() const
 {
 	int length;
-	auto* buf = Tcl_GetByteArrayFromObj(obj, &length);
+	const auto* buf = Tcl_GetByteArrayFromObj(obj, &length);
 	return {buf, size_t(length)};
 }
 
@@ -249,9 +248,8 @@ TclObject TclObject::eval(Interpreter& interp_) const
 TclObject TclObject::executeCommand(Interpreter& interp_, bool compile)
 {
 	auto* interp = interp_.interp;
-	int flags = compile ? 0 : TCL_EVAL_DIRECT;
-	int success = Tcl_EvalObjEx(interp, obj, flags);
-	if (success != TCL_OK) {
+	if (int flags = compile ? 0 : TCL_EVAL_DIRECT;
+	    Tcl_EvalObjEx(interp, obj, flags) != TCL_OK) {
 		throw CommandException(Tcl_GetStringResult(interp));
 	}
 	return TclObject(Tcl_GetObjResult(interp));

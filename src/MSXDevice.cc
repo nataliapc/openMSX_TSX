@@ -268,7 +268,7 @@ void MSXDevice::registerSlots()
 	}
 
 	int logicalSS = (ss == -1) ? 0 : ss;
-	for (auto& r : tmpMemRegions) {
+	for (const auto& r : tmpMemRegions) {
 		getCPUInterface().registerMemDevice(
 			*this, ps, logicalSS, r.base, r.size);
 		memRegions.push_back(r);
@@ -334,20 +334,20 @@ void MSXDevice::registerPorts()
 	}
 	// .. and only then register the ports. This filters possible overlaps.
 	inPorts.foreachSetBit([&](auto port) {
-		getCPUInterface().register_IO_In(byte(port), this);
+		getCPUInterface().register_IO_In(narrow_cast<byte>(port), this);
 	});
 	outPorts.foreachSetBit([&](auto port) {
-		getCPUInterface().register_IO_Out(byte(port), this);
+		getCPUInterface().register_IO_Out(narrow_cast<byte>(port), this);
 	});
 }
 
 void MSXDevice::unregisterPorts()
 {
 	inPorts.foreachSetBit([&](auto port) {
-		getCPUInterface().unregister_IO_In(byte(port), this);
+		getCPUInterface().unregister_IO_In(narrow_cast<byte>(port), this);
 	});
 	outPorts.foreachSetBit([&](auto port) {
-		getCPUInterface().unregister_IO_Out(byte(port), this);
+		getCPUInterface().unregister_IO_Out(narrow_cast<byte>(port), this);
 	});
 }
 
@@ -456,7 +456,7 @@ void MSXDevice::globalRead(word /*address*/, EmuTime::param /*time*/)
 	UNREACHABLE;
 }
 
-byte* MSXDevice::getWriteCacheLine(word /*start*/) const
+byte* MSXDevice::getWriteCacheLine(word /*start*/)
 {
 	return nullptr; // uncacheable
 }

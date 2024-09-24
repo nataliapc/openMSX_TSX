@@ -141,11 +141,10 @@ std::optional<float> OSDImageBasedWidget::getScrollWidth() const
         const auto* parentImage = dynamic_cast<const OSDImageBasedWidget*>(getParent());
         if (!parentImage) return {};
 
-        auto* output = getDisplay().getOutputSurface();
+        const auto* output = getDisplay().getOutputSurface();
         if (!output) return {};
 
-        vec2 parentPos, parentSize;
-        parentImage->getBoundingBox(*output, parentPos, parentSize);
+        auto [parentPos, parentSize] = parentImage->getBoundingBox(*output);
         auto parentWidth = parentSize.x / narrow<float>(getScaleFactor(*output));
 
         auto thisWidth = getRenderedSize().x;
@@ -324,9 +323,7 @@ vec2 OSDImageBasedWidget::getRenderedSize() const
 		} else {
 			// Couldn't be rendered, maybe an (intentionally)
 			// invisible rectangle
-			vec2 dummyPos, size;
-			getBoundingBox(*output, dummyPos, size);
-			return size;
+			return getBoundingBox(*output).size;
 		}
 	}();
 	return imageSize / float(getScaleFactor(*output));
@@ -339,8 +336,8 @@ void OSDImageBasedWidget::paint(OutputSurface& output)
 	//    child widgets.
 	createImage(output);
 
-	auto fadedAlpha = getFadedAlpha();
-	if ((fadedAlpha != 0) && image) {
+	if (auto fadedAlpha = getFadedAlpha();
+	    (fadedAlpha != 0) && image) {
 		ivec2 drawPos = round(getTransformedPos(output));
 		image->draw(drawPos, fadedAlpha);
 	}

@@ -3,7 +3,9 @@
 
 #include "ImGuiPartInterface.hh"
 #include "ImGuiUtils.hh"
+#include "Shortcuts.hh"
 
+#include "EmuTime.hh"
 #include "EventListener.hh"
 #include "FilenameSetting.hh"
 #include "IntegerSetting.hh"
@@ -40,9 +42,10 @@ class ImGuiMachine;
 class ImGuiMedia;
 class ImGuiMessages;
 class ImGuiOpenFile;
-class ImGuiPalette;
 class ImGuiOsdIcons;
+class ImGuiPalette;
 class ImGuiReverseBar;
+class ImGuiSCCViewer;
 class ImGuiSettings;
 class ImGuiSoundChip;
 class ImGuiSpriteViewer;
@@ -51,30 +54,34 @@ class ImGuiTools;
 class ImGuiTrainer;
 class ImGuiVdpRegs;
 class ImGuiWatchExpr;
+class ImGuiWaveViewer;
 class RomInfo;
+class SettingsConfig;
 
 class ImGuiManager final : public ImGuiPartInterface, private EventListener, private Observer<Setting>
 {
 public:
-	ImGuiManager(const ImGuiManager&) = delete;
-	ImGuiManager& operator=(const ImGuiManager&) = delete;
-
 	explicit ImGuiManager(Reactor& reactor_);
+	ImGuiManager(const ImGuiManager&) = delete;
+	ImGuiManager(ImGuiManager&&) = delete;
+	ImGuiManager& operator=(const ImGuiManager&) = delete;
+	ImGuiManager& operator=(ImGuiManager&&) = delete;
 	~ImGuiManager();
 
 	void   registerPart(ImGuiPartInterface* part);
 	void unregisterPart(ImGuiPartInterface* part);
 
 	[[nodiscard]] Reactor& getReactor() { return reactor; }
+	[[nodiscard]] Shortcuts& getShortcuts() { return reactor.getShortcuts(); }
 	[[nodiscard]] Interpreter& getInterpreter();
 	[[nodiscard]] CliComm& getCliComm();
 	std::optional<TclObject> execute(TclObject command);
 	void executeDelayed(std::function<void()> action);
 	void executeDelayed(TclObject command,
-	                    std::function<void(const TclObject&)> ok,
-	                    std::function<void(const std::string&)> error);
+	                    const std::function<void(const TclObject&)>& ok,
+	                    const std::function<void(const std::string&)>& error);
 	void executeDelayed(TclObject command,
-	                    std::function<void(const TclObject&)> ok = {});
+	                    const std::function<void(const TclObject&)>& ok = {});
 
 	void printError(std::string_view message);
 	template<typename... Ts> void printError(Ts&&... ts) {
@@ -92,6 +99,7 @@ private:
 	[[nodiscard]] ImFont* addFont(zstring_view filename, int fontSize);
 	void loadFont();
 	void reloadFont();
+	void drawStatusBar(MSXMotherBoard* motherBoard);
 
 	// ImGuiPartInterface
 	[[nodiscard]] zstring_view iniName() const override { return "manager"; }
@@ -100,7 +108,7 @@ private:
 	void loadEnd() override;
 
 	// EventListener
-	int signalEvent(const Event& event) override;
+	bool signalEvent(const Event& event) override;
 
 	// Observer<Setting>
 	void update(const Setting& setting) noexcept override;
@@ -108,7 +116,7 @@ private:
 	// ini handler callbacks
 	void iniReadInit();
 	void* iniReadOpen(std::string_view name);
-	void loadLine(void* entry, const char* line);
+	void loadLine(void* entry, const char* line) const;
 	void iniApplyAll();
 	void iniWriteAll(ImGuiTextBuffer& buf);
 
@@ -146,6 +154,8 @@ public:
 	std::unique_ptr<ImGuiConnector> connector;
 	std::unique_ptr<ImGuiTools> tools;
 	std::unique_ptr<ImGuiTrainer> trainer;
+	std::unique_ptr<ImGuiSCCViewer> sccViewer;
+	std::unique_ptr<ImGuiWaveViewer> waveViewer;
 	std::unique_ptr<ImGuiCheatFinder> cheatFinder;
 	std::unique_ptr<ImGuiDiskManipulator> diskManipulator;
 	std::unique_ptr<ImGuiSettings> settings;
@@ -156,6 +166,7 @@ public:
 
 	bool menuFade = true;
 	bool needReloadFont = false;
+	bool statusBarVisible = false;
 	std::string loadIniFile;
 
 private:
@@ -167,7 +178,7 @@ private:
 	std::vector<std::string> selectList;
 	std::string selectedMedia;
 	const RomInfo* romInfo = nullptr;
-	RomType selectedRomType = ROM_UNKNOWN;
+	RomType selectedRomType = RomType::UNKNOWN;
 	float insertedInfoTimeout = 0.0f;
 	gl::ivec2 windowPos;
 	bool mainMenuBarUndocked = false;
@@ -175,10 +186,17 @@ private:
 	bool openInsertedInfo = false;
 	bool guiActive = false;
 
+	EmuTime prevBoardTime = EmuTime::zero();
+	float speedDrawTimeOut = 0.0f;
+	float fpsDrawTimeOut = 0.0f;
+	float fps = 0.0f;
+	float speed = 0.0f;
+
 	static constexpr auto persistentElements = std::tuple{
 		PersistentElement{"mainMenuBarUndocked", &ImGuiManager::mainMenuBarUndocked},
 		PersistentElement{"mainMenuBarFade",     &ImGuiManager::menuFade},
-		PersistentElement{"windowPos",           &ImGuiManager::windowPos}
+		PersistentElement{"windowPos",           &ImGuiManager::windowPos},
+		PersistentElement{"statusBarVisible",    &ImGuiManager::statusBarVisible}
 	};
 };
 

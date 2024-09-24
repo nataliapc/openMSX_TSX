@@ -4,6 +4,7 @@
 #include "static_string_view.hh"
 #include "Subject.hh"
 #include "strCat.hh"
+
 #include <string>
 
 namespace openmsx {
@@ -14,7 +15,9 @@ class ProbeBase : public Subject<ProbeBase>
 {
 public:
 	ProbeBase(const ProbeBase&) = delete;
+	ProbeBase(ProbeBase&&) = delete;
 	ProbeBase& operator=(const ProbeBase&) = delete;
+	ProbeBase& operator=(ProbeBase&&) = delete;
 
 	[[nodiscard]] const std::string& getName() const { return name; }
 	[[nodiscard]] std::string_view getDescription() const { return description; }
@@ -75,7 +78,7 @@ template<> class Probe<void> final : public ProbeBase
 {
 public:
 	Probe(Debugger& debugger, std::string name, static_string_view description);
-	void signal();
+	void signal() const;
 
 private:
 	[[nodiscard]] std::string getValue() const override;

@@ -1,11 +1,12 @@
 #ifndef HARDWARECONFIG_HH
 #define HARDWARECONFIG_HH
 
-#include "XMLElement.hh"
 #include "FileContext.hh"
+#include "XMLElement.hh"
 #include "openmsx.hh"
-#include "serialize_meta.hh"
 #include "serialize_constr.hh"
+#include "serialize_meta.hh"
+
 #include <array>
 #include <memory>
 #include <span>
@@ -28,9 +29,6 @@ public:
 		ROM
 	};
 
-	HardwareConfig(const HardwareConfig&) = delete;
-	HardwareConfig& operator=(const HardwareConfig&) = delete;
-
 	static void loadConfig(XMLDocument& doc, std::string_view type, std::string_view name);
 
 	[[nodiscard]] static std::unique_ptr<HardwareConfig> createMachineConfig(
@@ -43,6 +41,10 @@ public:
 		std::string_view slotName, std::span<const TclObject> options);
 
 	HardwareConfig(MSXMotherBoard& motherBoard, std::string hwName);
+	HardwareConfig(const HardwareConfig&) = delete;
+	HardwareConfig(HardwareConfig&&) = delete;
+	HardwareConfig& operator=(const HardwareConfig&) = delete;
+	HardwareConfig& operator=(HardwareConfig&&) = delete;
 	~HardwareConfig();
 
 	[[nodiscard]] MSXMotherBoard& getMotherBoard() const { return motherBoard; }
@@ -97,7 +99,7 @@ private:
 	std::string hwName;
 	Type type;
 	std::string userName;
-	XMLDocument config;
+	XMLDocument config{8192}; // tweak: initial allocator buffer size
 	FileContext context;
 
 	std::array<std::array<bool, 4>, 4> externalSlots;
@@ -118,13 +120,13 @@ template<> struct SerializeConstructorArgs<HardwareConfig>
 	using type = std::tuple<std::string>;
 
 	template<typename Archive>
-	void save(Archive& ar, const HardwareConfig& config)
+	void save(Archive& ar, const HardwareConfig& config) const
 	{
 		ar.serialize("hwname", config.hwName);
 	}
 
 	template<typename Archive>
-	[[nodiscard]] type load(Archive& ar, unsigned /*version*/)
+	[[nodiscard]] type load(Archive& ar, unsigned /*version*/) const
 	{
 		std::string name;
 		ar.serialize("hwname", name);

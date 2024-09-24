@@ -24,14 +24,13 @@ public:
 	[[nodiscard]] byte readMem(word address, EmuTime::param time) override;
 	void writeMem(word address, byte value, EmuTime::param time) override;
 	[[nodiscard]] const byte* getReadCacheLine(word address) const override;
-	[[nodiscard]] byte* getWriteCacheLine(word address) const override;
+	[[nodiscard]] byte* getWriteCacheLine(word address) override;
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
 private:
 	Rom rom;
-	const std::vector<AmdFlash::SectorInfo> flashConfig;
 	AmdFlash flash;
 	NowindHost::Drives drives;
 	NowindHost host;

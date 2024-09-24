@@ -18,26 +18,29 @@ TODO:
 */
 
 #include "VDP.hh"
-#include "VDPVRAM.hh"
-#include "VDPCmdEngine.hh"
-#include "SpriteChecker.hh"
+
 #include "Display.hh"
-#include "HardwareConfig.hh"
-#include "RendererFactory.hh"
-#include "Renderer.hh"
 #include "RenderSettings.hh"
+#include "Renderer.hh"
+#include "RendererFactory.hh"
+#include "SpriteChecker.hh"
+#include "VDPCmdEngine.hh"
+#include "VDPVRAM.hh"
+
 #include "EnumSetting.hh"
-#include "TclObject.hh"
+#include "HardwareConfig.hh"
 #include "MSXCPU.hh"
+#include "MSXException.hh"
 #include "MSXMotherBoard.hh"
 #include "Reactor.hh"
-#include "MSXException.hh"
-#include "MSXCliComm.hh"
+#include "TclObject.hh"
+#include "serialize_core.hh"
+
 #include "narrow.hh"
 #include "one_of.hh"
 #include "ranges.hh"
-#include "serialize_core.hh"
 #include "unreachable.hh"
+
 #include <cassert>
 #include <memory>
 
@@ -100,7 +103,13 @@ VDP::VDP(const DeviceConfig& config)
 		getName() + ".too_fast_vram_access_callback",
 		"Tcl proc called when the VRAM is read or written too fast",
 		"",
-		Setting::SaveSetting::SAVE)
+		Setting::Save::YES)
+	, dotClockDirectionCallback(
+		getCommandController(),
+		getName() + ".dot_clock_direction_callback",
+		"Tcl proc called when DLCLK is set as input",
+		"default_dot_clock_direction_callback",
+		Setting::Save::YES)
 	, cpu(getCPU()) // used frequently, so cache it
 	, fixedVDPIOdelayCycles(getDelayCycles(getMotherBoard().getMachineConfig()->getConfig().getChild("devices")))
 {
@@ -488,15 +497,6 @@ void VDP::scheduleDisplayStart(EmuTime::param time)
 
 void VDP::scheduleVScan(EmuTime::param time)
 {
-	/*
-	cerr << "scheduleVScan @ " << (getTicksThisFrame(time) / TICKS_PER_LINE) << "\n";
-	if (vScanSyncTime < frameStartTime) {
-		cerr << "old VSCAN was previous frame\n";
-	} else {
-		cerr << "old VSCAN was " << (frameStartTime.getTicksTill(vScanSyncTime) / TICKS_PER_LINE) << "\n";
-	}
-	*/
-
 	// Remove pending VSCAN sync point, if any.
 	if (vScanSyncTime > time) {
 		syncVScan.removeSyncPoint();
@@ -506,7 +506,6 @@ void VDP::scheduleVScan(EmuTime::param time)
 	// Calculate moment in time display end occurs.
 	vScanSyncTime = frameStartTime +
 	                (displayStart + getNumberOfLines() * TICKS_PER_LINE);
-	//cerr << "new VSCAN is " << (frameStartTime.getTicksTill(vScanSyncTime) / TICKS_PER_LINE) << "\n";
 
 	// Register new VSCAN sync point.
 	if (vScanSyncTime > time) {
@@ -533,8 +532,8 @@ void VDP::scheduleHScan(EmuTime::param time)
 	// By switching from NTSC to PAL it may even be possible to get two
 	// HSCANs in a single frame without modifying any other setting.
 	// Fortunately, no known program relies on this.
-	int ticksPerFrame = getTicksPerFrame();
-	if (horizontalScanOffset >= ticksPerFrame) {
+	if (int ticksPerFrame = getTicksPerFrame();
+	    horizontalScanOffset >= ticksPerFrame) {
 		horizontalScanOffset -= ticksPerFrame;
 
 		// Time at which the internal VDP display line counter is reset,
@@ -585,8 +584,6 @@ void VDP::frameStart(EmuTime::param time)
 {
 	++frameCount;
 
-	//cerr << "VDP::frameStart @ " << time << "\n";
-
 	// Toggle E/O.
 	// Actually this should occur half a line earlier,
 	// but for now this is accurate enough.
@@ -615,8 +612,8 @@ void VDP::frameStart(EmuTime::param time)
 	// signal is provided then the VDP stops producing a signal
 	// (at least on an MSX1, VDP(0)=1 produces "signal lost" on my
 	// monitor)
-	const RawFrame* newSuperimposing = (controlRegs[0] & 1) ? externalVideo : nullptr;
-	if (superimposing != newSuperimposing) {
+	if (const RawFrame* newSuperimposing = (controlRegs[0] & 1) ? externalVideo : nullptr;
+	    superimposing != newSuperimposing) {
 		superimposing = newSuperimposing;
 		renderer->updateSuperimposing(superimposing, time);
 	}
@@ -833,7 +830,7 @@ void VDP::scheduleCpuVramAccess(bool isRead, byte write, EmuTime::param time)
 			// So this test could not decide between 8 or 9 TMS cycles.
 			// To be on the safe side we picked 8.
 			//
-			// Update: 8 cycles (DELTA_32) causes corruption in
+			// Update: 8 cycles (Delta::D32) causes corruption in
 			// 'Chase HQ', see
 			//    http://www.msx.org/forum/msx-talk/openmsx/openmsx-about-release-testing-help-wanted
 			// lowering it to 7 cycles seems fine. TODO needs more
@@ -841,8 +838,8 @@ void VDP::scheduleCpuVramAccess(bool isRead, byte write, EmuTime::param time)
 			// other variables that influence the exact timing (7
 			// vs 8 cycles).
 			pendingCpuAccess = true;
-			auto delta = isMSX1VDP() ? VDPAccessSlots::DELTA_28
-						 : VDPAccessSlots::DELTA_16;
+			auto delta = isMSX1VDP() ? VDPAccessSlots::Delta::D28
+						 : VDPAccessSlots::Delta::D16;
 			syncCpuVramAccess.setSyncPoint(getAccessSlot(time, delta));
 		}
 	}
@@ -1216,10 +1213,7 @@ void VDP::changeRegister(byte reg, byte val, EmuTime::param time)
 	case 9:
 		if ((val & 1) && ! warningPrinted) {
 			warningPrinted = true;
-			getCliComm().printWarning(
-				"The running MSX software has set bit 0 of VDP register 9 "
-				"(dot clock direction) to one. In an ordinary MSX, "
-				"the screen would go black and the CPU would stop running.");
+			dotClockDirectionCallback.execute();
 			// TODO: Emulate such behaviour.
 		}
 		if (change & 0x80) {
@@ -1253,7 +1247,7 @@ void VDP::changeRegister(byte reg, byte val, EmuTime::param time)
 	}
 }
 
-void VDP::syncAtNextLine(SyncBase& type, EmuTime::param time)
+void VDP::syncAtNextLine(SyncBase& type, EmuTime::param time) const
 {
 	// The processing of a new line starts in the middle of the left erase,
 	// ~144 cycles after the sync signal. Adjust affects it. See issue #1310.
@@ -1596,7 +1590,7 @@ std::array<std::array<uint8_t, 3>, 16> VDP::getMSX1Palette() const
 
 // RegDebug
 
-VDP::RegDebug::RegDebug(VDP& vdp_)
+VDP::RegDebug::RegDebug(const VDP& vdp_)
 	: SimpleDebuggable(vdp_.getMotherBoard(),
 	                   vdp_.getName() + " regs", "VDP registers.", 0x40)
 {
@@ -1604,7 +1598,7 @@ VDP::RegDebug::RegDebug(VDP& vdp_)
 
 byte VDP::RegDebug::read(unsigned address)
 {
-	auto& vdp = OUTER(VDP, vdpRegDebug);
+	const auto& vdp = OUTER(VDP, vdpRegDebug);
 	return vdp.peekRegister(address);
 }
 
@@ -1622,7 +1616,7 @@ void VDP::RegDebug::write(unsigned address, byte value, EmuTime::param time)
 
 // StatusRegDebug
 
-VDP::StatusRegDebug::StatusRegDebug(VDP& vdp_)
+VDP::StatusRegDebug::StatusRegDebug(const VDP& vdp_)
 	: SimpleDebuggable(vdp_.getMotherBoard(),
 	                   vdp_.getName() + " status regs", "VDP status registers.", 0x10)
 {
@@ -1630,14 +1624,14 @@ VDP::StatusRegDebug::StatusRegDebug(VDP& vdp_)
 
 byte VDP::StatusRegDebug::read(unsigned address, EmuTime::param time)
 {
-	auto& vdp = OUTER(VDP, vdpStatusRegDebug);
+	const auto& vdp = OUTER(VDP, vdpStatusRegDebug);
 	return vdp.peekStatusReg(narrow<byte>(address), time);
 }
 
 
 // PaletteDebug
 
-VDP::PaletteDebug::PaletteDebug(VDP& vdp_)
+VDP::PaletteDebug::PaletteDebug(const VDP& vdp_)
 	: SimpleDebuggable(vdp_.getMotherBoard(),
 	                   vdp_.getName() + " palette", "V99x8 palette (RBG format)", 0x20)
 {
@@ -1645,7 +1639,7 @@ VDP::PaletteDebug::PaletteDebug(VDP& vdp_)
 
 byte VDP::PaletteDebug::read(unsigned address)
 {
-	auto& vdp = OUTER(VDP, vdpPaletteDebug);
+	const auto& vdp = OUTER(VDP, vdpPaletteDebug);
 	word grb = vdp.getPalette(address / 2);
 	return (address & 1) ? narrow_cast<byte>(grb >> 8)
 	                     : narrow_cast<byte>(grb & 0xff);
@@ -1670,7 +1664,7 @@ void VDP::PaletteDebug::write(unsigned address, byte value, EmuTime::param time)
 
 // class VRAMPointerDebug
 
-VDP::VRAMPointerDebug::VRAMPointerDebug(VDP& vdp_)
+VDP::VRAMPointerDebug::VRAMPointerDebug(const VDP& vdp_)
 	: SimpleDebuggable(vdp_.getMotherBoard(), vdp_.getName() == "VDP" ?
 			"VRAM pointer" : vdp_.getName() + " VRAM pointer",
 			"VDP VRAM pointer (14 lower bits)", 2)
@@ -1679,7 +1673,7 @@ VDP::VRAMPointerDebug::VRAMPointerDebug(VDP& vdp_)
 
 byte VDP::VRAMPointerDebug::read(unsigned address)
 {
-	auto& vdp = OUTER(VDP, vramPointerDebug);
+	const auto& vdp = OUTER(VDP, vramPointerDebug);
 	if (address & 1) {
 		return narrow_cast<byte>(vdp.vramPointer >> 8);  // TODO add read/write mode?
 	} else {
@@ -1700,7 +1694,7 @@ void VDP::VRAMPointerDebug::write(unsigned address, byte value, EmuTime::param /
 
 // class RegisterLatchStatusDebug
 
-VDP::RegisterLatchStatusDebug::RegisterLatchStatusDebug(VDP &vdp_)
+VDP::RegisterLatchStatusDebug::RegisterLatchStatusDebug(const VDP &vdp_)
 	: SimpleDebuggable(vdp_.getMotherBoard(),
 			vdp_.getName() + " register latch status", "V99x8 register latch status (0 = expecting a value, 1 = expecting a register)", 1)
 {
@@ -1708,13 +1702,13 @@ VDP::RegisterLatchStatusDebug::RegisterLatchStatusDebug(VDP &vdp_)
 
 byte VDP::RegisterLatchStatusDebug::read(unsigned /*address*/)
 {
-	auto& vdp = OUTER(VDP, registerLatchStatusDebug);
+	const auto& vdp = OUTER(VDP, registerLatchStatusDebug);
 	return byte(vdp.registerDataStored);
 }
 
 // class VramAccessStatusDebug
 
-VDP::VramAccessStatusDebug::VramAccessStatusDebug(VDP &vdp_)
+VDP::VramAccessStatusDebug::VramAccessStatusDebug(const VDP &vdp_)
 	: SimpleDebuggable(vdp_.getMotherBoard(), vdp_.getName() == "VDP" ?
 			"VRAM access status" : vdp_.getName() + " VRAM access status",
 			"VDP VRAM access status (0 = ready to read, 1 = ready to write)", 1)
@@ -1723,13 +1717,13 @@ VDP::VramAccessStatusDebug::VramAccessStatusDebug(VDP &vdp_)
 
 byte VDP::VramAccessStatusDebug::read(unsigned /*address*/)
 {
-	auto& vdp = OUTER(VDP, vramAccessStatusDebug);
+	const auto& vdp = OUTER(VDP, vramAccessStatusDebug);
 	return byte(vdp.writeAccess);
 }
 
 // class PaletteLatchStatusDebug
 
-VDP::PaletteLatchStatusDebug::PaletteLatchStatusDebug(VDP &vdp_)
+VDP::PaletteLatchStatusDebug::PaletteLatchStatusDebug(const VDP &vdp_)
 	: SimpleDebuggable(vdp_.getMotherBoard(),
 			vdp_.getName() + " palette latch status", "V99x8 palette latch status (0 = expecting red & blue, 1 = expecting green)", 1)
 {
@@ -1737,13 +1731,13 @@ VDP::PaletteLatchStatusDebug::PaletteLatchStatusDebug(VDP &vdp_)
 
 byte VDP::PaletteLatchStatusDebug::read(unsigned /*address*/)
 {
-	auto& vdp = OUTER(VDP, paletteLatchStatusDebug);
+	const auto& vdp = OUTER(VDP, paletteLatchStatusDebug);
 	return byte(vdp.paletteDataStored);
 }
 
 // class DataLatchDebug
 
-VDP::DataLatchDebug::DataLatchDebug(VDP &vdp_)
+VDP::DataLatchDebug::DataLatchDebug(const VDP &vdp_)
 	: SimpleDebuggable(vdp_.getMotherBoard(),
 			vdp_.getName() + " data latch value", "V99x8 data latch value (byte)", 1)
 {
@@ -1751,7 +1745,7 @@ VDP::DataLatchDebug::DataLatchDebug(VDP &vdp_)
 
 byte VDP::DataLatchDebug::read(unsigned /*address*/)
 {
-	auto& vdp = OUTER(VDP, dataLatchDebug);
+	const auto& vdp = OUTER(VDP, dataLatchDebug);
 	return vdp.dataLatch;
 }
 
@@ -1856,8 +1850,7 @@ VDP::MsxYPosInfo::MsxYPosInfo(VDP& vdp_)
 
 int VDP::MsxYPosInfo::calc(const EmuTime& time) const
 {
-	return (vdp.getTicksThisFrame(time) / VDP::TICKS_PER_LINE) -
-		vdp.getLineZero();
+	return vdp.getMSXPos(time).y;
 }
 
 
@@ -1868,15 +1861,14 @@ VDP::MsxX256PosInfo::MsxX256PosInfo(VDP& vdp_)
 	       "Similar to 'cycle_in_frame', but expressed in MSX "
 	       "coordinates. So a position in the left border has "
 	       "a negative coordinate and a position in the right "
-	       "border has a coordinated bigger or equal to 256. "
+	       "border has a coordinate bigger or equal to 256. "
 	       "See also 'msx_x512_pos'.")
 {
 }
 
 int VDP::MsxX256PosInfo::calc(const EmuTime& time) const
 {
-	return ((vdp.getTicksThisFrame(time) % VDP::TICKS_PER_LINE) -
-		 vdp.getLeftSprites()) / 4;
+	return vdp.getMSXPos(time).x / 2;
 }
 
 
@@ -1887,15 +1879,14 @@ VDP::MsxX512PosInfo::MsxX512PosInfo(VDP& vdp_)
 	       "Similar to 'cycle_in_frame', but expressed in "
 	       "'narrow' (screen 7) MSX coordinates. So a position "
 	       "in the left border has a negative coordinate and "
-	       "a position in the right border has a coordinated "
+	       "a position in the right border has a coordinate "
 	       "bigger or equal to 512. See also 'msx_x256_pos'.")
 {
 }
 
 int VDP::MsxX512PosInfo::calc(const EmuTime& time) const
 {
-	return ((vdp.getTicksThisFrame(time) % VDP::TICKS_PER_LINE) -
-		 vdp.getLeftSprites()) / 2;
+	return vdp.getMSXPos(time).x;
 }
 
 

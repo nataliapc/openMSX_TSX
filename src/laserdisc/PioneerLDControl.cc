@@ -32,7 +32,6 @@ namespace openmsx {
 PioneerLDControl::PioneerLDControl(const DeviceConfig& config)
 	: MSXDevice(config)
 	, rom(getName() + " ROM", "rom", config)
-	, clock(EmuTime::zero())
 	, irq(getMotherBoard(), "PioneerLDControl.IRQdisplayoff")
 {
 	if (config.getChildDataAsBool("laserdisc", true)) {
@@ -137,7 +136,7 @@ void PioneerLDControl::writeMem(word address, byte value, EmuTime::param time)
 	}
 }
 
-byte* PioneerLDControl::getWriteCacheLine(word address) const
+byte* PioneerLDControl::getWriteCacheLine(word address)
 {
 	if ((address & CacheLine::HIGH) == (0x7FFE & CacheLine::HIGH)) {
 		return nullptr;

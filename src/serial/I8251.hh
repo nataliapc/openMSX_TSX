@@ -44,9 +44,29 @@ public:
 	// SerialDataInterface
 	void setDataBits(DataBits bits) override { recvDataBits = bits; }
 	void setStopBits(StopBits bits) override { recvStopBits = bits; }
-	void setParityBit(bool enable, ParityBit parity) override;
+	void setParityBit(bool enable, Parity parity) override;
 	void recvByte(byte value, EmuTime::param time) override;
 
+	void execRecv(EmuTime::param time);
+	void execTrans(EmuTime::param time);
+
+	template<typename Archive>
+	void serialize(Archive& ar, unsigned version);
+
+	// public for serialize
+	enum class CmdPhase {
+		MODE, SYNC1, SYNC2, CMD
+	};
+
+private:
+	void setMode(byte newMode);
+	void writeCommand(byte value, EmuTime::param time);
+	[[nodiscard]] byte readStatus(EmuTime::param time);
+	[[nodiscard]] byte readTrans(EmuTime::param time);
+	void writeTrans(byte value, EmuTime::param time);
+	void send(byte value, EmuTime::param time);
+
+private:
 	// Schedulable
 	struct SyncRecv final : Schedulable {
 		friend class I8251;
@@ -64,34 +84,15 @@ public:
 			i8251.execTrans(time);
 		}
 	} syncTrans;
-	void execRecv(EmuTime::param time);
-	void execTrans(EmuTime::param time);
 
-	template<typename Archive>
-	void serialize(Archive& ar, unsigned version);
-
-	// public for serialize
-	enum CmdFaze {
-		FAZE_MODE, FAZE_SYNC1, FAZE_SYNC2, FAZE_CMD
-	};
-
-private:
-	void setMode(byte newMode);
-	void writeCommand(byte value, EmuTime::param time);
-	[[nodiscard]] byte readStatus(EmuTime::param time);
-	[[nodiscard]] byte readTrans(EmuTime::param time);
-	void writeTrans(byte value, EmuTime::param time);
-	void send(byte value, EmuTime::param time);
-
-private:
 	I8251Interface& interface;
 	ClockPin clock;
 	unsigned charLength;
 
-	CmdFaze cmdFaze;
+	CmdPhase cmdPhase;
 	SerialDataInterface::DataBits  recvDataBits;
 	SerialDataInterface::StopBits  recvStopBits;
-	SerialDataInterface::ParityBit recvParityBit;
+	SerialDataInterface::Parity recvParityBit;
 	bool recvParityEnabled;
 	byte recvBuf;
 	bool recvReady;

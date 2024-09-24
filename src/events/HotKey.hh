@@ -57,7 +57,7 @@ public:
 	void saveBindings(XmlStream& xml) const
 	{
 		xml.begin("bindings");
-		// add explicit bind's
+		// add explicit binds
 		for (const auto& k : boundKeys) {
 			xml.begin("bind");
 			xml.attribute("key", toString(k));
@@ -87,6 +87,9 @@ public:
 
 private:
 	struct LayerInfo {
+		LayerInfo(std::string l, bool b)
+			: layer(std::move(l)), blocking(b) {} // clang-15 workaround
+
 		std::string layer;
 		bool blocking;
 	};
@@ -102,12 +105,12 @@ private:
 	void activateLayer  (std::string layer, bool blocking);
 	void deactivateLayer(std::string_view layer);
 
-	int executeEvent(const Event& event, EventDistributor::Priority priority);
+	bool executeEvent(const Event& event, EventDistributor::Priority priority);
 	void executeBinding(const Event& event, const HotKeyInfo& info);
 	void startRepeat  (const Event& event);
 	void stopRepeat();
 
-	int signalEvent(const Event& event, EventDistributor::Priority priority);
+	bool signalEvent(const Event& event, EventDistributor::Priority priority);
 
 	// RTSchedulable
 	void executeRT() override;
@@ -165,7 +168,7 @@ private:
 	public:
 		Listener(HotKey& hotKey, EventDistributor::Priority priority);
 		~Listener();
-		int signalEvent(const Event& event) override;
+		bool signalEvent(const Event& event) override;
 	private:
 		HotKey& hotKey;
 		EventDistributor::Priority priority;

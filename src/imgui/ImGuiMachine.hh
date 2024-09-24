@@ -19,14 +19,13 @@ public:
 	};
 
 public:
-	explicit ImGuiMachine(ImGuiManager& manager_)
-		: ImGuiPart(manager_) {}
+	using ImGuiPart::ImGuiPart;
 
 	void showMenu(MSXMotherBoard* motherBoard) override;
 	void paint(MSXMotherBoard* motherBoard) override;
 
 private:
-	void paintSelectMachine(MSXMotherBoard* motherBoard);
+	void paintSelectMachine(const MSXMotherBoard* motherBoard);
 	void paintTestHardware();
 	[[nodiscard]] std::vector<MachineInfo>& getAllMachines();
 	[[nodiscard]] MachineInfo* findMachineInfo(std::string_view config);

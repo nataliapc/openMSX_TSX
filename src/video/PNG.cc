@@ -82,14 +82,16 @@ imported from SDL_image 1.2.10, file "IMG_png.c", function "IMG_LoadPNG_RW".
 
 struct PNGReadHandle {
 	PNGReadHandle() = default;
+	PNGReadHandle(const PNGReadHandle&) = delete;
+	PNGReadHandle(PNGReadHandle&&) = delete;
+	PNGReadHandle& operator=(const PNGReadHandle&) = delete;
+	PNGReadHandle& operator=(PNGReadHandle&&) = delete;
 	~PNGReadHandle()
 	{
 		if (ptr) {
 			png_destroy_read_struct(&ptr, info ? &info : nullptr, nullptr);
 		}
 	}
-	PNGReadHandle(const PNGReadHandle&) = delete;
-	PNGReadHandle& operator=(const PNGReadHandle&) = delete;
 
 	png_structp ptr = nullptr;
 	png_infop info = nullptr;
@@ -205,14 +207,16 @@ SDLSurfacePtr load(const std::string& filename, bool want32bpp)
 
 struct PNGWriteHandle {
 	PNGWriteHandle() = default;
+	PNGWriteHandle(const PNGWriteHandle&) = delete;
+	PNGWriteHandle(PNGWriteHandle&&) = delete;
+	PNGWriteHandle& operator=(const PNGWriteHandle&) = delete;
+	PNGWriteHandle& operator=(PNGWriteHandle&&) = delete;
 	~PNGWriteHandle()
 	{
 		if (ptr) {
 			png_destroy_write_struct(&ptr, info ? &info : nullptr);
 		}
 	}
-	PNGWriteHandle(const PNGWriteHandle&) = delete;
-	PNGWriteHandle& operator=(const PNGWriteHandle&) = delete;
 
 	png_structp ptr = nullptr;
 	png_infop info = nullptr;
@@ -237,7 +241,7 @@ static void IMG_SavePNG_RW(size_t width, std::span<const void*> rowPointers,
 	assert(width  <= std::numeric_limits<png_uint_32>::max());
 	assert(height <= std::numeric_limits<png_uint_32>::max());
 	try {
-		File file(filename, File::TRUNCATE);
+		File file(filename, File::OpenMode::TRUNCATE);
 
 		PNGWriteHandle png;
 		png.ptr = png_create_write_struct(
@@ -274,7 +278,7 @@ static void IMG_SavePNG_RW(size_t width, std::span<const void*> rowPointers,
 		// some extra buffer space.
 		static constexpr size_t size = (10 + 1 + 8 + 1) + 44;
 		time_t now = time(nullptr);
-		struct tm* tm = localtime(&now);
+		const struct tm* tm = localtime(&now);
 		std::array<char, size> timeStr;
 		snprintf(timeStr.data(), sizeof(timeStr), "%04d-%02d-%02d %02d:%02d:%02d",
 		         1900 + tm->tm_year, tm->tm_mon + 1, tm->tm_mday,
@@ -320,7 +324,7 @@ static void save(SDL_Surface* image, const std::string& filename)
 	IMG_SavePNG_RW(image->w, row_pointers, filename, true);
 }
 
-void saveRGBA(size_t width, std::span<const void*> rowPointers,
+void saveRGBA(size_t width, std::span<const uint32_t*> rowPointers,
               const std::string& filename)
 {
 	// this implementation creates 1 extra copy, can be optimized if required
@@ -338,9 +342,11 @@ void saveRGBA(size_t width, std::span<const void*> rowPointers,
 	save(surface.get(), filename);
 }
 
-void saveGrayscale(size_t width, std::span<const void*> rowPointers,
+void saveGrayscale(size_t width, std::span<const uint8_t*> rowPointers_,
                    const std::string& filename)
 {
+	std::span rowPointers{std::bit_cast<const void**>(rowPointers_.data()),
+	                      rowPointers_.size()};
 	IMG_SavePNG_RW(width, rowPointers, filename, false);
 }
 

@@ -1,27 +1,32 @@
 #include "Debugger.hh"
+
+#include "BreakPoint.hh"
+#include "CommandException.hh"
+#include "CPURegs.hh"
+#include "Dasm.hh"
+#include "DebugCondition.hh"
 #include "Debuggable.hh"
-#include "MSXCliComm.hh"
-#include "ProbeBreakPoint.hh"
-#include "MSXMotherBoard.hh"
 #include "MSXCPU.hh"
 #include "MSXCPUInterface.hh"
-#include "BreakPoint.hh"
-#include "DebugCondition.hh"
+#include "MSXCliComm.hh"
+#include "MSXMotherBoard.hh"
 #include "MSXWatchIODevice.hh"
+#include "ProbeBreakPoint.hh"
 #include "Reactor.hh"
 #include "SymbolManager.hh"
 #include "TclArgParser.hh"
 #include "TclObject.hh"
-#include "CommandException.hh"
+
 #include "MemBuffer.hh"
+#include "StringOp.hh"
 #include "narrow.hh"
 #include "one_of.hh"
 #include "ranges.hh"
 #include "stl.hh"
-#include "StringOp.hh"
 #include "unreachable.hh"
 #include "view.hh"
 #include "xrange.hh"
+
 #include <array>
 #include <cassert>
 #include <memory>
@@ -107,7 +112,7 @@ unsigned Debugger::insertProbeBreakPoint(
 	auto bp = std::make_unique<ProbeBreakPoint>(
 		std::move(command), std::move(condition), *this, probe, once, newId);
 	unsigned result = bp->getId();
-	motherBoard.getMSXCliComm().update(CliComm::DEBUG_UPDT, tmpStrCat("pp#", result), "add");
+	motherBoard.getMSXCliComm().update(CliComm::UpdateType::DEBUG_UPDT, tmpStrCat("pp#", result), "add");
 	probeBreakPoints.push_back(std::move(bp));
 	return result;
 }
@@ -120,7 +125,7 @@ void Debugger::removeProbeBreakPoint(string_view name)
 			if (auto it = ranges::find(probeBreakPoints, id, &ProbeBreakPoint::getId);
 			    it != std::end(probeBreakPoints)) {
 				motherBoard.getMSXCliComm().update(
-					CliComm::DEBUG_UPDT, name, "remove");
+					CliComm::UpdateType::DEBUG_UPDT, name, "remove");
 				move_pop_back(probeBreakPoints, it);
 				return;
 			}
@@ -136,7 +141,7 @@ void Debugger::removeProbeBreakPoint(string_view name)
 				"No (unconditional) breakpoint for probe: ", name);
 		}
 		motherBoard.getMSXCliComm().update(
-			CliComm::DEBUG_UPDT, tmpStrCat("pp#", (*it)->getId()), "remove");
+			CliComm::UpdateType::DEBUG_UPDT, tmpStrCat("pp#", (*it)->getId()), "remove");
 		move_pop_back(probeBreakPoints, it);
 	}
 }
@@ -144,7 +149,7 @@ void Debugger::removeProbeBreakPoint(string_view name)
 void Debugger::removeProbeBreakPoint(ProbeBreakPoint& bp)
 {
 	motherBoard.getMSXCliComm().update(
-		CliComm::DEBUG_UPDT, tmpStrCat("pp#", bp.getId()), "remove");
+		CliComm::UpdateType::DEBUG_UPDT, tmpStrCat("pp#", bp.getId()), "remove");
 	move_pop_back(probeBreakPoints, rfind_unguarded(probeBreakPoints, &bp,
 		[](auto& v) { return v.get(); }));
 }
@@ -155,7 +160,7 @@ unsigned Debugger::setWatchPoint(TclObject command, TclObject condition,
                                  bool once, unsigned newId /*= -1*/)
 {
 	std::shared_ptr<WatchPoint> wp;
-	if (type == one_of(WatchPoint::READ_IO, WatchPoint::WRITE_IO)) {
+	if (type == one_of(WatchPoint::Type::READ_IO, WatchPoint::Type::WRITE_IO)) {
 		wp = std::make_shared<WatchIO>(
 			motherBoard, type, beginAddr, endAddr,
 			std::move(command), std::move(condition), once, newId);
@@ -180,7 +185,7 @@ void Debugger::transfer(Debugger& other)
 
 	// Copy probes to new machine.
 	assert(probeBreakPoints.empty());
-	for (auto& bp : other.probeBreakPoints) {
+	for (const auto& bp : other.probeBreakPoints) {
 		if (ProbeBase* probe = findProbe(bp->getProbe().getName())) {
 			insertProbeBreakPoint(bp->getCommandObj(),
 			                      bp->getConditionObj(),
@@ -224,7 +229,7 @@ bool Debugger::Cmd::needRecord(std::span<const TclObject> tokens) const
 }
 
 void Debugger::Cmd::execute(
-	std::span<const TclObject> tokens, TclObject& result, EmuTime::param /*time*/)
+	std::span<const TclObject> tokens, TclObject& result, EmuTime::param time)
 {
 	checkNumArgs(tokens, AtLeast{2}, "subcommand ?arg ...?");
 	executeSubCommand(tokens[1].getString(),
@@ -237,9 +242,10 @@ void Debugger::Cmd::execute(
 		"list",              [&]{ list(result); },
 		"step",              [&]{ debugger().motherBoard.getCPUInterface().doStep(); },
 		"cont",              [&]{ debugger().motherBoard.getCPUInterface().doContinue(); },
-		"disasm",            [&]{ debugger().cpu->disasmCommand(getInterpreter(), tokens, result); },
+		"disasm",            [&]{ disasm(tokens, result, time); },
+		"disasm_blob",       [&]{ disasmBlob(tokens, result); },
 		"break",             [&]{ debugger().motherBoard.getCPUInterface().doBreak(); },
-		"breaked",           [&]{ result = debugger().motherBoard.getCPUInterface().isBreaked(); },
+		"breaked",           [&]{ result = MSXCPUInterface::isBreaked(); },
 		"set_bp",            [&]{ setBreakPoint(tokens, result); },
 		"remove_bp",         [&]{ removeBreakPoint(tokens, result); },
 		"list_bp",           [&]{ listBreakPoints(tokens, result); },
@@ -261,14 +267,14 @@ void Debugger::Cmd::list(TclObject& result)
 void Debugger::Cmd::desc(std::span<const TclObject> tokens, TclObject& result)
 {
 	checkNumArgs(tokens, 3, "debuggable");
-	Debuggable& device = debugger().getDebuggable(tokens[2].getString());
+	const Debuggable& device = debugger().getDebuggable(tokens[2].getString());
 	result = device.getDescription();
 }
 
 void Debugger::Cmd::size(std::span<const TclObject> tokens, TclObject& result)
 {
 	checkNumArgs(tokens, 3, "debuggable");
-	Debuggable& device = debugger().getDebuggable(tokens[2].getString());
+	const Debuggable& device = debugger().getDebuggable(tokens[2].getString());
 	result = device.getSize();
 }
 
@@ -341,6 +347,60 @@ void Debugger::Cmd::writeBlock(std::span<const TclObject> tokens, TclObject& /*r
 	}
 }
 
+static constexpr char toHex(byte x)
+{
+	return narrow<char>((x < 10) ? (x + '0') : (x - 10 + 'A'));
+}
+static constexpr void toHex(byte x, std::span<char, 3> buf)
+{
+	buf[0] = toHex(x / 16);
+	buf[1] = toHex(x & 15);
+}
+
+void Debugger::Cmd::disasm(std::span<const TclObject> tokens, TclObject& result, EmuTime::param time) const
+{
+	word address = (tokens.size() < 3) ? debugger().cpu->getRegisters().getPC()
+	                                   : word(tokens[2].getInt(getInterpreter()));
+	std::array<byte, 4> outBuf;
+	std::string dasmOutput;
+	unsigned len = dasm(debugger().motherBoard.getCPUInterface(), address, outBuf, dasmOutput, time);
+	dasmOutput.resize(19, ' ');
+	result.addListElement(dasmOutput);
+	std::array<char, 3> tmp; tmp[2] = 0;
+	for (auto i : xrange(len)) {
+		toHex(outBuf[i], tmp);
+		result.addListElement(tmp.data());
+	}
+}
+
+void Debugger::Cmd::disasmBlob(std::span<const TclObject> tokens, TclObject& result) const
+{
+	checkNumArgs(tokens, Between{4, 5}, Prefix{2}, "value addr ?function?");
+	std::span<const uint8_t> bin = tokens[2].getBinary();
+	auto len = instructionLength(bin);
+	if (!len || *len > bin.size()) {
+		throw CommandException("Blob does not contain a complete Z80 instruction");
+	}
+	std::string dasmOutput;
+	unsigned addr = tokens[3].getInt(getInterpreter());
+	dasm(bin.subspan(0, *len), word(addr), dasmOutput,
+		[&](std::string& out, uint16_t a) {
+			zstring_view cmdRes;
+			if (tokens.size() > 4) {
+				auto command = makeTclList(tokens[4], a);
+				cmdRes = command.executeCommand(getInterpreter()).getString();
+			}
+			if (!cmdRes.empty()) {
+				strAppend(out, cmdRes);
+			} else {
+				appendAddrAsHex(out, a);
+			}
+		});
+	dasmOutput.resize(19, ' ');
+	result.addListElement(dasmOutput);
+	result.addListElement(*len);
+}
+
 void Debugger::Cmd::setBreakPoint(std::span<const TclObject> tokens, TclObject& result)
 {
 	checkNumArgs(tokens, AtLeast{3}, "address ?-once? ?condition? ?command?");
@@ -376,7 +436,7 @@ void Debugger::Cmd::removeBreakPoint(
 {
 	checkNumArgs(tokens, 3, "id|address");
 	auto& interface = debugger().motherBoard.getCPUInterface();
-	auto& breakPoints = interface.getBreakPoints();
+	auto& breakPoints = MSXCPUInterface::getBreakPoints();
 
 	string_view tmp = tokens[2].getString();
 	if (tmp.starts_with("bp#")) {
@@ -404,12 +464,10 @@ void Debugger::Cmd::removeBreakPoint(
 	}
 }
 
-void Debugger::Cmd::listBreakPoints(
-	std::span<const TclObject> /*tokens*/, TclObject& result)
+void Debugger::Cmd::listBreakPoints(std::span<const TclObject> /*tokens*/, TclObject& result) const
 {
 	string res;
-	auto& interface = debugger().motherBoard.getCPUInterface();
-	for (const auto& bp : interface.getBreakPoints()) {
+	for (const auto& bp : MSXCPUInterface::getBreakPoints()) {
 		TclObject line = makeTclList(
 			tmpStrCat("bp#", bp.getId()),
 			tmpStrCat("0x", hex_string<4>(bp.getAddress())),
@@ -446,17 +504,18 @@ void Debugger::Cmd::setWatchPoint(std::span<const TclObject> tokens, TclObject& 
 	case 2: { // address + type
 		string_view typeStr = arguments[0].getString();
 		unsigned max = [&] {
+			using enum WatchPoint::Type;
 			if (typeStr == "read_io") {
-				type = WatchPoint::READ_IO;
+				type = READ_IO;
 				return 0x100;
 			} else if (typeStr == "write_io") {
-				type = WatchPoint::WRITE_IO;
+				type = WRITE_IO;
 				return 0x100;
 			} else if (typeStr == "read_mem") {
-				type = WatchPoint::READ_MEM;
+				type = READ_MEM;
 				return 0x10000;
 			} else if (typeStr == "write_mem") {
-				type = WatchPoint::WRITE_MEM;
+				type = WRITE_MEM;
 				return 0x10000;
 			} else {
 				throw CommandException("Invalid type: ", typeStr);
@@ -511,21 +570,22 @@ void Debugger::Cmd::listWatchPoints(
 	std::span<const TclObject> /*tokens*/, TclObject& result)
 {
 	string res;
-	auto& interface = debugger().motherBoard.getCPUInterface();
+	const auto& interface = debugger().motherBoard.getCPUInterface();
 	for (const auto& wp : interface.getWatchPoints()) {
 		TclObject line = makeTclList(tmpStrCat("wp#", wp->getId()));
 		string type;
 		switch (wp->getType()) {
-		case WatchPoint::READ_IO:
+		using enum WatchPoint::Type;
+		case READ_IO:
 			type = "read_io";
 			break;
-		case WatchPoint::WRITE_IO:
+		case WRITE_IO:
 			type = "write_io";
 			break;
-		case WatchPoint::READ_MEM:
+		case READ_MEM:
 			type = "read_mem";
 			break;
-		case WatchPoint::WRITE_MEM:
+		case WRITE_MEM:
 			type = "write_mem";
 			break;
 		default:
@@ -585,9 +645,9 @@ void Debugger::Cmd::removeCondition(
 	if (tmp.starts_with("cond#")) {
 		// remove by id
 		if (auto id = StringOp::stringToBase<10, unsigned>(tmp.substr(5))) {
-			auto& interface = debugger().motherBoard.getCPUInterface();
-			for (auto& c : interface.getConditions()) {
+			for (auto& c : MSXCPUInterface::getConditions()) {
 				if (c.getId() == *id) {
+					auto& interface = debugger().motherBoard.getCPUInterface();
 					interface.removeCondition(c);
 					return;
 				}
@@ -597,12 +657,10 @@ void Debugger::Cmd::removeCondition(
 	throw CommandException("No such condition: ", tmp);
 }
 
-void Debugger::Cmd::listConditions(
-	std::span<const TclObject> /*tokens*/, TclObject& result)
+void Debugger::Cmd::listConditions(std::span<const TclObject> /*tokens*/, TclObject& result) const
 {
 	string res;
-	auto& interface = debugger().motherBoard.getCPUInterface();
-	for (const auto& c : interface.getConditions()) {
+	for (const auto& c : MSXCPUInterface::getConditions()) {
 		TclObject line = makeTclList(tmpStrCat("cond#", c.getId()),
 		                             c.getCondition(),
 		                             c.getCommand());
@@ -681,7 +739,7 @@ void Debugger::Cmd::probeListBreakPoints(
 	std::span<const TclObject> /*tokens*/, TclObject& result)
 {
 	string res;
-	for (auto& p : debugger().probeBreakPoints) {
+	for (const auto& p : debugger().probeBreakPoints) {
 		TclObject line = makeTclList(tmpStrCat("pp#", p->getId()),
 		                             p->getProbe().getName(),
 		                             p->getCondition(),
@@ -705,7 +763,7 @@ void Debugger::Cmd::symbols(std::span<const TclObject> tokens, TclObject& result
 		"files",  [&]{ symbolsFiles(tokens, result); },
 		"lookup", [&]{ symbolsLookup(tokens, result); });
 }
-void Debugger::Cmd::symbolsTypes(std::span<const TclObject> tokens, TclObject& result)
+void Debugger::Cmd::symbolsTypes(std::span<const TclObject> tokens, TclObject& result) const
 {
 	checkNumArgs(tokens, 3, "");
 	for (auto type = SymbolFile::Type::FIRST;
@@ -800,6 +858,7 @@ string Debugger::Cmd::help(std::span<const TclObject> tokens) const
 		"    break             break CPU at current position\n"
 		"    breaked           query CPU breaked status\n"
 		"    disasm            disassemble instructions\n"
+		"    disasm_blob       disassemble a instruction in Tcl binary string\n"
 		"    symbols           manage debug symbols\n"
 		"  The arguments are specific for each subcommand.\n"
 		"  Type 'help debug <subcommand>' for help about a specific subcommand.\n";
@@ -961,6 +1020,15 @@ string Debugger::Cmd::help(std::span<const TclObject> tokens) const
 		"instruction).\n"
 		"  Note that openMSX comes with a 'disasm' Tcl script that is much "
 		"more convenient to use than this subcommand.";
+	auto disasmBlobHelp =
+		"debug disasm_blob <value> <addr> [<function>]\n"
+		"  This is a more generic version of the disasm subcommand, but it "
+		"works on a Tcl binary string (see Tcl manual) to disassemble a "
+		"single instruction. The given address is used when relative "
+		"address to jump to is necessary. The optional fuction will be "
+		"called with an address as parameter and may return a symbol name "
+		"that replaces that address if a symbol that matches the address "
+		"is found.\n";
 	auto symbolsHelp =
 		"debug symbols <subcommand> [<arguments>]\n"
 		"  Possible subcommands are:\n"
@@ -1024,6 +1092,8 @@ string Debugger::Cmd::help(std::span<const TclObject> tokens) const
 		return breakedHelp;
 	} else if (tokens[1] == "disasm") {
 		return disasmHelp;
+	} else if (tokens[1] == "disasm_blob") {
+		return disasmBlobHelp;
 	} else if (tokens[1] == "symbols") {
 		return symbolsHelp;
 	} else {
@@ -1034,7 +1104,7 @@ string Debugger::Cmd::help(std::span<const TclObject> tokens) const
 std::vector<string> Debugger::Cmd::getBreakPointIds() const
 {
 	return to_vector(view::transform(
-		debugger().motherBoard.getCPUInterface().getBreakPoints(),
+		MSXCPUInterface::getBreakPoints(),
 		[](auto& bp) { return strCat("bp#", bp.getId()); }));
 }
 std::vector<string> Debugger::Cmd::getWatchPointIds() const
@@ -1046,7 +1116,7 @@ std::vector<string> Debugger::Cmd::getWatchPointIds() const
 std::vector<string> Debugger::Cmd::getConditionIds() const
 {
 	return to_vector(view::transform(
-		debugger().motherBoard.getCPUInterface().getConditions(),
+		MSXCPUInterface::getConditions(),
 		[](auto& c) { return strCat("cond#", c.getId()); }));
 }
 
@@ -1062,7 +1132,7 @@ void Debugger::Cmd::tabCompletion(std::vector<string>& tokens) const
 		"write"sv, "write_block"sv,
 	};
 	static constexpr std::array otherCmds = {
-		"disasm"sv, "set_bp"sv, "remove_bp"sv, "set_watchpoint"sv,
+		"disasm"sv, "disasm_blob"sv, "set_bp"sv, "remove_bp"sv, "set_watchpoint"sv,
 		"remove_watchpoint"sv, "set_condition"sv, "remove_condition"sv,
 		"probe"sv, "symbols"sv,
 	};

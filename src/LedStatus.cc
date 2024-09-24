@@ -1,11 +1,14 @@
 #include "LedStatus.hh"
+
 #include "MSXCliComm.hh"
 #include "CommandController.hh"
 #include "Timer.hh"
+
 #include "ranges.hh"
 #include "stl.hh"
 #include "strCat.hh"
 #include "xrange.hh"
+
 #include <array>
 #include <string_view>
 
@@ -65,7 +68,7 @@ void LedStatus::handleEvent(Led led) noexcept
 {
 	std::string_view str = ledValue[led] ? "on": "off";
 	ledStatus[led].setReadOnlyValue(TclObject(str));
-	msxCliComm.updateFiltered(CliComm::LED, getLedName(led), str);
+	msxCliComm.updateFiltered(CliComm::UpdateType::LED, getLedName(led), str);
 }
 
 void LedStatus::executeRT()

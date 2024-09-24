@@ -24,7 +24,7 @@ public:
 	[[nodiscard]] byte peekMem(word address, EmuTime::param time) const override;
 	void writeMem(word address, byte value, EmuTime::param time) override;
 	[[nodiscard]] const byte* getReadCacheLine(word address) const override;
-	[[nodiscard]] byte* getWriteCacheLine(word address) const override;
+	[[nodiscard]] byte* getWriteCacheLine(word address) override;
 	void init() override;
 
 	void videoIn(bool enabled);
@@ -48,7 +48,7 @@ private:
 	 *
 	 * See page 88 of the PX-7 Service Manual.
 	 */
-	Clock<2 * 500000, 128> clock;	// 2*500kHz / 128 = 7812.5Hz
+	Clock<2 * 500000, 128> clock{EmuTime::zero()}; // 2*500kHz / 128 = 7812.5Hz
 
 	/**
 	 * When video output stops, generate an IRQ

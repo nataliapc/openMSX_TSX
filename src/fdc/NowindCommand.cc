@@ -63,7 +63,7 @@ void NowindCommand::processHdimage(
 	if (auto pos = hdImage.find_last_of(':');
 	    (pos != string::npos) && !FileOperations::exists(hdImage)) {
 		partitions = StringOp::parseRange(
-			hdImage.substr(pos + 1), 1, 31);
+			std::string_view(hdImage).substr(pos + 1), 1, 31);
 	}
 
 	auto wholeDisk = std::make_shared<DSKDiskImage>(Filename(hdImage));
@@ -242,7 +242,7 @@ void NowindCommand::execute(std::span<const TclObject> tokens, TclObject& result
 	//   - the new drives (when there was an error)
 	auto prevSize = tmpDrives.size();
 	tmpDrives.clear();
-	for (auto& d : drives) {
+	for (const auto& d : drives) {
 		if (auto* disk = dynamic_cast<DiskChanger*>(d.get())) {
 			disk->createCommand();
 		}

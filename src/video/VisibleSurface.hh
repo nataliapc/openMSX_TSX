@@ -77,17 +77,14 @@ public:
 	void update(const Setting& setting) noexcept override;
 
 	// EventListener
-	int signalEvent(const Event& event) override;
+	bool signalEvent(const Event& event) override;
 
 	// RTSchedulable
 	void executeRT() override;
 
-	bool guiActive = false;
-
 private:
-	[[nodiscard]] gl::ivec2 getWindowSize() const;
 	void updateCursor();
-	void createSurface(int width, int height, unsigned flags);
+	void createSurface(gl::ivec2 size, unsigned flags);
 	void setViewPort(gl::ivec2 logicalSize, bool fullScreen);
 
 private:
@@ -106,6 +103,7 @@ private:
 	SDL_GLContext glContext;
 
 	bool grab = false;
+	bool guiActive = false;
 
 	static int windowPosX;
 	static int windowPosY;

@@ -130,14 +130,14 @@ void ESE_SCC::setMapperHigh(byte value)
 
 	bool flush = false;
 	byte mapperHigh = value & 0x40;
-	bool newSpcEnable = mapperHigh && !writeEnable;
-	if (spcEnable != newSpcEnable) {
+	if (bool newSpcEnable = mapperHigh && !writeEnable;
+	    spcEnable != newSpcEnable) {
 		spcEnable = newSpcEnable;
 		flush = true;
 	}
 
-	byte newValue = ((mapper[0] & 0x3F) | mapperHigh) & mapperMask;
-	if (mapper[0] != newValue) {
+	if (byte newValue = ((mapper[0] & 0x3F) | mapperHigh) & mapperMask;
+	    mapper[0] != newValue) {
 		mapper[0] = newValue;
 		flush = true;
 	}
@@ -240,7 +240,7 @@ void ESE_SCC::writeMem(word address, byte value, EmuTime::param time)
 	}
 }
 
-byte* ESE_SCC::getWriteCacheLine(word /*address*/) const
+byte* ESE_SCC::getWriteCacheLine(word /*address*/)
 {
 	return nullptr; // not cacheable
 }

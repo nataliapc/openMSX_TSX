@@ -408,8 +408,8 @@ static constexpr bool overlap(
 	//       VRAM region cannot wrap around.
 ) {
 	if (displayY0 <= displayY1) {
-		if (vramLine1 > displayY0) {
-			if (vramLine0 <= displayY1) return true;
+		if ((vramLine1 > displayY0) && (vramLine0 <= displayY1)) {
+			return true;
 		}
 	} else {
 		if (vramLine1 > displayY0) return true;
@@ -418,7 +418,7 @@ static constexpr bool overlap(
 	return false;
 }
 
-inline bool PixelRenderer::checkSync(unsigned offset, EmuTime::param time)
+bool PixelRenderer::checkSync(unsigned offset, EmuTime::param time) const
 {
 	// TODO: Because range is entire VRAM, offset == address.
 
@@ -427,7 +427,7 @@ inline bool PixelRenderer::checkSync(unsigned offset, EmuTime::param time)
 	// TODO: Have bitmapVisibleWindow disabled in this case.
 	if (!displayEnabled) return false;
 	//if (frameSkipCounter != 0) return false; // TODO
-	if (accuracy == RenderSettings::ACC_SCREEN) return false;
+	if (accuracy == RenderSettings::Accuracy::SCREEN) return false;
 
 	// Calculate what display lines are scanned between current
 	// renderer time and update-to time.
@@ -512,8 +512,6 @@ void PixelRenderer::updateVRAM(unsigned offset, EmuTime::param time)
 	// Note: No need to sync if display is disabled, because then the
 	//       output does not depend on VRAM (only on background color).
 	if (renderFrame && displayEnabled && checkSync(offset, time)) {
-		//fprintf(stderr, "vram sync @ line %d\n",
-		//	vdp.getTicksThisFrame(time) / VDP::TICKS_PER_LINE);
 		renderUntil(time);
 	}
 }
@@ -542,7 +540,7 @@ void PixelRenderer::sync(EmuTime::param time, bool force)
 	// TODO: I wonder if it's possible to enforce this synchronisation
 	//       scheme at a higher level. Probably. But how...
 	//if ((frameSkipCounter == 0) && TODO
-	if (accuracy != RenderSettings::ACC_SCREEN || force) {
+	if (accuracy != RenderSettings::Accuracy::SCREEN || force) {
 		vram.sync(time);
 		renderUntil(time);
 	}
@@ -555,12 +553,12 @@ void PixelRenderer::renderUntil(EmuTime::param time)
 	assert(limitTicks <= vdp.getTicksPerFrame());
 	auto [limitX, limitY] = [&]() -> std::pair<int, int> {
 		switch (accuracy) {
-		case RenderSettings::ACC_PIXEL: {
+		case RenderSettings::Accuracy::PIXEL: {
 			return {limitTicks % VDP::TICKS_PER_LINE,
 			        limitTicks / VDP::TICKS_PER_LINE};
 		}
-		case RenderSettings::ACC_LINE:
-		case RenderSettings::ACC_SCREEN:
+		case RenderSettings::Accuracy::LINE:
+		case RenderSettings::Accuracy::SCREEN:
 			// Note: I'm not sure the rounding point is optimal.
 			//       It used to be based on the left margin, but that doesn't work
 			//       because the margin can change which leads to a line being

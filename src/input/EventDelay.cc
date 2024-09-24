@@ -1,14 +1,17 @@
 #include "EventDelay.hh"
+
+#include "Event.hh"
 #include "EventDistributor.hh"
 #include "MSXEventDistributor.hh"
-#include "ReverseManager.hh"
-#include "Event.hh"
-#include "Timer.hh"
 #include "MSXException.hh"
+#include "ReverseManager.hh"
+#include "Timer.hh"
+
 #include "narrow.hh"
 #include "one_of.hh"
 #include "ranges.hh"
 #include "stl.hh"
+
 #include <cassert>
 
 #include <SDL.h>
@@ -23,23 +26,16 @@ EventDelay::EventDelay(Scheduler& scheduler_,
 	: Schedulable(scheduler_)
 	, eventDistributor(eventDistributor_)
 	, msxEventDistributor(msxEventDistributor_)
-	, prevEmu(EmuTime::zero())
 	, prevReal(Timer::getTime())
 	, delaySetting(
 		commandController, "inputdelay",
 		"delay input to avoid key-skips", 0.0, 0.0, 10.0)
 {
-	for (auto type : {
-			EventType::KEY_DOWN,
-			EventType::KEY_UP,
-			EventType::MOUSE_MOTION,
-			EventType::MOUSE_BUTTON_DOWN,
-			EventType::MOUSE_BUTTON_UP,
-			EventType::JOY_AXIS_MOTION,
-			EventType::JOY_HAT,
-			EventType::JOY_BUTTON_DOWN,
-			EventType::JOY_BUTTON_UP}) {
-		eventDistributor.registerEventListener(type, *this, EventDistributor::MSX);
+	using enum EventType;
+	for (auto type : {KEY_DOWN, KEY_UP,
+	                  MOUSE_MOTION, MOUSE_BUTTON_DOWN, MOUSE_BUTTON_UP,
+	                  JOY_AXIS_MOTION, JOY_HAT, JOY_BUTTON_DOWN, JOY_BUTTON_UP}) {
+		eventDistributor.registerEventListener(type, *this, EventDistributor::Priority::MSX);
 	}
 
 	reverseManager.registerEventDelay(*this);
@@ -47,27 +43,21 @@ EventDelay::EventDelay(Scheduler& scheduler_,
 
 EventDelay::~EventDelay()
 {
-	for (auto type : {
-			EventType::JOY_BUTTON_UP,
-			EventType::JOY_BUTTON_DOWN,
-			EventType::JOY_HAT,
-			EventType::JOY_AXIS_MOTION,
-			EventType::MOUSE_BUTTON_UP,
-			EventType::MOUSE_BUTTON_DOWN,
-			EventType::MOUSE_MOTION,
-			EventType::KEY_UP,
-			EventType::KEY_DOWN}) {
+	using enum EventType;
+	for (auto type : {JOY_BUTTON_UP, JOY_BUTTON_DOWN, JOY_HAT, JOY_AXIS_MOTION,
+	                  MOUSE_BUTTON_UP, MOUSE_BUTTON_DOWN, MOUSE_MOTION,
+	                  KEY_UP, KEY_DOWN}) {
 		eventDistributor.unregisterEventListener(type, *this);
 	}
 }
 
-int EventDelay::signalEvent(const Event& event)
+bool EventDelay::signalEvent(const Event& event)
 {
 	toBeScheduledEvents.push_back(event);
 	if (delaySetting.getDouble() == 0.0) {
 		sync(getCurrentTime());
 	}
-	return 0;
+	return false;
 }
 
 void EventDelay::sync(EmuTime::param curEmu)
@@ -174,12 +164,12 @@ void EventDelay::flush()
 {
 	EmuTime time = getCurrentTime();
 
-	for (auto& e : scheduledEvents) {
+	for (const auto& e : scheduledEvents) {
 		msxEventDistributor.distributeEvent(e, time);
 	}
 	scheduledEvents.clear();
 
-	for (auto& e : toBeScheduledEvents) {
+	for (const auto& e : toBeScheduledEvents) {
 		msxEventDistributor.distributeEvent(e, time);
 	}
 	toBeScheduledEvents.clear();

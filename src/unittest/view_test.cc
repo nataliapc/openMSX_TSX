@@ -131,15 +131,15 @@ TEST_CASE("view::reverse")
 	vector<int> out;
 	SECTION("l-value") {
 		vector<int> in = {1, 2, 3, 4};
-		for (auto& e : reverse(in)) out.push_back(e);
+		for (const auto& e : reverse(in)) out.push_back(e);
 		CHECK(out == vector<int>{4, 3, 2, 1});
 	}
 	SECTION("r-value") {
-		for (auto& e : reverse(getVector(3))) out.push_back(e);
+		for (const auto& e : reverse(getVector(3))) out.push_back(e);
 		CHECK(out == vector<int>{2, 1, 0});
 	}
 	SECTION("2 x reverse") {
-		for (auto& e : reverse(reverse(getVector(4)))) out.push_back(e);
+		for (const auto& e : reverse(reverse(getVector(4)))) out.push_back(e);
 		CHECK(out == vector<int>{0, 1, 2, 3});
 	}
 }
@@ -297,7 +297,7 @@ TEST_CASE("view::take") {
 	}
 	SECTION("split_view") {
 		std::string_view str = "abc  def\t \tghi    jkl  mno  pqr";
-		auto v = view::take(StringOp::split_view<StringOp::REMOVE_EMPTY_PARTS>(str, " \t"), 3);
+		auto v = view::take(StringOp::split_view<StringOp::EmptyParts::REMOVE>(str, " \t"), 3);
 
 		auto it = v.begin();
 		auto et = v.end();

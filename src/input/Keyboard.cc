@@ -1,33 +1,37 @@
 #include "Keyboard.hh"
-#include "SDLKey.hh"
+
+#include "CommandController.hh"
+#include "CommandException.hh"
 #include "DeviceConfig.hh"
+#include "Event.hh"
 #include "EventDistributor.hh"
 #include "InputEventFactory.hh"
 #include "MSXEventDistributor.hh"
-#include "StateChangeDistributor.hh"
 #include "MSXMotherBoard.hh"
 #include "ReverseManager.hh"
-#include "CommandController.hh"
-#include "CommandException.hh"
-#include "Event.hh"
+#include "SDLKey.hh"
 #include "StateChange.hh"
+#include "StateChangeDistributor.hh"
 #include "TclArgParser.hh"
 #include "TclObject.hh"
 #include "UnicodeKeymap.hh"
-#include "enumerate.hh"
 #include "openmsx.hh"
+#include "serialize.hh"
+#include "serialize_meta.hh"
+#include "serialize_stl.hh"
+
+#include "enumerate.hh"
 #include "one_of.hh"
 #include "outer.hh"
-#include "serialize.hh"
-#include "serialize_stl.hh"
-#include "serialize_meta.hh"
 #include "ranges.hh"
 #include "stl.hh"
 #include "unreachable.hh"
 #include "utf8_checked.hh"
 #include "view.hh"
 #include "xrange.hh"
+
 #include <SDL.h>
+
 #include <array>
 #include <cstdio>
 #include <cassert>
@@ -91,31 +95,32 @@ private:
 REGISTER_POLYMORPHIC_CLASS(StateChange, KeyMatrixState, "KeyMatrixState");
 
 
-static constexpr std::array<std::string_view, 4> defaultKeymapForMatrix = {
-	"int", // MATRIX_MSX
-	"svi", // MATRIX_SVI
-	"cvjoy", // MATRIX_CVJOY
-	"sega_int", // MATRIX_SEGA
+static constexpr array_with_enum_index<Keyboard::Matrix, std::string_view> defaultKeymapForMatrix = {
+	"int", // Matrix::MSX
+	"svi", // Matrix::SVI
+	"cvjoy", // Matrix::CVJOY
+	"sega_int", // Matrix::SEGA
 };
 
-static constexpr std::array modifierPosForMatrix = {
-	std::array{ // MATRIX_MSX
+using ModifierArray = array_with_enum_index<UnicodeKeymap::KeyInfo::Modifier, KeyMatrixPosition>;
+static constexpr array_with_enum_index<Keyboard::Matrix, ModifierArray> modifierPosForMatrix = {
+	ModifierArray{ // Matrix::MSX
 		KeyMatrixPosition(6, 0), // SHIFT
 		KeyMatrixPosition(6, 1), // CTRL
 		KeyMatrixPosition(6, 2), // GRAPH
 		KeyMatrixPosition(6, 3), // CAPS
 		KeyMatrixPosition(6, 4), // CODE
 	},
-	std::array{ // MATRIX_SVI
+	ModifierArray{ // Matrix::SVI
 		KeyMatrixPosition(6, 0), // SHIFT
 		KeyMatrixPosition(6, 1), // CTRL
 		KeyMatrixPosition(6, 2), // LGRAPH
 		KeyMatrixPosition(8, 3), // CAPS
 		KeyMatrixPosition(6, 3), // RGRAPH
 	},
-	std::array<KeyMatrixPosition, UnicodeKeymap::KeyInfo::NUM_MODIFIERS>{ // MATRIX_CVJOY
+	ModifierArray{ // Matrix::CVJOY
 	},
-	std::array{ // MATRIX_SEGA
+	ModifierArray{ // Matrix::SEGA
 		KeyMatrixPosition(13, 3), // SHIFT
 		KeyMatrixPosition(13, 2), // CTRL
 		KeyMatrixPosition(13, 1), // GRAPH
@@ -668,13 +673,13 @@ static constexpr auto cvJoyScanCodeMapping = extractScanCodeMapping([] { return 
 static constexpr auto segaKeyCodeMapping   = extractKeyCodeMapping ([] { return getSegaMapping(); });
 static constexpr auto segaScanCodeMapping  = extractScanCodeMapping([] { return getSegaMapping(); });
 
-static constexpr std::array<std::span<const KeyCodeMsxMapping>, 4> defaultKeyCodeMappings = {
+static constexpr array_with_enum_index<Keyboard::Matrix, std::span<const KeyCodeMsxMapping>> defaultKeyCodeMappings = {
 	msxKeyCodeMapping,
 	sviKeyCodeMapping,
 	cvJoyKeyCodeMapping,
 	segaKeyCodeMapping,
 };
-static constexpr std::array<std::span<const ScanCodeMsxMapping>, 4> defaultScanCodeMappings = {
+static constexpr array_with_enum_index<Keyboard::Matrix, std::span<const ScanCodeMsxMapping>> defaultScanCodeMappings = {
 	msxScanCodeMapping,
 	sviScanCodeMapping,
 	cvJoyScanCodeMapping,
@@ -687,7 +692,7 @@ Keyboard::Keyboard(MSXMotherBoard& motherBoard,
                    EventDistributor& eventDistributor,
                    MSXEventDistributor& msxEventDistributor_,
                    StateChangeDistributor& stateChangeDistributor_,
-                   MatrixType matrix,
+                   Matrix matrix,
                    const DeviceConfig& config)
 	: Schedulable(scheduler_)
 	, commandController(commandController_)
@@ -708,7 +713,7 @@ Keyboard::Keyboard(MSXMotherBoard& motherBoard,
 	, unicodeKeymap(config.getChildData(
 		"keyboard_type", defaultKeymapForMatrix[matrix]))
 	, hasKeypad(config.getChildDataAsBool("has_keypad", true))
-	, blockRow11(matrix == MATRIX_MSX
+	, blockRow11(matrix == Matrix::MSX
 		&& !config.getChildDataAsBool("has_yesno_keys", false))
 	, keyGhosting(config.getChildDataAsBool("key_ghosting", true))
 	, keyGhostingSGCprotected(config.getChildDataAsBool(
@@ -728,11 +733,14 @@ Keyboard::Keyboard(MSXMotherBoard& motherBoard,
 	// We do not listen for CONSOLE_OFF_EVENTS because rescanning the
 	// keyboard can have unwanted side effects
 
-	motherBoard.getReverseManager().registerKeyboard(*this);
+	motherBoard.registerKeyboard(*this);
 }
 
 Keyboard::~Keyboard()
 {
+	auto& motherBoard = keybDebuggable.getMotherBoard();
+	motherBoard.unregisterKeyboard(*this);
+
 	stateChangeDistributor.unregisterListener(*this);
 	msxEventDistributor.unregisterEventListener(*this);
 }
@@ -839,6 +847,14 @@ void Keyboard::transferHostKeyMatrix(const Keyboard& source)
 	}
 }
 
+void Keyboard::setFocus(bool newFocus, EmuTime::param time)
+{
+	if (newFocus == focus) return;
+	focus = newFocus;
+
+	syncHostKeyMatrix(time); // release all keys on lost focus
+}
+
 /* Received an MSX event
  * Following events get processed:
  *  EventType::KEY_DOWN
@@ -869,6 +885,11 @@ void Keyboard::signalStateChange(const StateChange& event)
 }
 
 void Keyboard::stopReplay(EmuTime::param time) noexcept
+{
+	syncHostKeyMatrix(time);
+}
+
+void Keyboard::syncHostKeyMatrix(EmuTime::param time)
 {
 	for (auto [row, hkm] : enumerate(hostKeyMatrix)) {
 		changeKeyMatrixEvent(time, uint8_t(row), hkm);
@@ -922,6 +943,8 @@ void Keyboard::releaseKeyMatrixEvent(EmuTime::param time, KeyMatrixPosition pos)
 
 void Keyboard::changeKeyMatrixEvent(EmuTime::param time, uint8_t row, uint8_t newValue)
 {
+	if (!focus) newValue = 0xff;
+
 	// This method already updates hostKeyMatrix[],
 	// userKeyMatrix[] will soon be updated via KeyMatrixState events.
 	hostKeyMatrix[row] = newValue;
@@ -970,7 +993,7 @@ bool Keyboard::processQueuedEvent(const Event& event, EmuTime::param time)
 	}
 
 	// Process dead keys.
-	if (mode == KeyboardSettings::CHARACTER_MAPPING) {
+	if (mode == KeyboardSettings::MappingMode::CHARACTER) {
 		for (auto n : xrange(3)) {
 			if (key.sym.sym == keyboardSettings.getDeadKeyHostKey(n)) {
 				UnicodeKeymap::KeyInfo deadKey = unicodeKeymap.getDeadKey(n);
@@ -1009,7 +1032,7 @@ void Keyboard::processCodeKanaChange(EmuTime::param time, bool down)
 	if (down) {
 		locksOn ^= KeyInfo::CODE_MASK;
 	}
-	updateKeyMatrix(time, down, modifierPos[KeyInfo::CODE]);
+	updateKeyMatrix(time, down, modifierPos[KeyInfo::Modifier::CODE]);
 }
 
 /*
@@ -1022,7 +1045,7 @@ void Keyboard::processGraphChange(EmuTime::param time, bool down)
 	if (down) {
 		locksOn ^= KeyInfo::GRAPH_MASK;
 	}
-	updateKeyMatrix(time, down, modifierPos[KeyInfo::GRAPH]);
+	updateKeyMatrix(time, down, modifierPos[KeyInfo::Modifier::GRAPH]);
 }
 
 /*
@@ -1037,11 +1060,11 @@ void Keyboard::processCapslockEvent(EmuTime::param time, bool down)
 		if (down) {
 			locksOn ^= KeyInfo::CAPS_MASK;
 		}
-		updateKeyMatrix(time, down, modifierPos[KeyInfo::CAPS]);
+		updateKeyMatrix(time, down, modifierPos[KeyInfo::Modifier::CAPS]);
 	} else {
 		debug("Pressing CAPS lock and scheduling a release\n");
 		locksOn ^= KeyInfo::CAPS_MASK;
-		updateKeyMatrix(time, true, modifierPos[KeyInfo::CAPS]);
+		updateKeyMatrix(time, true, modifierPos[KeyInfo::Modifier::CAPS]);
 		setSyncPoint(time + EmuDuration::hz(10)); // 0.1s (in MSX time)
 	}
 }
@@ -1049,7 +1072,7 @@ void Keyboard::processCapslockEvent(EmuTime::param time, bool down)
 void Keyboard::executeUntil(EmuTime::param time)
 {
 	debug("Releasing CAPS lock\n");
-	updateKeyMatrix(time, false, modifierPos[KeyInfo::CAPS]);
+	updateKeyMatrix(time, false, modifierPos[KeyInfo::Modifier::CAPS]);
 }
 
 void Keyboard::processKeypadEnterKey(EmuTime::param time, bool down)
@@ -1060,7 +1083,7 @@ void Keyboard::processKeypadEnterKey(EmuTime::param time, bool down)
 		return;
 	}
 	processSdlKey(time,
-	              SDLKey::create(keyboardSettings.getKpEnterMode() == KeyboardSettings::MSX_KP_COMMA
+	              SDLKey::create(keyboardSettings.getKpEnterMode() == KeyboardSettings::KpEnterMode::MSX_KP_COMMA
 	                                 ? SDLK_KP_ENTER : SDLK_RETURN,
 	                             down));
 }
@@ -1082,12 +1105,12 @@ void Keyboard::processSdlKey(EmuTime::param time, SDLKey key)
 		updateKeyMatrix(time, key.down, pos);
 	};
 
-	if (keyboardSettings.getMappingMode() == KeyboardSettings::POSITIONAL_MAPPING) {
-		if (auto* mapping = binary_find(scanCodeTab, key.sym.scancode, {}, &ScanCodeMsxMapping::hostScanCode)) {
+	if (keyboardSettings.getMappingMode() == KeyboardSettings::MappingMode::POSITIONAL) {
+		if (const auto* mapping = binary_find(scanCodeTab, key.sym.scancode, {}, &ScanCodeMsxMapping::hostScanCode)) {
 			process(mapping->msx);
 		}
 	} else {
-		if (auto* mapping = binary_find(keyCodeTab, key.sym.sym, {}, &KeyCodeMsxMapping::hostKeyCode)) {
+		if (const auto* mapping = binary_find(keyCodeTab, key.sym.sym, {}, &KeyCodeMsxMapping::hostKeyCode)) {
 			process(mapping->msx);
 		}
 	}
@@ -1151,7 +1174,7 @@ bool Keyboard::processKeyEvent(EmuTime::param time, bool down, const KeyEvent& k
 		return false;
 	}
 #if defined(__APPLE__)
-	bool positional = mode == KeyboardSettings::POSITIONAL_MAPPING;
+	bool positional = mode == KeyboardSettings::MappingMode::POSITIONAL;
 	if ((key.sym.mod & KMOD_GUI) &&
 	    (( positional && (keyEvent.getScanCode() == SDL_SCANCODE_I)) ||
 	     (!positional && (keyCode == SDLK_i)))) {
@@ -1168,8 +1191,8 @@ bool Keyboard::processKeyEvent(EmuTime::param time, bool down, const KeyEvent& k
 		UnicodeKeymap::KeyInfo keyInfo;
 		unsigned unicode;
 		if (isOnKeypad ||
-		    mode == one_of(KeyboardSettings::KEY_MAPPING,
-		                   KeyboardSettings::POSITIONAL_MAPPING)) {
+		    mode == one_of(KeyboardSettings::MappingMode::KEY,
+		                   KeyboardSettings::MappingMode::POSITIONAL)) {
 			// User entered a key on numeric keypad or the driver is in
 			// KEY/POSITIONAL mapping mode.
 			// First option (keypad) maps to same unicode as some other key
@@ -1320,7 +1343,7 @@ bool Keyboard::pressUnicodeByUser(
 			// Toggle it by pressing the lock key and scheduling a
 			// release event
 			locksOn ^= KeyInfo::CODE_MASK;
-			pressKeyMatrixEvent(time, modifierPos[KeyInfo::CODE]);
+			pressKeyMatrixEvent(time, modifierPos[KeyInfo::Modifier::CODE]);
 			insertCodeKanaRelease = true;
 		} else {
 			// Press the character key and related modifiers
@@ -1342,7 +1365,7 @@ bool Keyboard::pressUnicodeByUser(
 			} else {
 				// Release SHIFT if our character does not require it.
 				if (~modMask & KeyInfo::SHIFT_MASK) {
-					releaseKeyMatrixEvent(time, modifierPos[KeyInfo::SHIFT]);
+					releaseKeyMatrixEvent(time, modifierPos[KeyInfo::Modifier::SHIFT]);
 				}
 			}
 			// Press required modifiers for our character.
@@ -1438,7 +1461,7 @@ uint8_t Keyboard::pressAscii(unsigned unicode, bool down)
 				auto isPressed = [&](auto& key) {
 					return (typeKeyMatrix[key.getRow()] & key.getMask()) == 0;
 				};
-				if (!isPressed(modifierPos[KeyInfo::GRAPH])) {
+				if (!isPressed(modifierPos[KeyInfo::Modifier::GRAPH])) {
 					// GRAPH not yet pressed ->
 					//  first press it before adding the non-modifier key
 					releaseMask = TRY_AGAIN;
@@ -1496,7 +1519,7 @@ void Keyboard::pressLockKeys(uint8_t lockKeysMask, bool down)
  * a short while after releasing a key (to enter a certain character) before
  * pressing the next key (to enter the next character)
  */
-bool Keyboard::commonKeys(unsigned unicode1, unsigned unicode2)
+bool Keyboard::commonKeys(unsigned unicode1, unsigned unicode2) const
 {
 	// get row / mask of key (note: ignore modifier mask)
 	auto keyPos1 = unicodeKeymap.get(unicode1).pos;
@@ -1505,7 +1528,7 @@ bool Keyboard::commonKeys(unsigned unicode1, unsigned unicode2)
 	return keyPos1 == keyPos2 && keyPos1.isValid();
 }
 
-void Keyboard::debug(const char* format, ...)
+void Keyboard::debug(const char* format, ...) const
 {
 	if (keyboardSettings.getTraceKeyPresses()) {
 		va_list args;
@@ -1601,7 +1624,7 @@ void Keyboard::MsxKeyEventQueue::executeUntil(EmuTime::param time)
 		// The processor pressed the CODE/KANA key
 		// Schedule a CODE/KANA release event, to be processed
 		// before any of the other events in the queue
-		eventQueue.push_front(KeyUpEvent::create(keyboard.keyboardSettings.getCodeKanaHostKey()));
+		eventQueue.emplace_front(KeyUpEvent::create(keyboard.keyboardSettings.getCodeKanaHostKey()));
 	} else {
 		// The event has been completely processed. Delete it from the queue
 		if (!eventQueue.empty()) {
@@ -1679,7 +1702,7 @@ void Keyboard::KeyInserter::type(std::string_view str)
 	if (str.empty()) {
 		return;
 	}
-	auto& keyboard = OUTER(Keyboard, keyTypeCmd);
+	const auto& keyboard = OUTER(Keyboard, keyTypeCmd);
 	oldLocksOn = keyboard.locksOn;
 	if (text_utf8.empty()) {
 		reschedule(getCurrentTime());
@@ -1809,7 +1832,7 @@ void Keyboard::Unicode2MsxcodeCmd::execute(std::span<const TclObject> tokens, Tc
 	checkNumArgs(tokens, Between{2, 3}, "unicode-string ?fallback?");
 
 	auto& interp = getInterpreter();
-	auto& keyboard = OUTER(Keyboard, unicode2MsxcodeCmd);
+	const auto& keyboard = OUTER(Keyboard, unicode2MsxcodeCmd);
 	const auto& msxChars = keyboard.unicodeKeymap.getMsxChars();
 
 	const auto& unicode = tokens[1].getString();
@@ -1879,11 +1902,11 @@ Keyboard::CapsLockAligner::~CapsLockAligner()
 	}
 }
 
-int Keyboard::CapsLockAligner::signalEvent(const Event& event)
+bool Keyboard::CapsLockAligner::signalEvent(const Event& event)
 {
 	if constexpr (!SANE_CAPSLOCK_BEHAVIOR) {
 		// don't even try
-		return 0;
+		return false;
 	}
 
 	if (state == IDLE) {
@@ -1904,7 +1927,7 @@ int Keyboard::CapsLockAligner::signalEvent(const Event& event)
 			[](const EventBase&) { UNREACHABLE; }
 		}, event);
 	}
-	return 0;
+	return false;
 }
 
 void Keyboard::CapsLockAligner::executeUntil(EmuTime::param time)
@@ -1964,7 +1987,7 @@ Keyboard::KeybDebuggable::KeybDebuggable(MSXMotherBoard& motherBoard_)
 
 uint8_t Keyboard::KeybDebuggable::read(unsigned address)
 {
-	auto& keyboard = OUTER(Keyboard, keybDebuggable);
+	const auto& keyboard = OUTER(Keyboard, keybDebuggable);
 	return keyboard.getKeys()[address];
 }
 
@@ -2085,7 +2108,7 @@ void Keyboard::MsxKeyEventQueue::serialize(Archive& ar, unsigned /*version*/)
 	ar.serialize("eventQueue", eventStrs);
 	if constexpr (Archive::IS_LOADER) {
 		assert(eventQueue.empty());
-		for (auto& s : eventStrs) {
+		for (const auto& s : eventStrs) {
 			eventQueue.push_back(
 				InputEventFactory::createInputEvent(s, interp));
 		}

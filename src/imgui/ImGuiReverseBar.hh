@@ -14,8 +14,7 @@ namespace openmsx {
 class ImGuiReverseBar final : public ImGuiPart
 {
 public:
-	explicit ImGuiReverseBar(ImGuiManager& manager_)
-		: ImGuiPart(manager_) {}
+	using ImGuiPart::ImGuiPart;
 
 	[[nodiscard]] zstring_view iniName() const override { return "reverse bar"; }
 	void save(ImGuiTextBuffer& buf) override;
@@ -51,6 +50,7 @@ private:
 		PersistentElement{"hideTitle", &ImGuiReverseBar::reverseHideTitle},
 		PersistentElement{"fadeOut",   &ImGuiReverseBar::reverseFadeOut},
 		PersistentElement{"allowMove", &ImGuiReverseBar::reverseAllowMove}
+		// manually handle "adjust"
 	};
 };
 

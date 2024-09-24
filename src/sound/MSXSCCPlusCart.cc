@@ -66,7 +66,7 @@ MSXSCCPlusCart::MSXSCCPlusCart(const DeviceConfig& config)
 	: MSXDevice(config)
 	, mapperConfig(getMapperConfig(config))
 	, ram(config, getName() + " RAM", "SCC+ RAM", size_t(mapperConfig.numBlocks) * 0x2000)
-	, scc(getName(), config, getCurrentTime(), SCC::SCC_Compatible)
+	, scc(getName(), config, getCurrentTime(), SCC::Mode::Compatible)
 	, romBlockDebug(*this, mapper, 0x4000, 0x8000, 13)
 {
 	if (const auto* fileElem = config.findChild("filename")) {
@@ -207,14 +207,14 @@ void MSXSCCPlusCart::writeMem(word address, byte value, EmuTime::param time)
 	}
 }
 
-byte* MSXSCCPlusCart::getWriteCacheLine(word start) const
+byte* MSXSCCPlusCart::getWriteCacheLine(word start)
 {
 	if ((0x4000 <= start) && (start < 0xC000)) {
 		if (start == (0xBFFF & CacheLine::HIGH)) {
 			return nullptr;
 		}
-		int region = (start >> 13) - 2;
-		if (isRamSegment[region] && isMapped[region]) {
+		if (int region = (start >> 13) - 2;
+		    isRamSegment[region] && isMapped[region]) {
 			return &internalMemoryBank[region][start & 0x1FFF];
 		}
 		return nullptr;
@@ -250,9 +250,9 @@ void MSXSCCPlusCart::setModeRegister(byte value)
 	checkEnable(); // invalidateDeviceRWCache() done below
 
 	if (modeRegister & 0x20) {
-		scc.setChipMode(SCC::SCC_plusmode);
+		scc.setMode(SCC::Mode::Plus);
 	} else {
-		scc.setChipMode(SCC::SCC_Compatible);
+		scc.setMode(SCC::Mode::Compatible);
 	}
 
 	if (modeRegister & 0x10) {

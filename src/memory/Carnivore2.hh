@@ -102,7 +102,7 @@ private:
 	[[nodiscard]] unsigned getMemoryMapperAddress(word address) const;
 	[[nodiscard]] bool isMemoryMapperWriteProtected(word address) const;
 	[[nodiscard]] byte peekMemoryMapperSlot(word address) const;
-	[[nodiscard]] byte readMemoryMapperSlot(word address);
+	[[nodiscard]] byte readMemoryMapperSlot(word address) const;
 	void writeMemoryMapperSlot(word address, byte value);
 
 	// fm-pac

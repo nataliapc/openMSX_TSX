@@ -1,11 +1,13 @@
 #ifndef GLPOSTPROCESSOR_HH
 #define GLPOSTPROCESSOR_HH
 
-#include "EmuTime.hh"
 #include "GLUtil.hh"
 #include "RenderSettings.hh"
-#include "Schedulable.hh"
 #include "VideoLayer.hh"
+
+#include "EmuTime.hh"
+#include "Schedulable.hh"
+
 #include <array>
 #include <memory>
 #include <vector>
@@ -114,11 +116,11 @@ private:
 	                 unsigned lineWidth);
 
 	void preCalcNoise(float factor);
-	void drawNoise();
+	void drawNoise() const;
 	void drawGlow(int glow);
 
 	void preCalcMonitor3D(float width);
-	void drawMonitor3D();
+	void drawMonitor3D() const;
 
 private:
 	Display& display;
@@ -215,7 +217,7 @@ private:
 
 	/** Currently active scale algorithm, used to detect scaler changes.
 	  */
-	RenderSettings::ScaleAlgorithm scaleAlgorithm = RenderSettings::NO_SCALER;
+	RenderSettings::ScaleAlgorithm scaleAlgorithm = RenderSettings::ScaleAlgorithm::NO;
 
 	gl::ShaderProgram monitor3DProg;
 	gl::BufferObject arrayBuffer;

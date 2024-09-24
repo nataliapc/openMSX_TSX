@@ -1,15 +1,17 @@
 #include "GlobalCommandController.hh"
-#include "Reactor.hh"
-#include "Setting.hh"
-#include "ProxyCommand.hh"
-#include "ProxySetting.hh"
-#include "LocalFileReference.hh"
-#include "GlobalCliComm.hh"
+
 #include "CliConnection.hh"
 #include "CommandException.hh"
+#include "GlobalCliComm.hh"
+#include "LocalFileReference.hh"
+#include "ProxyCommand.hh"
+#include "ProxySetting.hh"
+#include "Reactor.hh"
+#include "Setting.hh"
 #include "SettingsManager.hh"
 #include "TclObject.hh"
 #include "Version.hh"
+
 #include "ScopedAssign.hh"
 #include "join.hh"
 #include "outer.hh"
@@ -17,7 +19,9 @@
 #include "stl.hh"
 #include "view.hh"
 #include "xrange.hh"
+
 #include "build-info.hh"
+
 #include <cassert>
 #include <memory>
 
@@ -34,7 +38,7 @@ GlobalCommandController::GlobalCommandController(
 	, reactor(reactor_)
 	, openMSXInfoCommand(*this, "openmsx_info")
 	, hotKey(reactor.getRTScheduler(), *this, eventDistributor)
-	, settingsConfig(*this, hotKey)
+	, settingsConfig(*this, hotKey, reactor.getShortcuts())
 	, helpCmd(*this)
 	, tabCompletionCmd(*this)
 	, updateCmd(*this)
@@ -84,7 +88,7 @@ GlobalCommandController::findProxySetting(string_view name)
 		[](auto& v) { return v.first->getFullName(); });
 }
 
-void GlobalCommandController::registerProxySetting(Setting& setting)
+void GlobalCommandController::registerProxySetting(const Setting& setting)
 {
 	const auto& name = setting.getBaseNameObj();
 	auto it = findProxySetting(name.getString());
@@ -100,7 +104,7 @@ void GlobalCommandController::registerProxySetting(Setting& setting)
 	}
 }
 
-void GlobalCommandController::unregisterProxySetting(Setting& setting)
+void GlobalCommandController::unregisterProxySetting(const Setting& setting)
 {
 	auto it = findProxySetting(setting.getBaseName());
 	assert(it != end(proxySettings));
@@ -342,8 +346,7 @@ string GlobalCommandController::tabCompletion(string_view command)
 
 	// replace last token
 	string& original = originalTokens.back();
-	string& completed = tokens[oldNum - 1];
-	if (!completed.empty()) {
+	if (const string& completed = tokens[oldNum - 1]; !completed.empty()) {
 		bool quote = !original.empty() && (original[0] == '"');
 		original = addEscaping(completed, quote, tokenFinished);
 	}
@@ -521,8 +524,8 @@ GlobalCommandController::UpdateCmd::UpdateCmd(CommandController& commandControll
 
 static GlobalCliComm::UpdateType getType(const TclObject& name)
 {
-	auto updateStr = CliComm::getUpdateStrings();
-	for (auto i : xrange(updateStr.size())) {
+	for (auto updateStr = CliComm::getUpdateStrings();
+	     auto i : xrange(updateStr.size())) {
 		if (updateStr[i] == name) {
 			return static_cast<CliComm::UpdateType>(i);
 		}
@@ -532,7 +535,7 @@ static GlobalCliComm::UpdateType getType(const TclObject& name)
 
 CliConnection& GlobalCommandController::UpdateCmd::getConnection()
 {
-	auto& controller = OUTER(GlobalCommandController, updateCmd);
+	const auto& controller = OUTER(GlobalCommandController, updateCmd);
 	if (auto* c = controller.getConnection()) {
 		return *c;
 	}

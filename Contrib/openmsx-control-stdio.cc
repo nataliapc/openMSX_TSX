@@ -29,9 +29,9 @@ private:
 	// these methods get called when openMSX has send the corresponding tag
 	void openmsx_cmd_ok(const std::string& msg);
 	void openmsx_cmd_nok(const std::string& msg);
-	void openmsx_cmd_info(const std::string& msg);
-	void openmsx_cmd_warning(const std::string& msg);
-	void openmsx_cmd_update(const std::string& name, const std::string& value);
+	void openmsx_cmd_info(const std::string& msg) const;
+	void openmsx_cmd_warning(const std::string& msg) const;
+	void openmsx_cmd_update(const std::string& name, const std::string& value) const;
 
 	// XML parsing call-back functions
 	static void cb_start_element(OpenMSXComm* comm, const xmlChar* name,
@@ -44,10 +44,10 @@ private:
 	void parseUpdate(const char** attrs);
 
 	void doReply();
-	void doLog();
-	void doUpdate();
+	void doLog() const;
+	void doUpdate() const;
 
-	void deprecated();
+	void deprecated() const;
 
 	// commands being executed
 	std::list<std::string> commandStack;
@@ -114,22 +114,22 @@ void OpenMSXComm::openmsx_cmd_nok(const std::string& msg)
 	commandStack.pop_front();
 }
 
-void OpenMSXComm::openmsx_cmd_info(const std::string& msg)
+void OpenMSXComm::openmsx_cmd_info(const std::string& msg) const
 {
 	std::cout << "INFO: " << msg << '\n' << std::flush;
 }
 
-void OpenMSXComm::openmsx_cmd_warning(const std::string& msg)
+void OpenMSXComm::openmsx_cmd_warning(const std::string& msg) const
 {
 	std::cout << "WARNING: " << msg << '\n' << std::flush;
 }
 
-void OpenMSXComm::openmsx_cmd_update(const std::string& name, const std::string& value)
+void OpenMSXComm::openmsx_cmd_update(const std::string& name, const std::string& value) const
 {
 	std::cout << "UPDATE: " << name << ' ' << value << '\n' << std::flush;
 }
 
-void OpenMSXComm::deprecated()
+void OpenMSXComm::deprecated() const
 {
 	static bool alreadyPrinted = false;
 	if (!alreadyPrinted) {
@@ -196,14 +196,13 @@ void OpenMSXComm::cb_start_element(OpenMSXComm* comm, const xmlChar* name,
 void OpenMSXComm::parseReply(const char** attrs)
 {
 	replyStatus = REPLY_UNKNOWN;
-	if (attrs) {
-		for ( ; *attrs; attrs += 2) {
-			if (strcmp(attrs[0], "result") == 0) {
-				if (strcmp(attrs[1], "ok") == 0) {
-					replyStatus = REPLY_OK;
-				} else if (strcmp(attrs[1], "nok") == 0) {
-					replyStatus = REPLY_NOK;
-				}
+	if (!attrs) return;
+	for ( ; *attrs; attrs += 2) {
+		if (strcmp(attrs[0], "result") == 0) {
+			if (strcmp(attrs[1], "ok") == 0) {
+				replyStatus = REPLY_OK;
+			} else if (strcmp(attrs[1], "nok") == 0) {
+				replyStatus = REPLY_NOK;
 			}
 		}
 	}
@@ -212,14 +211,13 @@ void OpenMSXComm::parseReply(const char** attrs)
 void OpenMSXComm::parseLog(const char** attrs)
 {
 	logLevel = LOG_UNKNOWN;
-	if (attrs) {
-		for ( ; *attrs; attrs += 2) {
-			if (strcmp(attrs[0], "level") == 0) {
-				if (strcmp(attrs[1], "info") == 0) {
-					logLevel = LOG_INFO;
-				} else if (strcmp(attrs[1], "warning") == 0) {
-					logLevel = LOG_WARNING;
-				}
+	if (!attrs) return;
+	for ( ; *attrs; attrs += 2) {
+		if (strcmp(attrs[0], "level") == 0) {
+			if (strcmp(attrs[1], "info") == 0) {
+				logLevel = LOG_INFO;
+			} else if (strcmp(attrs[1], "warning") == 0) {
+				logLevel = LOG_WARNING;
 			}
 		}
 	}
@@ -228,15 +226,14 @@ void OpenMSXComm::parseLog(const char** attrs)
 void OpenMSXComm::parseUpdate(const char** attrs)
 {
 	updateType = UPDATE_UNKNOWN;
-	if (attrs) {
-		for ( ; *attrs; attrs += 2) {
-			if (strcmp(attrs[0], "type") == 0) {
-				if (strcmp(attrs[1], "led") == 0) {
-					updateType = UPDATE_LED;
-				}
-			} else if (strcmp(attrs[0], "name") == 0) {
-				updateName = attrs[1];
+	if (!attrs) return;
+	for ( ; *attrs; attrs += 2) {
+		if (strcmp(attrs[0], "type") == 0) {
+			if (strcmp(attrs[1], "led") == 0) {
+				updateType = UPDATE_LED;
 			}
+		} else if (strcmp(attrs[0], "name") == 0) {
+			updateName = attrs[1];
 		}
 	}
 }
@@ -300,7 +297,7 @@ void OpenMSXComm::doReply()
 	}
 }
 
-void OpenMSXComm::doLog()
+void OpenMSXComm::doLog() const
 {
 	switch (logLevel) {
 		case LOG_INFO:
@@ -315,7 +312,7 @@ void OpenMSXComm::doLog()
 	}
 }
 
-void OpenMSXComm::doUpdate()
+void OpenMSXComm::doUpdate() const
 {
 	switch (updateType) {
 		case UPDATE_LED:
@@ -373,8 +370,7 @@ void OpenMSXComm::start()
 	fd_out = pipe_to_child[1];
 
 	// start openmsx sub-process
-	pid_t pid = fork();
-	if (pid == 0) {
+	if (pid_t pid = fork(); pid == 0) {
 		dup2(pipe_to_child[0], STDIN_FILENO);
 		dup2(pipe_from_child[1], STDOUT_FILENO);
 		close(pipe_to_child[0]);

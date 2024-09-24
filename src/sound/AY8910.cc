@@ -37,12 +37,22 @@ static constexpr int NATIVE_FREQ_INT = int(cstd::round(NATIVE_FREQ_FLOAT));
 static constexpr int PORT_A_DIRECTION = 0x40;
 static constexpr int PORT_B_DIRECTION = 0x80;
 
-enum Register {
-	AY_AFINE = 0, AY_ACOARSE = 1, AY_BFINE = 2, AY_BCOARSE = 3,
-	AY_CFINE = 4, AY_CCOARSE = 5, AY_NOISEPER = 6, AY_ENABLE = 7,
-	AY_AVOL = 8, AY_BVOL = 9, AY_CVOL = 10, AY_EFINE = 11,
-	AY_ECOARSE = 12, AY_ESHAPE = 13, AY_PORTA = 14, AY_PORTB = 15
-};
+static constexpr uint8_t AY_AFINE    =  0;
+static constexpr uint8_t AY_ACOARSE  =  1;
+static constexpr uint8_t AY_BFINE    =  2;
+static constexpr uint8_t AY_BCOARSE  =  3;
+static constexpr uint8_t AY_CFINE    =  4;
+static constexpr uint8_t AY_CCOARSE  =  5;
+static constexpr uint8_t AY_NOISEPER =  6;
+static constexpr uint8_t AY_ENABLE   =  7;
+static constexpr uint8_t AY_AVOL     =  8;
+static constexpr uint8_t AY_BVOL     =  9;
+static constexpr uint8_t AY_CVOL     = 10;
+static constexpr uint8_t AY_EFINE    = 11;
+static constexpr uint8_t AY_ECOARSE  = 12;
+static constexpr uint8_t AY_ESHAPE   = 13;
+static constexpr uint8_t AY_PORTA    = 14;
+static constexpr uint8_t AY_PORTB    = 15;
 
 // Calculate the volume->voltage conversion table. The AY-3-8910 has 16 levels,
 // in a logarithmic scale (3dB per step). YM2149 has 32 levels, the 16 extra
@@ -79,21 +89,22 @@ static constexpr auto volumeTab = [] {
 }();
 
 
-// Perlin noise
-static std::array<float, 256 + 3> noiseTab;
-
-static void initDetune()
-{
-	auto& generator = global_urng(); // fast (non-cryptographic) random numbers
-	std::uniform_real_distribution<float> distribution(-1.0f, 1.0f);
-
-	for (auto i : xrange(256)) {
-		noiseTab[i] = distribution(generator);
+// 256 random floats, each in range [-1, 1).
+//  (with entries 0..2 repeated at entries 256..258).
+static constexpr auto noiseTab = []{
+	std::array<float, 256 + 3> result = {};
+	// Seed doesn't matter. It's OK that these 'random' numbers are the same
+	// in each openMSX run.
+	PCG<0x123456789abcdefLL> pcg;
+	for (int i = 0; i < 256; ++i) {
+		result[i] = 2.0f * getCanonicalFloat(pcg()) - 1.0f;
 	}
-	noiseTab[256] = noiseTab[0];
-	noiseTab[257] = noiseTab[1];
-	noiseTab[258] = noiseTab[2];
-}
+	result[256] = result[0];
+	result[257] = result[1];
+	result[258] = result[2];
+	return result;
+}();
+
 static float noiseValue(float x)
 {
 	// cubic hermite spline interpolation
@@ -151,11 +162,11 @@ inline void AY8910::ToneGenerator::reset()
 	output = false;
 }
 
-int AY8910::ToneGenerator::getDetune(AY8910& ay8910)
+int AY8910::ToneGenerator::getDetune(const AY8910& ay8910)
 {
 	int result = 0;
-	float vibPerc = ay8910.vibratoPercent.getFloat();
-	if (vibPerc != 0.0f) {
+	if (float vibPerc = ay8910.vibratoPercent.getFloat();
+	    vibPerc != 0.0f) {
 		auto vibratoPeriod = int(
 			NATIVE_FREQ_FLOAT /
 			ay8910.vibratoFrequency.getFloat());
@@ -165,8 +176,8 @@ int AY8910::ToneGenerator::getDetune(AY8910& ay8910)
 			sinf((float(2 * Math::pi) * narrow_cast<float>(vibratoCount)) / narrow_cast<float>(vibratoPeriod))
 			* vibPerc * 0.01f * narrow_cast<float>(period));
 	}
-	float detunePerc = ay8910.detunePercent.getFloat();
-	if (detunePerc != 0.0f) {
+	if (float detunePerc = ay8910.detunePercent.getFloat();
+	    detunePerc != 0.0f) {
 		float detunePeriod = NATIVE_FREQ_FLOAT /
 			ay8910.detuneFrequency.getFloat();
 		detuneCount += period;
@@ -190,7 +201,7 @@ inline void AY8910::ToneGenerator::advance(unsigned duration)
 	}
 }
 
-inline void AY8910::ToneGenerator::doNextEvent(AY8910& ay8910)
+inline void AY8910::ToneGenerator::doNextEvent(const AY8910& ay8910)
 {
 	if (ay8910.doDetune) [[unlikely]] {
 		count = getDetune(ay8910);
@@ -670,7 +681,7 @@ void AY8910::wrtReg(unsigned reg, uint8_t value, EmuTime::param time)
 }
 [[nodiscard]] static inline float calc(bool b1, bool b2, float f)
 {
-	return narrow<float>(b1 * b2) * f;
+	return narrow<float>(b1 && b2) * f;
 }
 
 void AY8910::generateChannels(std::span<float*> bufs, unsigned num)
@@ -969,10 +980,6 @@ void AY8910::update(const Setting& setting) noexcept
 	if (&setting == one_of(&vibratoPercent, &detunePercent)) {
 		doDetune = (vibratoPercent.getFloat() != 0.0f) ||
 			   (detunePercent .getFloat() != 0.0f);
-		if (doDetune && !detuneInitialized) {
-			detuneInitialized = true;
-			initDetune();
-		}
 	} else {
 		ResampledSoundDevice::update(setting);
 	}

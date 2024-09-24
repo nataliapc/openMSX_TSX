@@ -110,9 +110,9 @@ void CanonFDC::writeMem(word address, byte value, EmuTime::param time)
 		controlReg = value & 0x0F;
 		auto drive = [&] {
 			switch (value & 3) {
-			case 0:  return DriveMultiplexer::DRIVE_A;
-			case 1:  return DriveMultiplexer::DRIVE_B;
-			default: return DriveMultiplexer::NO_DRIVE;
+			case 0:  return DriveMultiplexer::Drive::A;
+			case 1:  return DriveMultiplexer::Drive::B;
+			default: return DriveMultiplexer::Drive::NONE;
 			}
 		}();
 		multiplexer.selectDrive(drive, time);
@@ -123,7 +123,7 @@ void CanonFDC::writeMem(word address, byte value, EmuTime::param time)
 	}
 }
 
-byte* CanonFDC::getWriteCacheLine(word address) const
+byte* CanonFDC::getWriteCacheLine(word address)
 {
 	if ((address & 0x3FFF & CacheLine::HIGH) == (0x3FF0 & CacheLine::HIGH)) {
 		return nullptr;

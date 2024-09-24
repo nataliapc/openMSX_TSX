@@ -46,7 +46,7 @@ static constexpr std::array<char, 11> NEXTOR_PARTITION_TABLE_HEADER = {
 	return {};
 }
 
-bool hasPartitionTable(SectorAccessibleDisk& disk)
+bool hasPartitionTable(const SectorAccessibleDisk& disk)
 {
 	SectorBuffer buf;
 	disk.readSector(0, buf);
@@ -55,7 +55,7 @@ bool hasPartitionTable(SectorAccessibleDisk& disk)
 
 // Get partition from Nextor extended boot record (standard EBR) chain.
 static Partition& getPartitionNextorExtended(
-	SectorAccessibleDisk& disk, unsigned partition, SectorBuffer& buf,
+	const SectorAccessibleDisk& disk, unsigned partition, SectorBuffer& buf,
 	unsigned remaining, unsigned ebrOuterSector)
 {
 	unsigned ebrSector = ebrOuterSector;
@@ -74,7 +74,7 @@ static Partition& getPartitionNextorExtended(
 		}
 
 		// EBR link entry. Start is relative to *outermost* EBR sector.
-		auto& link = buf.ptNextor.part[1];
+		const auto& link = buf.ptNextor.part[1];
 		if (link.start == 0) {
 			break;
 		} else if (link.sys_ind != one_of(0x05, 0x0F)) {
@@ -88,7 +88,7 @@ static Partition& getPartitionNextorExtended(
 
 // Get partition from Nextor master boot record (standard MBR).
 static Partition& getPartitionNextor(
-	SectorAccessibleDisk& disk, unsigned partition, SectorBuffer& buf)
+	const SectorAccessibleDisk& disk, unsigned partition, SectorBuffer& buf)
 {
 	unsigned remaining = partition - 1;
 	for (auto& p : buf.ptNextor.part) {
@@ -121,7 +121,7 @@ static Partition& getPartitionSunrise(unsigned partition, SectorBuffer& buf)
 	return p;
 }
 
-Partition& getPartition(SectorAccessibleDisk& disk, unsigned partition, SectorBuffer& buf)
+Partition& getPartition(const SectorAccessibleDisk& disk, unsigned partition, SectorBuffer& buf)
 {
 	// check drive has a partition table
 	// check valid partition number and return the entry
@@ -136,10 +136,10 @@ Partition& getPartition(SectorAccessibleDisk& disk, unsigned partition, SectorBu
 	}
 }
 
-void checkSupportedPartition(SectorAccessibleDisk& disk, unsigned partition)
+void checkSupportedPartition(const SectorAccessibleDisk& disk, unsigned partition)
 {
 	SectorBuffer buf;
-	Partition& p = getPartition(disk, partition, buf);
+	const Partition& p = getPartition(disk, partition, buf);
 
 	// check partition type
 	if (p.sys_ind != one_of(0x01, 0x04, 0x06, 0x0E)) {
@@ -639,7 +639,7 @@ unsigned partition(SectorAccessibleDisk& disk, std::span<const unsigned> sizes, 
 
 FatTimeDate toTimeDate(time_t totalSeconds)
 {
-	if (tm* mtim = localtime(&totalSeconds)) {
+	if (const tm* mtim = localtime(&totalSeconds)) {
 		auto time = narrow<uint16_t>(
 			(std::min(mtim->tm_sec, 59) >> 1) + (mtim->tm_min << 5) +
 			(mtim->tm_hour << 11));
@@ -664,13 +664,14 @@ time_t fromTimeDate(FatTimeDate timeDate)
 	return mktime(&tm);
 }
 
-std::string formatAttrib(uint8_t attrib)
+std::string formatAttrib(MSXDirEntry::AttribValue attrib)
 {
-	return strCat((attrib & MSXDirEntry::Attrib::DIRECTORY ? 'd' : '-'),
-	              (attrib & MSXDirEntry::Attrib::READONLY  ? 'r' : '-'),
-	              (attrib & MSXDirEntry::Attrib::HIDDEN    ? 'h' : '-'),
-	              (attrib & MSXDirEntry::Attrib::VOLUME    ? 'v' : '-'),  // TODO check if this is the output of files,l
-	              (attrib & MSXDirEntry::Attrib::ARCHIVE   ? 'a' : '-')); // TODO check if this is the output of files,l
+	using enum MSXDirEntry::Attrib;
+	return strCat((attrib & DIRECTORY ? 'd' : '-'),
+	              (attrib & READONLY  ? 'r' : '-'),
+	              (attrib & HIDDEN    ? 'h' : '-'),
+	              (attrib & VOLUME    ? 'v' : '-'),  // TODO check if this is the output of files,l
+	              (attrib & ARCHIVE   ? 'a' : '-')); // TODO check if this is the output of files,l
 }
 
 } // namespace openmsx::DiskImageUtils

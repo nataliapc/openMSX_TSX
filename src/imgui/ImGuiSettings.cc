@@ -76,7 +76,7 @@ void ImGuiSettings::loadEnd()
 	setStyle();
 }
 
-void ImGuiSettings::setStyle()
+void ImGuiSettings::setStyle() const
 {
 	switch (selectedStyle) {
 	case 0: ImGui::StyleColorsDark();    break;
@@ -85,6 +85,35 @@ void ImGuiSettings::setStyle()
 	}
 	setColors(selectedStyle);
 }
+
+// Returns the currently pressed key-chord, or 'ImGuiKey_None' if no
+// (non-modifier) key is pressed.
+// If more than (non-modifier) one key is pressed, this returns an arbitrary key
+// (in the current implementation the one with lowest index).
+[[nodiscard]] static ImGuiKeyChord getCurrentlyPressedKeyChord()
+{
+	static constexpr auto mods = std::array{
+		ImGuiKey_LeftCtrl, ImGuiKey_LeftShift, ImGuiKey_LeftAlt, ImGuiKey_LeftSuper,
+		ImGuiKey_RightCtrl, ImGuiKey_RightShift, ImGuiKey_RightAlt, ImGuiKey_RightSuper,
+		ImGuiKey_ReservedForModCtrl, ImGuiKey_ReservedForModShift, ImGuiKey_ReservedForModAlt,
+		ImGuiKey_ReservedForModSuper, ImGuiKey_MouseLeft, ImGuiKey_MouseRight, ImGuiKey_MouseMiddle,
+		ImGuiKey_MouseX1, ImGuiKey_MouseX2, ImGuiKey_MouseWheelX, ImGuiKey_MouseWheelY,
+	};
+	for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_NamedKey_END; ++key) {
+		// This is O(M*N), if needed could be optimized to be O(M+N).
+		if (contains(mods, key)) continue; // skip: mods can't be primary keys in a KeyChord
+		if (ImGui::IsKeyPressed(static_cast<ImGuiKey>(key))) {
+			const ImGuiIO& io = ImGui::GetIO();
+			return key
+			     | (io.KeyCtrl  ? ImGuiMod_Ctrl  : 0)
+			     | (io.KeyShift ? ImGuiMod_Shift : 0)
+			     | (io.KeyAlt   ? ImGuiMod_Alt   : 0)
+			     | (io.KeySuper ? ImGuiMod_Super : 0);
+		}
+	}
+	return ImGuiKey_None;
+}
+
 void ImGuiSettings::showMenu(MSXMotherBoard* motherBoard)
 {
 	bool openConfirmPopup = false;
@@ -93,7 +122,7 @@ void ImGuiSettings::showMenu(MSXMotherBoard* motherBoard)
 		auto& reactor = manager.getReactor();
 		auto& globalSettings = reactor.getGlobalSettings();
 		auto& renderSettings = reactor.getDisplay().getRenderSettings();
-		auto& settingsManager = reactor.getGlobalCommandController().getSettingsManager();
+		const auto& settingsManager = reactor.getGlobalCommandController().getSettingsManager();
 		const auto& hotKey = reactor.getHotKey();
 
 		im::Menu("Video", [&]{
@@ -106,14 +135,15 @@ void ImGuiSettings::showMenu(MSXMotherBoard* motherBoard)
 						bool hasScanline;
 						bool hasBlur;
 					};
+					using enum RenderSettings::ScaleAlgorithm;
 					static constexpr std::array algoEnables = {
-						//                                        scanline / blur
-						AlgoEnable{RenderSettings::SCALER_SIMPLE,     true,  true },
-						AlgoEnable{RenderSettings::SCALER_SCALE,      false, false},
-						AlgoEnable{RenderSettings::SCALER_HQ,         false, false},
-						AlgoEnable{RenderSettings::SCALER_HQLITE,     false, false},
-						AlgoEnable{RenderSettings::SCALER_RGBTRIPLET, true,  true },
-						AlgoEnable{RenderSettings::SCALER_TV,         true,  false},
+						//                 scanline / blur
+						AlgoEnable{SIMPLE,     true,  true },
+						AlgoEnable{SCALE,      false, false},
+						AlgoEnable{HQ,         false, false},
+						AlgoEnable{HQLITE,     false, false},
+						AlgoEnable{RGBTRIPLET, true,  true },
+						AlgoEnable{TV,         true,  false},
 					};
 					auto it = ranges::find(algoEnables, scaler.getEnum(), &AlgoEnable::algo);
 					assert(it != algoEnables.end());
@@ -160,6 +190,7 @@ void ImGuiSettings::showMenu(MSXMotherBoard* motherBoard)
 				Checkbox(hotKey, "Disable sprites", renderSettings.getDisableSpritesSetting());
 				ComboBox("Way to handle too fast VDP access", renderSettings.getTooFastAccessSetting());
 				ComboBox("Emulate VDP command timing", renderSettings.getCmdTimingSetting());
+				ComboBox("Rendering accuracy", renderSettings.getAccuracySetting());
 			});
 		});
 		im::Menu("Sound", [&]{
@@ -194,8 +225,8 @@ void ImGuiSettings::showMenu(MSXMotherBoard* motherBoard)
 				bool fwdChanged = ImGui::RadioButton("normal", &fastForward, 0);
 				ImGui::SameLine();
 				fwdChanged |= ImGui::RadioButton("fast forward", &fastForward, 1);
-				auto fastForwardShortCut = getShortCutForCommand(reactor.getHotKey(), "toggle fastforward");
-				if (!fastForwardShortCut.empty()) {
+				if (auto fastForwardShortCut = getShortCutForCommand(reactor.getHotKey(), "toggle fastforward");
+				    !fastForwardShortCut.empty()) {
 					HelpMarker(strCat("Use '", fastForwardShortCut ,"' to quickly toggle between these two"));
 				}
 				if (fwdChanged) {
@@ -267,21 +298,21 @@ void ImGuiSettings::showMenu(MSXMotherBoard* motherBoard)
 				EnumToolTip{"POSITIONAL", "Tries to map the keyboard key positions to the MSX keyboard key positions"},
 			};
 			if (motherBoard) {
-				auto& controller = motherBoard->getMSXCommandController();
+				const auto& controller = motherBoard->getMSXCommandController();
 				if (auto* turbo = dynamic_cast<IntegerSetting*>(controller.findSetting("renshaturbo"))) {
 					SliderInt("Ren Sha Turbo (%)", *turbo);
 				}
 				if (auto* mappingModeSetting = dynamic_cast<EnumSetting<KeyboardSettings::MappingMode>*>(controller.findSetting("kbd_mapping_mode"))) {
 					ComboBox("Keyboard mapping mode", *mappingModeSetting, kbdModeToolTips);
 				}
-			};
+			}
 			ImGui::MenuItem("Configure MSX joysticks...", nullptr, &showConfigureJoystick);
 		});
 		im::Menu("GUI", [&]{
 			auto getExistingLayouts = [] {
 				std::vector<std::string> names;
-				auto context = userDataFileContext("layouts");
-				for (const auto& path : context.getPaths()) {
+				for (auto context = userDataFileContext("layouts");
+				     const auto& path : context.getPaths()) {
 					foreach_file(path, [&](const std::string& fullName, std::string_view name) {
 						if (name.ends_with(".ini")) {
 							names.emplace_back(fullName);
@@ -311,8 +342,7 @@ void ImGuiSettings::showMenu(MSXMotherBoard* motherBoard)
 				return selectedLayout;
 			};
 			im::Menu("Save layout", [&]{
-				auto names = getExistingLayouts();
-				if (!names.empty()) {
+				if (auto names = getExistingLayouts(); !names.empty()) {
 					ImGui::TextUnformatted("Existing layouts"sv);
 					if (auto selectedLayout = listExistingLayouts(names)) {
 						const auto& [name, displayName] = *selectedLayout;
@@ -352,7 +382,7 @@ void ImGuiSettings::showMenu(MSXMotherBoard* motherBoard)
 			});
 			im::Menu("Select style", [&]{
 				std::optional<int> newStyle;
-				std::array names = {"Dark", "Light", "Classic"}; // must be in sync with setStyle()
+				static constexpr std::array names = {"Dark", "Light", "Classic"}; // must be in sync with setStyle()
 				for (auto i : xrange(narrow<int>(names.size()))) {
 					if (ImGui::Selectable(names[i], selectedStyle == i)) {
 						newStyle = i;
@@ -364,10 +394,12 @@ void ImGuiSettings::showMenu(MSXMotherBoard* motherBoard)
 				}
 			});
 			ImGui::MenuItem("Select font...", nullptr, &showFont);
+			ImGui::MenuItem("Edit shortcuts...", nullptr, &showShortcut);
 		});
 		im::Menu("Misc", [&]{
 			ImGui::MenuItem("Configure OSD icons...", nullptr, &manager.osdIcons->showConfigureIcons);
 			ImGui::MenuItem("Fade out menu bar", nullptr, &manager.menuFade);
+			ImGui::MenuItem("Show status bar", nullptr, &manager.statusBarVisible);
 			ImGui::MenuItem("Configure messages...", nullptr, &manager.messages->configureWindow.open);
 		});
 		ImGui::Separator();
@@ -402,18 +434,8 @@ void ImGuiSettings::showMenu(MSXMotherBoard* motherBoard)
 					assert(false);
 				}
 			}
-			if (!Version::RELEASE) {
-				ImGui::Separator();
-				ImGui::Checkbox("ImGui Demo Window", &showDemoWindow);
-				HelpMarker("Show the ImGui demo window.\n"
-					"This is purely to demonstrate the ImGui capabilities.\n"
-					"There is no connection with any openMSX functionality.");
-			}
 		});
 	});
-	if (showDemoWindow) {
-		ImGui::ShowDemoWindow(&showDemoWindow);
-	}
 
 	const auto confirmTitle = "Confirm##settings";
 	if (openConfirmPopup) {
@@ -465,21 +487,12 @@ void ImGuiSettings::showMenu(MSXMotherBoard* motherBoard)
 			return strCat(joystickManager.getDisplayName(j.getJoystick()), " button ", j.getButton());
 		},
 		[&](const BooleanJoystickHat& h) {
-			const char* str = [&] {
-				switch (h.getValue()) {
-					case BooleanJoystickHat::UP:    return "up";
-					case BooleanJoystickHat::RIGHT: return "right";
-					case BooleanJoystickHat::DOWN:  return "down";
-					case BooleanJoystickHat::LEFT:  return "left";
-					default: UNREACHABLE;
-				}
-			}();
-			return strCat(joystickManager.getDisplayName(h.getJoystick()), " D-pad ", h.getHat(), ' ', str);
+			return strCat(joystickManager.getDisplayName(h.getJoystick()), " D-pad ", h.getHat(), ' ', toString(h.getValue()));
 		},
 		[&](const BooleanJoystickAxis& a) {
 			return strCat(joystickManager.getDisplayName(a.getJoystick()),
 			              " stick axis ", a.getAxis(), ", ",
-			              (a.getDirection() == BooleanJoystickAxis::POS ? "positive" : "negative"), " direction");
+			              (a.getDirection() == BooleanJoystickAxis::Direction::POS ? "positive" : "negative"), " direction");
 		}
 	}, input);
 }
@@ -635,7 +648,7 @@ static void drawLetterZ(gl::vec2 center)
 
 namespace msxjoystick {
 
-enum {UP, DOWN, LEFT, RIGHT, TRIG_A, TRIG_B, NUM_BUTTONS, NUM_DIRECTIONS = TRIG_A};
+enum {UP, DOWN, LEFT, RIGHT, TRIG_A, TRIG_B, NUM_BUTTONS};
 
 static constexpr std::array<zstring_view, NUM_BUTTONS> buttonNames = {
 	"Up", "Down", "Left", "Right", "A", "B" // show in the GUI
@@ -698,7 +711,7 @@ enum {UP, DOWN, LEFT, RIGHT,
       TRIG_A, TRIG_B, TRIG_C,
       TRIG_X, TRIG_Y, TRIG_Z,
       TRIG_SELECT, TRIG_START,
-      NUM_BUTTONS, NUM_DIRECTIONS = TRIG_A};
+      NUM_BUTTONS};
 
 static constexpr std::array<zstring_view, NUM_BUTTONS> buttonNames = { // show in the GUI
 	"Up", "Down", "Left", "Right",
@@ -840,8 +853,8 @@ void ImGuiSettings::paintJoystick(MSXMotherBoard& motherBoard)
 			}
 		});
 
-		auto& joystickManager = manager.getReactor().getInputEventGenerator().getJoystickManager();
-		auto& controller = motherBoard.getMSXCommandController();
+		const auto& joystickManager = manager.getReactor().getInputEventGenerator().getJoystickManager();
+		const auto& controller = motherBoard.getMSXCommandController();
 		auto* setting = dynamic_cast<StringSetting*>(controller.findSetting(settingName(joystick)));
 		if (!setting) return;
 		auto& interp = setting->getInterpreter();
@@ -1105,6 +1118,140 @@ void ImGuiSettings::paintFont()
 	});
 }
 
+[[nodiscard]] static std::string formatShortcutWithAnnotations(const Shortcuts::Shortcut& shortcut)
+{
+	auto result = getKeyChordName(shortcut.keyChord);
+	// don't show the 'ALWAYS_xxx' values
+	if (shortcut.type == Shortcuts::Type::GLOBAL) result += ", global";
+	return result;
+}
+
+[[nodiscard]] static gl::vec2 buttonSize(std::string_view text, float defaultSize_)
+{
+	const auto& style = ImGui::GetStyle();
+	auto textSize = ImGui::CalcTextSize(text).x + 2.0f * style.FramePadding.x;
+	auto defaultSize = ImGui::GetFontSize() * defaultSize_;
+	return {std::max(textSize, defaultSize), 0.0f};
+}
+
+void ImGuiSettings::paintEditShortcut()
+{
+	using enum Shortcuts::Type;
+
+	bool editShortcutWindow = editShortcutId != Shortcuts::ID::INVALID;
+	if (!editShortcutWindow) return;
+
+	im::Window("Edit shortcut", &editShortcutWindow, ImGuiWindowFlags_AlwaysAutoResize, [&]{
+		auto& shortcuts = manager.getShortcuts();
+		auto shortcut = shortcuts.getShortcut(editShortcutId);
+
+		im::Table("table", 2, [&]{
+			ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed);
+			ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthStretch);
+
+			if (ImGui::TableNextColumn()) {
+				ImGui::AlignTextToFramePadding();
+				ImGui::TextUnformatted("key");
+			}
+			static constexpr auto waitKeyTitle = "Waiting for key";
+			if (ImGui::TableNextColumn()) {
+				auto text = getKeyChordName(shortcut.keyChord);
+				if (ImGui::Button(text.c_str(), buttonSize(text, 4.0f))) {
+					popupTimeout = 10.0f;
+					centerNextWindowOverCurrent();
+					ImGui::OpenPopup(waitKeyTitle);
+				}
+			}
+			bool isOpen = true;
+			im::PopupModal(waitKeyTitle, &isOpen, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize, [&]{
+				ImGui::Text("Enter key combination for shortcut '%s'",
+					Shortcuts::getShortcutDescription(editShortcutId).c_str());
+				ImGui::Text("Timeout in %d seconds.", int(popupTimeout));
+
+				popupTimeout -= ImGui::GetIO().DeltaTime;
+				if (!isOpen || popupTimeout <= 0.0f) {
+					ImGui::CloseCurrentPopup();
+				}
+				if (auto keyChord = getCurrentlyPressedKeyChord(); keyChord != ImGuiKey_None) {
+					shortcut.keyChord = keyChord;
+					shortcuts.setShortcut(editShortcutId, shortcut);
+					editShortcutWindow = false;
+					ImGui::CloseCurrentPopup();
+				}
+			});
+
+			if (shortcut.type == one_of(LOCAL, GLOBAL)) { // don't edit the 'ALWAYS_xxx' values
+				if (ImGui::TableNextColumn()) {
+					ImGui::AlignTextToFramePadding();
+					ImGui::TextUnformatted("global");
+				}
+				if (ImGui::TableNextColumn()) {
+					bool global = shortcut.type == GLOBAL;
+					if (ImGui::Checkbox("##global", &global)) {
+						shortcut.type = global ? GLOBAL : LOCAL;
+						shortcuts.setShortcut(editShortcutId, shortcut);
+					}
+					simpleToolTip(
+						"Global shortcuts react when any GUI window has focus.\n"
+						"Local shortcuts only react when the specific GUI window has focus.\n"sv);
+				}
+			}
+		});
+		ImGui::Separator();
+		const auto& defaultShortcut = Shortcuts::getDefaultShortcut(editShortcutId);
+		im::Disabled(shortcut == defaultShortcut, [&]{
+			if (ImGui::Button("Restore default")) {
+				shortcuts.setShortcut(editShortcutId, defaultShortcut);
+				editShortcutWindow = false;
+			}
+			simpleToolTip([&]{ return formatShortcutWithAnnotations(defaultShortcut); });
+		});
+
+		ImGui::SameLine();
+		im::Disabled(shortcut == Shortcuts::Shortcut{}, [&]{
+			if (ImGui::Button("Set None")) {
+				shortcuts.setShortcut(editShortcutId, Shortcuts::Shortcut{});
+				editShortcutWindow = false;
+			}
+			simpleToolTip("Set no binding for this shortcut"sv);
+		});
+	});
+	if (!editShortcutWindow) editShortcutId = Shortcuts::ID::INVALID;
+}
+
+void ImGuiSettings::paintShortcut()
+{
+	im::Window("Edit shortcuts", &showShortcut, [&]{
+		int flags = ImGuiTableFlags_Resizable
+		          | ImGuiTableFlags_RowBg
+		          | ImGuiTableFlags_NoBordersInBodyUntilResize
+		          | ImGuiTableFlags_SizingStretchProp;
+		im::Table("table", 2, flags, {-FLT_MIN, 0.0f}, [&]{
+			ImGui::TableSetupColumn("description");
+			ImGui::TableSetupColumn("key");
+
+			const auto& shortcuts = manager.getShortcuts();
+			im::ID_for_range(to_underlying(Shortcuts::ID::NUM), [&](int i) {
+				auto id = static_cast<Shortcuts::ID>(i);
+				auto shortcut = shortcuts.getShortcut(id);
+
+				if (ImGui::TableNextColumn()) {
+					ImGui::AlignTextToFramePadding();
+					ImGui::TextUnformatted(Shortcuts::getShortcutDescription(id));
+				}
+				if (ImGui::TableNextColumn()) {
+					auto text = formatShortcutWithAnnotations(shortcut);
+					if (ImGui::Button(text.c_str(), buttonSize(text, 9.0f))) {
+						editShortcutId = id;
+						centerNextWindowOverCurrent();
+					}
+				}
+			});
+		});
+	});
+	paintEditShortcut();
+}
+
 void ImGuiSettings::paint(MSXMotherBoard* motherBoard)
 {
 	if (selectedStyle < 0) {
@@ -1114,13 +1261,14 @@ void ImGuiSettings::paint(MSXMotherBoard* motherBoard)
 	}
 	if (motherBoard && showConfigureJoystick) paintJoystick(*motherBoard);
 	if (showFont) paintFont();
+	if (showShortcut) paintShortcut();
 }
 
 std::span<const std::string> ImGuiSettings::getAvailableFonts()
 {
 	if (availableFonts.empty()) {
-		auto context = systemFileContext();
-		for (const auto& path : context.getPaths()) {
+		for (const auto& context = systemFileContext();
+		     const auto& path : context.getPaths()) {
 			foreach_file(FileOperations::join(path, "skins"), [&](const std::string& /*fullName*/, std::string_view name) {
 				if (name.ends_with(".ttf.gz") || name.ends_with(".ttf")) {
 					availableFonts.emplace_back(name);
@@ -1134,20 +1282,16 @@ std::span<const std::string> ImGuiSettings::getAvailableFonts()
 	return availableFonts;
 }
 
-int ImGuiSettings::signalEvent(const Event& event)
+bool ImGuiSettings::signalEvent(const Event& event)
 {
 	bool msxOrMega = joystick < 2;
 	using SP = std::span<const zstring_view>;
 	auto keyNames = msxOrMega ? SP{msxjoystick::keyNames}
 	                          : SP{joymega    ::keyNames};
-	const auto numButtons = keyNames.size();
-
-	if (popupForKey >= numButtons) {
+	if (const auto numButtons = keyNames.size(); popupForKey >= numButtons) {
 		deinitListener();
-		return 0; // don't block
+		return false; // don't block
 	}
-
-	static constexpr auto block = EventDistributor::Priority(EventDistributor::IMGUI + 1); // lower priority than this listener
 
 	bool escape = false;
 	if (const auto* keyDown = get_event_if<KeyDownEvent>(event)) {
@@ -1155,19 +1299,19 @@ int ImGuiSettings::signalEvent(const Event& event)
 	}
 	if (!escape) {
 		auto getJoyDeadZone = [&](JoystickId joyId) {
-			auto& joyMan = manager.getReactor().getInputEventGenerator().getJoystickManager();
-			auto* setting = joyMan.getJoyDeadZoneSetting(joyId);
+			const auto& joyMan = manager.getReactor().getInputEventGenerator().getJoystickManager();
+			const auto* setting = joyMan.getJoyDeadZoneSetting(joyId);
 			return setting ? setting->getInt() : 0;
 		};
 		auto b = captureBooleanInput(event, getJoyDeadZone);
-		if (!b) return block; // keep popup active
+		if (!b) return true; // keep popup active
 		auto bs = toString(*b);
 
 		auto* motherBoard = manager.getReactor().getMotherBoard();
-		if (!motherBoard) return block;
-		auto& controller = motherBoard->getMSXCommandController();
+		if (!motherBoard) return true;
+		const auto& controller = motherBoard->getMSXCommandController();
 		auto* setting = dynamic_cast<StringSetting*>(controller.findSetting(settingName(joystick)));
-		if (!setting) return block;
+		if (!setting) return true;
 		auto& interp = setting->getInterpreter();
 
 		TclObject bindings = setting->getValue();
@@ -1182,7 +1326,7 @@ int ImGuiSettings::signalEvent(const Event& event)
 	}
 
 	popupForKey = unsigned(-1); // close popup
-	return block; // block event
+	return true; // block event
 }
 
 void ImGuiSettings::initListener()
@@ -1192,11 +1336,9 @@ void ImGuiSettings::initListener()
 
 	auto& distributor = manager.getReactor().getEventDistributor();
 	// highest priority (higher than HOTKEY and IMGUI)
-	for (auto type : {EventType::KEY_DOWN,
-	                  EventType::MOUSE_BUTTON_DOWN,
-	                  EventType::JOY_BUTTON_DOWN,
-	                  EventType::JOY_HAT,
-	                  EventType::JOY_AXIS_MOTION}) {
+	using enum EventType;
+	for (auto type : {KEY_DOWN, MOUSE_BUTTON_DOWN,
+	                  JOY_BUTTON_DOWN, JOY_HAT, JOY_AXIS_MOTION}) {
 		distributor.registerEventListener(type, *this);
 	}
 }
@@ -1207,11 +1349,9 @@ void ImGuiSettings::deinitListener()
 	listening = false;
 
 	auto& distributor = manager.getReactor().getEventDistributor();
-	for (auto type : {EventType::JOY_AXIS_MOTION,
-	                  EventType::JOY_HAT,
-	                  EventType::JOY_BUTTON_DOWN,
-	                  EventType::MOUSE_BUTTON_DOWN,
-	                  EventType::KEY_DOWN}) {
+	using enum EventType;
+	for (auto type : {JOY_AXIS_MOTION, JOY_HAT, JOY_BUTTON_DOWN,
+	                  MOUSE_BUTTON_DOWN, KEY_DOWN}) {
 		distributor.unregisterEventListener(type, *this);
 	}
 }

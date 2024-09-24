@@ -1,17 +1,20 @@
 #include "DirAsDSK.hh"
-#include "DiskChanger.hh"
-#include "Scheduler.hh"
-#include "CliComm.hh"
+
 #include "BootBlocks.hh"
+#include "CliComm.hh"
+#include "DiskChanger.hh"
 #include "File.hh"
 #include "FileException.hh"
 #include "ReadDir.hh"
+#include "Scheduler.hh"
+
 #include "StringOp.hh"
 #include "narrow.hh"
 #include "one_of.hh"
 #include "ranges.hh"
 #include "stl.hh"
 #include "xrange.hh"
+
 #include <cassert>
 #include <cstring>
 #include <vector>
@@ -207,7 +210,7 @@ bool DirAsDSK::checkMSXFileExists(
 
 // Returns msx directory entry for the given host file. Or -1 if the host file
 // is not mapped in the virtual disk.
-DirAsDSK::DirIndex DirAsDSK::findHostFileInDSK(std::string_view hostName)
+DirAsDSK::DirIndex DirAsDSK::findHostFileInDSK(std::string_view hostName) const
 {
 	for (const auto& [dirIdx, mapDir] : mapDirs) {
 		if (mapDir.hostName == hostName) {
@@ -218,7 +221,7 @@ DirAsDSK::DirIndex DirAsDSK::findHostFileInDSK(std::string_view hostName)
 }
 
 // Check if a host file is already mapped in the virtual disk.
-bool DirAsDSK::checkFileUsedInDSK(std::string_view hostName)
+bool DirAsDSK::checkFileUsedInDSK(std::string_view hostName) const
 {
 	DirIndex dirIndex = findHostFileInDSK(hostName);
 	return dirIndex.sector != unsigned(-1);
@@ -265,7 +268,6 @@ DirAsDSK::DirAsDSK(DiskChanger& diskChanger_, CliComm& cliComm_,
 	, cliComm(cliComm_)
 	, hostDir(FileOperations::expandTilde(hostDir_.getResolved() + '/'))
 	, syncMode(syncMode_)
-	, lastAccess(EmuTime::zero())
 	, nofSectors((diskChanger_.isDoubleSidedDrive() ? 2 : 1) * SECTORS_PER_TRACK * NUM_TRACKS)
 	, nofSectorsPerFat(narrow<unsigned>((((3 * nofSectors) / (2 * SECTORS_PER_CLUSTER)) + SECTOR_SIZE - 1) / SECTOR_SIZE))
 	, firstSector2ndFAT(FIRST_FAT_SECTOR + nofSectorsPerFat)
@@ -290,7 +292,7 @@ DirAsDSK::DirAsDSK(DiskChanger& diskChanger_, CliComm& cliComm_,
 
 	// Use selected boot sector, fill-in values.
 	uint8_t mediaDescriptor = (numSides == 2) ? 0xF9 : 0xF8;
-	const auto& protoBootSector = bootSectorType == BOOT_SECTOR_DOS1
+	const auto& protoBootSector = bootSectorType == BootSectorType::DOS1
 		? BootBlocks::dos1BootBlock
 		: BootBlocks::dos2BootBlock;
 	sectors[0] = protoBootSector;
@@ -331,7 +333,7 @@ DirAsDSK::DirAsDSK(DiskChanger& diskChanger_, CliComm& cliComm_,
 
 bool DirAsDSK::isWriteProtectedImpl() const
 {
-	return syncMode == SYNC_READONLY;
+	return syncMode == SyncMode::READONLY;
 }
 
 bool DirAsDSK::hasChanged() const
@@ -347,7 +349,7 @@ bool DirAsDSK::hasChanged() const
 void DirAsDSK::checkCaches()
 {
 	bool needSync = [&] {
-		if (auto* scheduler = diskChanger.getScheduler()) {
+		if (const auto* scheduler = diskChanger.getScheduler()) {
 			auto now = scheduler->getCurrentTime();
 			auto delta = now - lastAccess;
 			return delta > EmuDuration::sec(1);
@@ -373,7 +375,7 @@ void DirAsDSK::readSectorImpl(size_t sector, SectorBuffer& buf)
 	// peek-mode we skip the whole sync-step.
 	if (!isPeekMode()) {
 		bool needSync = [&] {
-			if (auto* scheduler = diskChanger.getScheduler()) {
+			if (const auto* scheduler = diskChanger.getScheduler()) {
 				auto now = scheduler->getCurrentTime();
 				auto delta = now - lastAccess;
 				lastAccess = now;
@@ -431,8 +433,8 @@ void DirAsDSK::checkDeletedHostFiles()
 			continue;
 		}
 		auto fullHostName = tmpStrCat(hostDir, mapDir.hostName);
-		bool isMSXDirectory = (msxDir(dirIdx).attrib &
-		                       MSXDirEntry::Attrib::DIRECTORY) != 0;
+		auto isMSXDirectory = bool(msxDir(dirIdx).attrib &
+		                           MSXDirEntry::Attrib::DIRECTORY);
 		auto fst = FileOperations::getStat(fullHostName);
 		if (!fst || (FileOperations::isDirectory(*fst) != isMSXDirectory)) {
 			// TODO also check access permission
@@ -451,8 +453,7 @@ void DirAsDSK::deleteMSXFile(DirIndex dirIndex)
 	// Remove mapping between host and msx file (if any).
 	mapDirs.erase(dirIndex);
 
-	char c = msxDir(dirIndex).filename[0];
-	if (c == one_of(0, char(0xE5))) {
+	if (msxDir(dirIndex).filename[0] == one_of(0, char(0xE5))) {
 		// Directory entry not in use, don't need to do anything.
 		return;
 	}
@@ -460,8 +461,8 @@ void DirAsDSK::deleteMSXFile(DirIndex dirIndex)
 	if (msxDir(dirIndex).attrib & MSXDirEntry::Attrib::DIRECTORY) {
 		// If we're deleting a directory then also (recursively)
 		// delete the files/directories in this directory.
-		const auto& msxName = msxDir(dirIndex).filename;
-		if (ranges::equal(msxName, std::string_view(".          ")) ||
+		if (const auto& msxName = msxDir(dirIndex).filename;
+		    ranges::equal(msxName, std::string_view(".          ")) ||
 		    ranges::equal(msxName, std::string_view("..         "))) {
 			// But skip the "." and ".." entries.
 			return;
@@ -518,8 +519,8 @@ void DirAsDSK::checkModifiedHostFiles()
 			continue;
 		}
 		auto fullHostName = tmpStrCat(hostDir, mapDir.hostName);
-		bool isMSXDirectory = (msxDir(dirIdx).attrib &
-		                       MSXDirEntry::Attrib::DIRECTORY) != 0;
+		auto isMSXDirectory = bool(msxDir(dirIdx).attrib &
+		                           MSXDirEntry::Attrib::DIRECTORY);
 		auto fst = FileOperations::getStat(fullHostName);
 		if (fst && (FileOperations::isDirectory(*fst) == isMSXDirectory)) {
 			// Detect changes in host file.
@@ -544,7 +545,7 @@ void DirAsDSK::checkModifiedHostFiles()
 	}
 }
 
-void DirAsDSK::importHostFile(DirIndex dirIndex, FileOperations::Stat& fst)
+void DirAsDSK::importHostFile(DirIndex dirIndex, const FileOperations::Stat& fst)
 {
 	assert(!(msxDir(dirIndex).attrib & MSXDirEntry::Attrib::DIRECTORY));
 	assert(mapDirs.contains(dirIndex));
@@ -662,11 +663,11 @@ void DirAsDSK::importHostFile(DirIndex dirIndex, FileOperations::Stat& fst)
 	// DirAsDSK from importing the other (small) files in my directory.
 }
 
-void DirAsDSK::setMSXTimeStamp(DirIndex dirIndex, FileOperations::Stat& fst)
+void DirAsDSK::setMSXTimeStamp(DirIndex dirIndex, const FileOperations::Stat& fst)
 {
 	// Use intermediate param to prevent compilation error for Android
 	time_t mtime = fst.st_mtime;
-	auto* mtim = localtime(&mtime);
+	const auto* mtim = localtime(&mtime);
 	int t1 = mtim ? (mtim->tm_sec >> 1) + (mtim->tm_min << 5) +
 	                (mtim->tm_hour << 11)
 	              : 0;
@@ -739,7 +740,7 @@ void DirAsDSK::addNewHostFiles(const string& hostSubDir, unsigned msxDirSector)
 }
 
 void DirAsDSK::addNewDirectory(const string& hostSubDir, const string& hostName,
-                               unsigned msxDirSector, FileOperations::Stat& fst)
+                               unsigned msxDirSector, const FileOperations::Stat& fst)
 {
 	DirIndex dirIndex = findHostFileInDSK(tmpStrCat(hostSubDir, hostName));
 	unsigned newMsxDirSector;
@@ -804,15 +805,15 @@ void DirAsDSK::addNewDirectory(const string& hostSubDir, const string& hostName,
 }
 
 void DirAsDSK::addNewHostFile(const string& hostSubDir, const string& hostName,
-                              unsigned msxDirSector, FileOperations::Stat& fst)
+                              unsigned msxDirSector, const FileOperations::Stat& fst)
 {
 	if (checkFileUsedInDSK(tmpStrCat(hostSubDir, hostName))) {
 		// File is already present in the virtual disk, do nothing.
 		return;
 	}
 	// TODO check for available free space on disk instead of max free space
-	auto diskSpace = (nofSectors - firstDataSector) * SECTOR_SIZE;
-	if (narrow<size_t>(fst.st_size) > diskSpace) {
+	if (auto diskSpace = (nofSectors - firstDataSector) * SECTOR_SIZE;
+	    narrow<size_t>(fst.st_size) > diskSpace) {
 		cliComm.printWarning("File too large: ",
 		                     hostDir, hostSubDir, hostName);
 		return;
@@ -898,11 +899,11 @@ DirAsDSK::DirIndex DirAsDSK::getFreeDirEntry(unsigned msxDirSector)
 void DirAsDSK::writeSectorImpl(size_t sector_, const SectorBuffer& buf)
 {
 	assert(sector_ < nofSectors);
-	assert(syncMode != SYNC_READONLY);
+	assert(syncMode != SyncMode::READONLY);
 	auto sector = unsigned(sector_);
 
 	// Update last access time.
-	if (auto* scheduler = diskChanger.getScheduler()) {
+	if (const auto* scheduler = diskChanger.getScheduler()) {
 		lastAccess = scheduler->getCurrentTime();
 	}
 
@@ -918,9 +919,9 @@ void DirAsDSK::writeSectorImpl(size_t sector_, const SectorBuffer& buf)
 		// Write to 2nd FAT, only buffer it. Don't interpret the data
 		// in FAT2 in any way (nor trigger any action on this write).
 		sectors[sector] = buf;
-	} else if (DirIndex dirDirIndex; isDirSector(sector, dirDirIndex)) {
+	} else if (auto dirDirIndex = isDirSector(sector)) {
 		// Either root- or sub-directory.
-		writeDIRSector(sector, dirDirIndex, buf);
+		writeDIRSector(sector, *dirDirIndex, buf);
 	} else {
 		writeDataSector(sector, buf);
 	}
@@ -975,9 +976,8 @@ void DirAsDSK::exportFileFromFATChange(unsigned cluster, std::span<SectorBuffer>
 
 	// Find the corresponding direntry and (if found) export file based on
 	// new cluster chain.
-	DirIndex dirIndex, dirDirIndex;
-	if (getDirEntryForCluster(startCluster, dirIndex, dirDirIndex)) {
-		exportToHost(dirIndex, dirDirIndex);
+	if (auto result = getDirEntryForCluster(startCluster)) {
+		exportToHost(result->dirIndex, result->dirDirIndex);
 	}
 }
 
@@ -1002,7 +1002,7 @@ std::pair<unsigned, unsigned> DirAsDSK::getChainStart(unsigned cluster)
 // Generic helper function that walks over the whole MSX directory tree
 // (possibly it stops early so it doesn't always walk over the whole tree).
 // The action that is performed while walking depends on the functor parameter.
-template<typename FUNC> bool DirAsDSK::scanMsxDirs(FUNC func, unsigned sector)
+template<typename FUNC> bool DirAsDSK::scanMsxDirs(FUNC&& func, unsigned sector)
 {
 	size_t rdIdx = 0;
 	vector<unsigned> dirs;  // TODO make vector of struct instead of
@@ -1063,16 +1063,16 @@ template<typename FUNC> bool DirAsDSK::scanMsxDirs(FUNC func, unsigned sector)
 // This implements all required methods with empty implementations.
 struct NullScanner {
 	// Called right before we enter a new subdirectory.
-	void onVisitSubDir(DirAsDSK::DirIndex /*subdir*/) {}
+	void onVisitSubDir(DirAsDSK::DirIndex /*subdir*/) const {}
 
 	// Called when a new sector of a (sub)directory is being scanned.
-	inline bool onDirSector(unsigned /*dirSector*/) {
+	[[nodiscard]] bool onDirSector(unsigned /*dirSector*/) const {
 		return false;
 	}
 
 	// Called for each directory entry (in a sector).
-	inline bool onDirEntry(DirAsDSK::DirIndex /*dirIndex*/,
-	                       const MSXDirEntry& /*entry*/) {
+	[[nodiscard]] bool onDirEntry(DirAsDSK::DirIndex /*dirIndex*/,
+	                              const MSXDirEntry& /*entry*/) const {
 		return false;
 	}
 };
@@ -1080,67 +1080,55 @@ struct NullScanner {
 // Base class for the IsDirSector and DirEntryForCluster scanner algorithms
 // below. This class remembers the directory entry of the last visited subdir.
 struct DirScanner : NullScanner {
-	explicit DirScanner(DirAsDSK::DirIndex& dirDirIndex_)
-		: dirDirIndex(dirDirIndex_)
-	{
-		dirDirIndex = DirAsDSK::DirIndex(0, 0); // represents entry for root dir
-	}
-
 	// Called right before we enter a new subdirectory.
 	void onVisitSubDir(DirAsDSK::DirIndex subdir) {
 		dirDirIndex = subdir;
 	}
 
-	DirAsDSK::DirIndex& dirDirIndex;
+	DirAsDSK::DirIndex dirDirIndex{0, 0}; // entry for root dir
 };
 
 // Figure out whether a given sector is part of the msx directory structure.
 struct IsDirSector : DirScanner {
-	IsDirSector(unsigned sector_, DirAsDSK::DirIndex& dirDirIndex_)
-		: DirScanner(dirDirIndex_)
-		, sector(sector_) {}
+	explicit IsDirSector(unsigned sector_) : sector(sector_) {}
+
 	[[nodiscard]] bool onDirSector(unsigned dirSector) const {
 		return sector == dirSector;
 	}
-	const unsigned sector;
+
+	unsigned sector;
 };
-bool DirAsDSK::isDirSector(unsigned sector, DirIndex& dirDirIndex)
+std::optional<DirAsDSK::DirIndex> DirAsDSK::isDirSector(unsigned sector)
 {
-	return scanMsxDirs(IsDirSector(sector, dirDirIndex), firstDirSector);
+	if (IsDirSector scanner{sector};
+	    scanMsxDirs(scanner, firstDirSector)) {
+		return scanner.dirDirIndex;
+	}
+	return std::nullopt;
 }
 
 // Search for the directory entry that has the given startCluster.
 struct DirEntryForCluster : DirScanner {
-	DirEntryForCluster(unsigned cluster_,
-	                   DirAsDSK::DirIndex& dirIndex_,
-	                   DirAsDSK::DirIndex& dirDirIndex_)
-		: DirScanner(dirDirIndex_)
-		, cluster(cluster_)
-		, result(dirIndex_) {}
-	bool onDirEntry(DirAsDSK::DirIndex dirIndex, const MSXDirEntry& entry) {
+	explicit DirEntryForCluster(unsigned cluster_) : cluster(cluster_) {}
+
+	bool onDirEntry(DirAsDSK::DirIndex dirIndex_, const MSXDirEntry& entry) {
 		if (entry.startCluster == cluster) {
-			result = dirIndex;
+			dirIndex = dirIndex_;
 			return true;
 		}
 		return false;
 	}
-	const unsigned cluster;
-	DirAsDSK::DirIndex& result;
+
+	unsigned cluster;
+	DirAsDSK::DirIndex dirIndex{0, 0}; // dummy initial value, not used
 };
-bool DirAsDSK::getDirEntryForCluster(unsigned cluster,
-                                     DirIndex& dirIndex, DirIndex& dirDirIndex)
+std::optional<DirAsDSK::DirEntryForClusterResult> DirAsDSK::getDirEntryForCluster(unsigned cluster)
 {
-	return scanMsxDirs(DirEntryForCluster(cluster, dirIndex, dirDirIndex),
-	                   firstDirSector);
-}
-DirAsDSK::DirIndex DirAsDSK::getDirEntryForCluster(unsigned cluster)
-{
-	DirIndex dirIndex, dirDirIndex;
-	if (getDirEntryForCluster(cluster, dirIndex, dirDirIndex)) {
-		return dirIndex;
-	} else {
-		return {unsigned(-1), unsigned(-1)}; // not found
+	if (DirEntryForCluster scanner{cluster};
+	    scanMsxDirs(scanner, firstDirSector)) {
+		return DirEntryForClusterResult{scanner.dirIndex, scanner.dirDirIndex};
 	}
+	return std::nullopt;
 }
 
 // Remove the mapping between the msx and host for all the files/dirs in the
@@ -1169,7 +1157,7 @@ void DirAsDSK::exportToHost(DirIndex dirIndex, DirIndex dirDirIndex)
 	}
 	const auto& msxName = msxDir(dirIndex).filename;
 	string hostName;
-	if (auto* v = lookup(mapDirs, dirIndex)) {
+	if (const auto* v = lookup(mapDirs, dirIndex)) {
 		// Hostname is already known.
 		hostName = v->hostName;
 	} else {
@@ -1182,7 +1170,7 @@ void DirAsDSK::exportToHost(DirIndex dirIndex, DirIndex dirDirIndex)
 		string hostSubDir;
 		if (dirDirIndex.sector != 0) {
 			// Not the msx root directory.
-			auto* v2 = lookup(mapDirs, dirDirIndex);
+			const auto* v2 = lookup(mapDirs, dirDirIndex);
 			assert(v2);
 			hostSubDir = v2->hostName;
 			assert(!hostSubDir.ends_with('/'));
@@ -1252,7 +1240,7 @@ void DirAsDSK::exportToHostFile(DirIndex dirIndex, const string& hostName)
 		unsigned curCl = msxDir(dirIndex).startCluster;
 		unsigned msxSize = msxDir(dirIndex).size;
 
-		File file(hostDir + hostName, File::TRUNCATE);
+		File file(hostDir + hostName, File::OpenMode::TRUNCATE);
 		unsigned offset = 0;
 		vector<bool> visited(maxCluster, false);
 
@@ -1344,20 +1332,17 @@ void DirAsDSK::writeDataSector(unsigned sector, const SectorBuffer& buf)
 	offset += narrow<unsigned>((sizeof(buf) * SECTORS_PER_CLUSTER) * chainLength);
 
 	// Get corresponding directory entry.
-	DirIndex dirIndex = getDirEntryForCluster(startCluster);
-	// no need to check for 'dirIndex.sector == unsigned(-1)'
-	auto* v = lookup(mapDirs, dirIndex);
-	if (!v) {
-		// This sector was not mapped to a file, nothing more to do.
-		return;
-	}
+	auto entry = getDirEntryForCluster(startCluster);
+	if (!entry) return;
+	const auto* v = lookup(mapDirs, entry->dirIndex);
+	if (!v) return; // sector was not mapped to a file, nothing more to do.
 
 	// Actually write data to host file.
 	string fullHostName = hostDir + v->hostName;
 	try {
 		File file(fullHostName, "rb+"); // don't uncompress
 		file.seek(offset);
-		unsigned msxSize = msxDir(dirIndex).size;
+		unsigned msxSize = msxDir(entry->dirIndex).size;
 		if (msxSize > offset) {
 			auto writeSize = std::min<size_t>(msxSize - offset, sizeof(buf));
 			file.write(subspan(buf.raw, 0, writeSize));

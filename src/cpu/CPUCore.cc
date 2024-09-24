@@ -508,33 +508,6 @@ template<typename T> void CPUCore<T>::setNextSyncPoint(EmuTime::param time)
 }
 
 
-static constexpr char toHex(byte x)
-{
-	return narrow<char>((x < 10) ? (x + '0') : (x - 10 + 'A'));
-}
-static constexpr void toHex(byte x, std::span<char, 3> buf)
-{
-	buf[0] = toHex(x / 16);
-	buf[1] = toHex(x & 15);
-}
-
-template<typename T> void CPUCore<T>::disasmCommand(
-	Interpreter& interp, std::span<const TclObject> tokens, TclObject& result) const
-{
-	word address = (tokens.size() < 3) ? getPC() : word(tokens[2].getInt(interp));
-	std::array<byte, 4> outBuf;
-	std::string dasmOutput;
-	unsigned len = dasm(*interface, address, outBuf, dasmOutput,
-	               T::getTimeFast());
-	dasmOutput.resize(19, ' ');
-	result.addListElement(dasmOutput);
-	std::array<char, 3> tmp; tmp[2] = 0;
-	for (auto i : xrange(len)) {
-		toHex(outBuf[i], tmp);
-		result.addListElement(tmp.data());
-	}
-}
-
 template<typename T> void CPUCore<T>::update(const Setting& setting) noexcept
 {
 	if (&setting == &freqLocked) {

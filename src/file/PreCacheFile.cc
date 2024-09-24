@@ -1,6 +1,9 @@
 #include "PreCacheFile.hh"
+
 #include "FileOperations.hh"
+
 #include "narrow.hh"
+
 #include <array>
 #include <cstdio>
 #include <sys/types.h>
@@ -12,7 +15,7 @@ namespace openmsx {
 //       with advise = POSIX_FADV_WILLNEED
 
 PreCacheFile::PreCacheFile(std::string name_)
-	: name(std::move(name_)), exitLoop(false)
+	: name(std::move(name_))
 {
 	thread = std::thread([this]() { run(); });
 }
@@ -23,7 +26,7 @@ PreCacheFile::~PreCacheFile()
 	thread.join();
 }
 
-void PreCacheFile::run()
+void PreCacheFile::run() const
 {
 	if (!FileOperations::isRegularFile(name)) {
 		// don't pre-cache non regular files (e.g. /dev/fd0)
@@ -46,8 +49,8 @@ void PreCacheFile::run()
 
 			std::array<char, BLOCK_SIZE> buf;
 			if (fseek(file.get(), narrow_cast<long>(block * BLOCK_SIZE), SEEK_SET)) break;
-			size_t read = fread(buf.data(), 1, BLOCK_SIZE, file.get());
-			if (read != BLOCK_SIZE) {
+			if (size_t read = fread(buf.data(), 1, BLOCK_SIZE, file.get());
+			    read != BLOCK_SIZE) {
 				// error or end-of-file reached,
 				// in both cases stop pre-caching
 				break;

@@ -169,7 +169,7 @@ OggReader::OggReader(const Filename& filename, CliComm& cli_)
 			throw MSXException("Video frame rate must be 59.94Hz or 29.97Hz");
 		}
 
-		// FIXME: Support YUV444 before release
+		// TODO: Support YUV444 before release
 		// It would be much better to use YUV444, however the existing
 		// captures are in YUV420 format. yuv2rgb will have to be
 		// updated too.
@@ -224,7 +224,7 @@ OggReader::~OggReader()
 void OggReader::vorbisFoundPosition()
 {
 	auto last = vorbisPos;
-	for (auto& audioFrag : view::reverse(audioList)) {
+	for (const auto& audioFrag : view::reverse(audioList)) {
 		last -= audioFrag->length;
 		audioFrag->position = last;
 	}
@@ -672,7 +672,7 @@ const AudioFragment* OggReader::getAudio(size_t sample)
 
 	auto it = begin(audioList);
 	while (true) {
-		auto& audio = *it;
+		const auto& audio = *it;
 		if (audio->position + audio->length + getSampleRate() <= sample) {
 			// Dispose if this, more than 1 second old
 			recycleAudio(std::move(*it));

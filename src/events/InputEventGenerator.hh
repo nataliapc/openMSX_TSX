@@ -18,12 +18,13 @@ class GlobalSettings;
 class InputEventGenerator final : private EventListener
 {
 public:
-	InputEventGenerator(const InputEventGenerator&) = delete;
-	InputEventGenerator& operator=(const InputEventGenerator&) = delete;
-
 	InputEventGenerator(CommandController& commandController,
 	                    EventDistributor& eventDistributor,
 	                    GlobalSettings& globalSettings);
+	InputEventGenerator(const InputEventGenerator&) = delete;
+	InputEventGenerator(InputEventGenerator&&) = delete;
+	InputEventGenerator& operator=(const InputEventGenerator&) = delete;
+	InputEventGenerator& operator=(InputEventGenerator&&) = delete;
 	~InputEventGenerator();
 
 	/** Wait for event(s) and handle it.
@@ -44,10 +45,10 @@ private:
 	void handle(const SDL_Event& evt);
 	void handleKeyDown(const SDL_KeyboardEvent& key, uint32_t unicode);
 	void splitText(uint32_t timestamp, const char* utf8);
-	void setGrabInput(bool grab);
+	void setGrabInput(bool grab) const;
 
 	// EventListener
-	int signalEvent(const Event& event) override;
+	bool signalEvent(const Event& event) override;
 
 	EventDistributor& eventDistributor;
 	GlobalSettings& globalSettings;

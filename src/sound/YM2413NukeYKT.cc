@@ -42,21 +42,13 @@
 namespace openmsx {
 namespace YM2413NukeYKT {
 
-enum RmNum : uint8_t {
-	rm_num_bd0 = 0,  // cycles == 11
-	rm_num_hh = 1,   //           12
-	rm_num_tom = 2,  //           13
-	rm_num_bd1 = 3,  //           14
-	rm_num_sd = 4,   //           15
-	rm_num_tc = 5,   //           16
-};
 [[nodiscard]] constexpr bool is_rm_cycle(int cycle)
 {
 	return (11 <= cycle) && (cycle <= 16);
 }
-[[nodiscard]] constexpr RmNum rm_for_cycle(int cycle)
+[[nodiscard]] constexpr YM2413::RmNum rm_for_cycle(int cycle)
 {
-	return RmNum(cycle - 11);
+	return static_cast<YM2413::RmNum>(cycle - 11);
 }
 
 static constexpr auto logSinTab = [] {
@@ -94,7 +86,7 @@ constexpr std::array<YM2413::Patch, 15> YM2413::m_patches = {
 	YM2413::Patch{0x09, 0, 3, {0, 0}, {1, 1}, {1, 0}, {0, 0}, {0x1, 0x1}, {2, 0}, {0xf, 0xe}, {0x1, 0x4}, {0x4, 0x1}, {0x0, 0x3}},
 };
 
-constexpr std::array<YM2413::Patch, 6> YM2413::r_patches = {
+constexpr array_with_enum_index<YM2413::RmNum, YM2413::Patch> YM2413::r_patches = {
 	YM2413::Patch{0x18, 1, 7, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0x1, 0x0}, {0, 0}, {0xd, 0x0}, {0xf, 0x0}, {0x6, 0x0}, {0xa, 0x0}},
 	YM2413::Patch{0x00, 0, 0, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0x1, 0x0}, {0, 0}, {0xc, 0x0}, {0x8, 0x0}, {0xa, 0x0}, {0x7, 0x0}},
 	YM2413::Patch{0x00, 0, 0, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0x5, 0x0}, {0, 0}, {0xf, 0x0}, {0x8, 0x0}, {0x5, 0x0}, {0x9, 0x0}},
@@ -197,7 +189,7 @@ template<uint32_t CYCLES> ALWAYS_INLINE uint32_t YM2413::envelopeKSLTL(const Pat
 
 	auto ksl = uint32_t(p_ksl[ch]) >> patch1.ksl_t[mcsel];
 	auto tl2 = [&]() -> uint32_t {
-		if ((rm_for_cycle(CYCLES) == one_of(rm_num_hh, rm_num_tom)) && use_rm_patches) {
+		if ((rm_for_cycle(CYCLES) == one_of(RmNum::hh, RmNum::tom)) && use_rm_patches) {
 			return inst[ch] << (2 + 1);
 		} else if /*constexpr*/ (mcsel == 1) { // constexpr triggers compile error on visual studio
 			return vol8[ch];
@@ -274,34 +266,35 @@ template<uint32_t CYCLES> ALWAYS_INLINE bool YM2413::envelopeGenerate1()
 	bool prev2_eg_kon   = eg_kon[(CYCLES + 16) & 1];
 	bool prev2_eg_dokon = eg_dokon[(CYCLES + 16) % 18];
 
+	using enum EgState;
 	auto state = eg_state[(CYCLES + 16) % 18];
 	if (prev2_eg_dokon) [[unlikely]] {
-		eg_state[(CYCLES + 16) % 18] = EgState::attack;
+		eg_state[(CYCLES + 16) % 18] = attack;
 	} else if (!prev2_eg_kon) {
-		eg_state[(CYCLES + 16) % 18] = EgState::release;
-	} else if ((state == EgState::attack) && (level == 0)) [[unlikely]] {
-		eg_state[(CYCLES + 16) % 18] = EgState::decay;
-	} else if ((state == EgState::decay) && ((level >> 3) == eg_sl[CYCLES & 1])) [[unlikely]] {
-		eg_state[(CYCLES + 16) % 18] = EgState::sustain;
+		eg_state[(CYCLES + 16) % 18] = release;
+	} else if ((state == attack) && (level == 0)) [[unlikely]] {
+		eg_state[(CYCLES + 16) % 18] = decay;
+	} else if ((state == decay) && ((level >> 3) == eg_sl[CYCLES & 1])) [[unlikely]] {
+		eg_state[(CYCLES + 16) % 18] = sustain;
 	}
 
 	auto prev2_rate = eg_rate[(CYCLES + 16) & 1];
 	int32_t next_level
-	    = (state != EgState::attack && prev2_eg_off && !prev2_eg_dokon) ? 0x7f
+	    = (state != attack && prev2_eg_off && !prev2_eg_dokon) ? 0x7f
 	    : ((prev2_rate >= 60) && prev2_eg_dokon)                        ? 0x00
 	                                                                    : level;
 	auto step = [&]() -> int {
 		switch (state) {
-		case EgState::attack:
+		case attack:
 			if (prev2_eg_kon && (level != 0)) [[likely]] {
 				return (level ^ 0xfff) >> attackPtr[prev2_rate];
 			}
 			break;
-		case EgState::decay:
+		case decay:
 			if ((level >> 3) == eg_sl[CYCLES & 1]) return 0;
 			[[fallthrough]];
-		case EgState::sustain:
-		case EgState::release:
+		case sustain:
+		case release:
 			if (!prev2_eg_off && !prev2_eg_dokon) {
 				return releasePtr[prev2_rate];
 			}
@@ -329,20 +322,21 @@ template<uint32_t CYCLES> ALWAYS_INLINE void YM2413::envelopeGenerate2(const Pat
 		bool result = sk & 1;
 		if (is_rm_cycle(CYCLES) && use_rm_patches) {
 			switch (rm_for_cycle(CYCLES)) {
-				case rm_num_bd0:
-				case rm_num_bd1:
+				using enum RmNum;
+				case bd0:
+				case bd1:
 					result |= bool(rhythm & 0x10);
 					break;
-				case rm_num_sd:
+				case sd:
 					result |= bool(rhythm & 0x08);
 					break;
-				case rm_num_tom:
+				case tom:
 					result |= bool(rhythm & 0x04);
 					break;
-				case rm_num_tc:
+				case tc:
 					result |= bool(rhythm & 0x02);
 					break;
-				case rm_num_hh:
+				case hh:
 					result |= bool(rhythm & 0x01);
 					break;
 				default:
@@ -354,9 +348,10 @@ template<uint32_t CYCLES> ALWAYS_INLINE void YM2413::envelopeGenerate2(const Pat
 	eg_kon[CYCLES & 1] = new_eg_kon;
 
 	// Calculate rate
+	using enum EgState;
 	auto state_rate = eg_state[CYCLES];
-	if (state_rate == EgState::release && new_eg_kon && new_eg_off) [[unlikely]] {
-		state_rate = EgState::attack;
+	if (state_rate == release && new_eg_kon && new_eg_off) [[unlikely]] {
+		state_rate = attack;
 		eg_dokon[CYCLES] = true;
 	} else {
 		eg_dokon[CYCLES] = false;
@@ -366,17 +361,17 @@ template<uint32_t CYCLES> ALWAYS_INLINE void YM2413::envelopeGenerate2(const Pat
 		if (!new_eg_kon && !(sk & 2) && mcsel == 1 && !patch1.et[mcsel]) {
 			return 7 * 4;
 		}
-		if (new_eg_kon && eg_state[CYCLES] == EgState::release && !new_eg_off) {
+		if (new_eg_kon && eg_state[CYCLES] == release && !new_eg_off) {
 			return 12 * 4;
 		}
-		bool tom_or_hh = (rm_for_cycle(CYCLES) == one_of(rm_num_tom, rm_num_hh)) && use_rm_patches;
+		bool tom_or_hh = (rm_for_cycle(CYCLES) == one_of(RmNum::tom, RmNum::hh)) && use_rm_patches;
 		if (!new_eg_kon && !mcsel && !tom_or_hh) {
 			return 0 * 4;
 		}
-		return (state_rate == EgState::attack ) ?   patch1.ar4[mcsel]
-		   :   (state_rate == EgState::decay  ) ?   patch1.dr4[mcsel]
-		   :   (state_rate == EgState::sustain) ?   (patch1.et[mcsel] ? (0 * 4) : patch1.rr4[mcsel])
-		   : /*(state_rate == EgState::release) ?*/ ((sk & 2) ? (5 * 4) : patch1.rr4[mcsel]);
+		return (state_rate == attack ) ?   patch1.ar4[mcsel]
+		   :   (state_rate == decay  ) ?   patch1.dr4[mcsel]
+		   :   (state_rate == sustain) ?   (patch1.et[mcsel] ? (0 * 4) : patch1.rr4[mcsel])
+		   : /*(state_rate == release) ?*/ ((sk & 2) ? (5 * 4) : patch1.rr4[mcsel]);
 	}();
 
 	eg_rate[CYCLES & 1] = narrow_cast<uint8_t>([&]() {

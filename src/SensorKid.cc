@@ -1,10 +1,12 @@
 #include "SensorKid.hh"
-#include "MSXCliComm.hh"
+
 #include "CommandController.hh"
+#include "MSXCliComm.hh"
 #include "MSXException.hh"
 #include "StringSetting.hh"
-#include "narrow.hh"
 #include "serialize.hh"
+
+#include "narrow.hh"
 
 namespace openmsx {
 
@@ -13,13 +15,13 @@ SensorKid::SensorKid(const DeviceConfig& config)
 	, portStatusCallback(getCommandController(),
 		getName() + "_port_status_callback",
 		"Tcl proc to call when an Sensor Kid port status is changed",
-		"", Setting::DONT_SAVE)
+		"", Setting::Save::NO)
 	, acquireCallback(getCommandController(),
 		getName() + "_acquire_callback",
 		"Tcl proc called to acquire analog data. "
 		"Input: port number (0-3). "
 		"Output: the value for that port (0-255).",
-		"", Setting::DONT_SAVE)
+		"", Setting::Save::NO)
 {
 	reset(getCurrentTime());
 }
@@ -85,7 +87,7 @@ byte SensorKid::readIO(word port, EmuTime::param /* time */)
 	}
 }
 
-byte SensorKid::getAnalog(byte chi)
+byte SensorKid::getAnalog(byte chi) const
 {
 	// bits 2 and 3 in the 'port-0' byte select between 4 possible channels
 	// for some reason bits 2 and 3 are swapped and then shifted down
@@ -118,7 +120,7 @@ byte SensorKid::getAnalog(byte chi)
 	return result;
 }
 
-void SensorKid::putPort(byte data, byte diff)
+void SensorKid::putPort(byte data, byte diff) const
 {
 	// When the upper 2 bits (bit 6 and 7) change we send a message.
 	// I assume the cartridge also has two digital output pins?

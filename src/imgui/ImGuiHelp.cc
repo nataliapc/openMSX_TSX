@@ -19,18 +19,28 @@ using namespace std::literals;
 
 void ImGuiHelp::showMenu(MSXMotherBoard* /*motherBoard*/)
 {
-	auto docDir = FileOperations::getSystemDocDir();
 	im::Menu("Help", [&]{
+		auto docDir = FileOperations::getSystemDocDir();
 		im::Menu("Manual", [&]{
-			drawURL("FAQ", strCat("file://", docDir, "/manual/faq.html"));
-			drawURL("Setup Guide", strCat("file://", docDir, "/manual/setup.html"));
-			drawURL("User Manual", strCat("file://", docDir, "/manual/user.html"));
+			ImGui::TextLinkOpenURL("FAQ", strCat("file://", docDir, "/manual/faq.html").c_str());
+			ImGui::TextLinkOpenURL("Setup Guide", strCat("file://", docDir, "/manual/setup.html").c_str());
+			ImGui::TextLinkOpenURL("User Manual", strCat("file://", docDir, "/manual/user.html").c_str());
 		});
 		ImGui::MenuItem("Dear ImGui user guide", nullptr, &showImGuiUserGuide);
+		ImGui::Separator();
+		ImGui::Checkbox("ImGui Demo Window", &showDemoWindow);
+		HelpMarker("Show the ImGui demo window.\n"
+			"This is purely to demonstrate the ImGui capabilities\n"
+			"and can sometimes help to diagnose problems.\n"
+			"There is no connection with any openMSX functionality.");
 		ImGui::Separator();
 		ImGui::MenuItem("About openMSX", nullptr, &showAboutOpenMSX);
 		ImGui::MenuItem("About Dear ImGui", nullptr, &showAboutImGui);
 	});
+
+	if (showDemoWindow) {
+		ImGui::ShowDemoWindow(&showDemoWindow);
+	}
 }
 
 void ImGuiHelp::paint(MSXMotherBoard* /*motherBoard*/)
@@ -61,7 +71,7 @@ void ImGuiHelp::paintAbout()
 		}
 		assert(logo);
 		if (logo->texture.get()) {
-			ImGui::Image(reinterpret_cast<void*>(logo->texture.get()), logo->size);
+			ImGui::Image(logo->texture.getImGui(), logo->size);
 			ImGui::SameLine();
 		}
 		im::Group([&]{
@@ -86,7 +96,7 @@ void ImGuiHelp::paintAbout()
 
 			ImGui::TextUnformatted("Visit our website:"sv);
 			ImGui::SameLine();
-			drawURL("openMSX.org", "https://openmsx.org");
+			ImGui::TextLinkOpenURL("openMSX.org", "https://openmsx.org");
 		});
 	});
 }

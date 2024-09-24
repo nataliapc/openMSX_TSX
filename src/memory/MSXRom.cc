@@ -16,7 +16,7 @@ void MSXRom::writeMem(word /*address*/, byte /*value*/, EmuTime::param /*time*/)
 	// nothing
 }
 
-byte* MSXRom::getWriteCacheLine(word /*address*/) const
+byte* MSXRom::getWriteCacheLine(word /*address*/)
 {
 	return unmappedWrite.data();
 }
@@ -33,7 +33,7 @@ std::string_view MSXRom::getMapperTypeString() const
 RomType MSXRom::getRomType() const
 {
 	auto result = RomInfo::nameToRomType(getMapperTypeString());
-	assert(result != ROM_UNKNOWN);
+	assert(result != RomType::UNKNOWN);
 	return result;
 }
 

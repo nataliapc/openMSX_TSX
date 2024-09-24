@@ -1,18 +1,21 @@
 #include "RomDatabase.hh"
-#include "FileContext.hh"
-#include "File.hh"
+
 #include "CliComm.hh"
+#include "File.hh"
+#include "FileContext.hh"
 #include "MSXException.hh"
-#include "StringOp.hh"
+
 #include "String32.hh"
+#include "StringOp.hh"
 #include "hash_map.hh"
 #include "narrow.hh"
 #include "ranges.hh"
 #include "rapidsax.hh"
-#include "unreachable.hh"
 #include "stl.hh"
+#include "unreachable.hh"
 #include "view.hh"
 #include "xxhash.hh"
+
 #include <array>
 #include <cassert>
 #include <string_view>
@@ -46,7 +49,7 @@ public:
 	[[nodiscard]] string_view getSystemID() const { return systemID; }
 
 private:
-	[[nodiscard]] String32 cIndex(string_view str);
+	[[nodiscard]] String32 cIndex(string_view str) const;
 	void addEntries();
 	void addAllEntries();
 
@@ -168,7 +171,7 @@ void DBParser::start(string_view tag)
 		case 'd':
 			if (small_compare<"dump">(tag)) {
 				dumps.resize(dumps.size() + 1);
-				dumps.back().type = ROM_UNKNOWN;
+				dumps.back().type = RomType::UNKNOWN;
 				dumps.back().origValue = false;
 				toString32(bufStart, bufStart, dumps.back().remark);
 				toString32(bufStart, bufStart, dumps.back().origData);
@@ -365,7 +368,7 @@ void DBParser::text(string_view txt)
 	}
 }
 
-String32 DBParser::cIndex(string_view str)
+String32 DBParser::cIndex(string_view str) const
 {
 	auto* begin = const_cast<char*>(str.data());
 	auto* end = begin + str.size();
@@ -515,7 +518,7 @@ void DBParser::stop()
 			}
 		}
 		RomType romType = RomInfo::nameToRomType(t);
-		if (romType == ROM_UNKNOWN) {
+		if (romType == RomType::UNKNOWN) {
 			unknownTypes[std::string(t)]++;
 		}
 		dumps.back().type = romType;

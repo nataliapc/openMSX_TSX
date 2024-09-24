@@ -4,6 +4,7 @@
 #include "ImGuiCpp.hh"
 
 #include "StringOp.hh"
+#include "escape_newline.hh"
 #include "stl.hh"
 #include "zstring_view.hh"
 
@@ -139,10 +140,10 @@ template<typename C>
 struct PersistentElement<C, std::string> : PersistentElementBase<C, std::string> {
 	using PersistentElementBase<C, std::string>::PersistentElementBase;
 	void save(ImGuiTextBuffer& buf, C& c) const {
-		buf.appendf("%s=%s\n", this->name.c_str(), this->get(c).c_str());
+		buf.appendf("%s=%s\n", this->name.c_str(), escape_newline::encode(this->get(c)).c_str());
 	}
 	void load(C& c, zstring_view value) const {
-		this->get(c) = std::string(value);
+		this->get(c) = escape_newline::decode(value);
 	}
 };
 
@@ -156,6 +157,22 @@ struct PersistentElement<C, gl::ivec2> : PersistentElementBase<C, gl::ivec2> {
 	void load(C& c, zstring_view value) const {
 		gl::ivec2 t;
 		if (sscanf(value.c_str(), "[ %d %d ]", &t.x, &t.y) == 2) {
+			this->get(c) = t;
+		}
+	}
+};
+
+template<typename C>
+struct PersistentElement<C, gl::vec2> : PersistentElementBase<C, gl::vec2> {
+	using PersistentElementBase<C, gl::vec2>::PersistentElementBase;
+	void save(ImGuiTextBuffer& buf, C& c) const {
+		const auto& v = this->get(c);
+		buf.appendf("%s=[ %f %f ]\n", this->name.c_str(),
+			double(v.x), double(v.y)); // note: cast only needed to silence warnings
+	}
+	void load(C& c, zstring_view value) const {
+		gl::vec2 t;
+		if (sscanf(value.c_str(), "[ %f %f ]", &t.x, &t.y) == 2) {
 			this->get(c) = t;
 		}
 	}

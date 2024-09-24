@@ -24,8 +24,7 @@ class MSXtar;
 class ImGuiDiskManipulator final : public ImGuiPart
 {
 public:
-	explicit ImGuiDiskManipulator(ImGuiManager& manager_)
-		: ImGuiPart(manager_) {}
+	using ImGuiPart::ImGuiPart;
 
 	void paint(MSXMotherBoard* motherBoard) override;
 
@@ -37,7 +36,7 @@ private:
 		std::string filename;
 		size_t size = 0;
 		time_t modified = 0;
-		uint8_t attrib = 0;
+		MSXDirEntry::AttribValue attrib{0};
 		bool isDirectory = false;
 		bool isSelected = false;
 	};
@@ -56,13 +55,13 @@ private:
 	[[nodiscard]] std::optional<DiskManipulator::DriveAndPartition> getDriveAndDisk();
 	[[nodiscard]] std::optional<DrivePartitionTar> getMsxStuff();
 
-	[[nodiscard]] bool isValidMsxDirectory(DrivePartitionTar& stuff, const std::string& dir);
+	[[nodiscard]] bool isValidMsxDirectory(DrivePartitionTar& stuff, const std::string& dir) const;
 	[[nodiscard]] std::string getDiskImageName();
 	[[nodiscard]] std::vector<FileInfo> dirMSX(DrivePartitionTar& stuff);
 	void refreshMsx(DrivePartitionTar& stuff);
 	void refreshHost();
-	void checkSort(std::vector<FileInfo>& files, bool& forceSort);
-	[[nodiscard]] Action drawTable(std::vector<FileInfo>& files, int& lastClickIdx, bool& forceSort, bool drawAttrib);
+	void checkSort(std::vector<FileInfo>& files, bool& forceSort) const;
+	[[nodiscard]] Action drawTable(std::vector<FileInfo>& files, int& lastClickIdx, bool& forceSort, bool drawAttrib) const;
 	void insertMsxDisk();
 	void exportDiskImage();
 	void msxParentDirectory();

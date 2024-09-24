@@ -42,17 +42,17 @@
 // this mapping by default is for GLFW but you can use another
 //#include <GLFW/glfw3.h>
 // Up key for explore to the top
-//#define IGFD_KEY_UP ImGuiKey_UpArrow
+#define IGFD_KEY_UP ImGuiKey_UpArrow
 // Down key for explore to the bottom
-//#define IGFD_KEY_DOWN ImGuiKey_DownArrow
+#define IGFD_KEY_DOWN ImGuiKey_DownArrow
 // Enter key for open directory
-//#define IGFD_KEY_ENTER ImGuiKey_Enter
+#define IGFD_KEY_ENTER ImGuiKey_Enter
 // BackSpace for coming back to the last directory
-//#define IGFD_KEY_BACKSPACE ImGuiKey_Backspace
+#define IGFD_KEY_BACKSPACE ImGuiKey_Backspace
 
 // by ex you can quit the dialog by pressing the key escape
-//#define USE_DIALOG_EXIT_WITH_KEY
-//#define IGFD_EXIT_KEY ImGuiKey_Escape
+#define USE_DIALOG_EXIT_WITH_KEY
+#define IGFD_EXIT_KEY ImGuiKey_Escape
 
 // widget
 // begin combo widget
@@ -70,14 +70,14 @@
 
 // locales string
 #define createDirButtonString ICON_IGFD_ADD
-#define resetButtonString ICON_IGFD_RESET
+#define resetButtonString ICON_IGFD_UNDO
 #define drivesButtonString ICON_IGFD_DRIVES
 #define editPathButtonString ICON_IGFD_EDIT
-#define searchString ICON_IGFD_SEARCH
+#define searchString ICON_IGFD_FILTER
 #define dirEntryString ICON_IGFD_FOLDER
 #define linkEntryString ICON_IGFD_LINK
 #define fileEntryString ICON_IGFD_FILE
-//#define buttonResetSearchString "Reset search"
+//#define buttonResetSearchString "Reset filter"
 //#define buttonDriveString "Drives"
 //#define buttonEditPathString "Edit path\nYou can also right click on path buttons"
 //#define buttonResetPathString "Reset to current directory"
@@ -111,7 +111,7 @@
 //#define tableHeaderFileSizeString " Size"
 //#define tableHeaderFileDateTimeString " Date"
 #define fileSizeBytes "B"
-#define fileSizeKiloBytes "KB"
+#define fileSizeKiloBytes "kB"
 #define fileSizeMegaBytes "MB"
 #define fileSizeGigaBytes "GB"
 

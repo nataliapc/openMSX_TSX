@@ -3,6 +3,7 @@
 
 #include "RomBlocks.hh"
 #include "RomTypes.hh"
+
 #include <span>
 
 namespace openmsx {
@@ -14,8 +15,8 @@ public:
 	[[nodiscard]] unsigned getBaseSizeAlignment() const override;
 
 private:
-	void guessHelper(unsigned offset, std::span<int, 3> pages);
-	[[nodiscard]] unsigned guessLocation(unsigned windowBase, unsigned windowSize);
+	void guessHelper(unsigned offset, std::span<int, 3> pages) const;
+	[[nodiscard]] unsigned guessLocation(unsigned windowBase, unsigned windowSize) const;
 };
 
 } // namespace openmsx

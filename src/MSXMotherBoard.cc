@@ -1,51 +1,54 @@
 #include "MSXMotherBoard.hh"
-#include "Reactor.hh"
-#include "MSXDevice.hh"
-#include "ReverseManager.hh"
-#include "HardwareConfig.hh"
-#include "ConfigException.hh"
-#include "XMLElement.hh"
-#include "MSXCliComm.hh"
-#include "GlobalCliComm.hh"
-#include "MSXCommandController.hh"
-#include "Scheduler.hh"
-#include "Schedulable.hh"
-#include "CartridgeSlotManager.hh"
-#include "EventDistributor.hh"
-#include "Debugger.hh"
-#include "SimpleDebuggable.hh"
-#include "MSXMixer.hh"
-#include "PluggingController.hh"
-#include "MSXCPUInterface.hh"
-#include "MSXCPU.hh"
-#include "PanasonicMemory.hh"
-#include "MSXDeviceSwitch.hh"
-#include "MSXMapperIO.hh"
-#include "CassettePort.hh"
-#include "JoystickPort.hh"
-#include "RenShaTurbo.hh"
-#include "LedStatus.hh"
-#include "MSXEventDistributor.hh"
-#include "StateChangeDistributor.hh"
-#include "EventDelay.hh"
-#include "RealTime.hh"
-#include "DeviceFactory.hh"
+
 #include "BooleanSetting.hh"
-#include "GlobalSettings.hh"
+#include "CartridgeSlotManager.hh"
+#include "CassettePort.hh"
 #include "Command.hh"
 #include "CommandException.hh"
-#include "InfoTopic.hh"
+#include "ConfigException.hh"
+#include "Debugger.hh"
+#include "DeviceFactory.hh"
+#include "EventDelay.hh"
+#include "EventDistributor.hh"
 #include "FileException.hh"
-#include "TclObject.hh"
+#include "GlobalCliComm.hh"
+#include "GlobalSettings.hh"
+#include "HardwareConfig.hh"
+#include "InfoTopic.hh"
+#include "JoystickPort.hh"
+#include "LedStatus.hh"
+#include "MSXCPU.hh"
+#include "MSXCPUInterface.hh"
+#include "MSXCliComm.hh"
+#include "MSXCommandController.hh"
+#include "MSXDevice.hh"
+#include "MSXDeviceSwitch.hh"
+#include "MSXEventDistributor.hh"
+#include "MSXMapperIO.hh"
+#include "MSXMixer.hh"
 #include "Observer.hh"
+#include "PanasonicMemory.hh"
+#include "PluggingController.hh"
+#include "Reactor.hh"
+#include "RealTime.hh"
+#include "RenShaTurbo.hh"
+#include "ReverseManager.hh"
+#include "Schedulable.hh"
+#include "Scheduler.hh"
+#include "SimpleDebuggable.hh"
+#include "StateChangeDistributor.hh"
+#include "TclObject.hh"
+#include "XMLElement.hh"
 #include "serialize.hh"
 #include "serialize_stl.hh"
+
 #include "ScopedAssign.hh"
 #include "one_of.hh"
 #include "ranges.hh"
 #include "stl.hh"
 #include "unreachable.hh"
 #include "view.hh"
+
 #include <cassert>
 #include <functional>
 #include <iostream>
@@ -60,9 +63,11 @@ class AddRemoveUpdate
 {
 public:
 	explicit AddRemoveUpdate(MSXMotherBoard& motherBoard);
-	~AddRemoveUpdate();
 	AddRemoveUpdate(const AddRemoveUpdate&) = delete;
+	AddRemoveUpdate(AddRemoveUpdate&&) = delete;
 	AddRemoveUpdate& operator=(const AddRemoveUpdate&) = delete;
+	AddRemoveUpdate& operator=(AddRemoveUpdate&&) = delete;
+	~AddRemoveUpdate();
 private:
 	MSXMotherBoard& motherBoard;
 };
@@ -160,6 +165,8 @@ public:
 	void unregisterProvider(MediaInfoProvider& provider);
 private:
 	struct ProviderInfo {
+		ProviderInfo(std::string_view n, MediaInfoProvider* p)
+			: name(n), provider(p) {} // clang-15 workaround
 		std::string_view name;
 		MediaInfoProvider* provider;
 	};
@@ -228,7 +235,7 @@ MSXMotherBoard::MSXMotherBoard(Reactor& reactor_)
 		"Intended use is for scripts that create temporary machines "
 		"of which you don't want to see warning messages about blank "
 		"SRAM content or PSG port directions for instance.",
-		false, Setting::DONT_SAVE)
+		false, Setting::Save::NO)
 	, fastForwardHelper(make_unique<FastForwardHelper>(*this))
 	, settingObserver(make_unique<SettingObserver>(*this))
 	, powerSetting(reactor.getGlobalSettings().getPowerSetting())
@@ -246,8 +253,6 @@ MSXMotherBoard::MSXMotherBoard(Reactor& reactor_)
 	machineMediaInfo = make_unique<MachineMediaInfo>(*this);
 	deviceInfo = make_unique<DeviceInfo>(*this);
 	debugger = make_unique<Debugger>(*this);
-
-	msxMixer->mute(); // powered down
 
 	// Do this before machine-specific settings are created, otherwise
 	// a setting-info CliComm message is send with a machine id that hasn't
@@ -396,7 +401,7 @@ string MSXMotherBoard::insertExtension(
 	}
 	string result = extension->getName();
 	extensions.push_back(std::move(extension));
-	getMSXCliComm().update(CliComm::EXTENSION, result, "add");
+	getMSXCliComm().update(CliComm::UpdateType::EXTENSION, result, "add");
 	return result;
 }
 
@@ -409,7 +414,7 @@ HardwareConfig* MSXMotherBoard::findExtension(std::string_view extensionName)
 void MSXMotherBoard::removeExtension(const HardwareConfig& extension)
 {
 	extension.testRemove();
-	getMSXCliComm().update(CliComm::EXTENSION, extension.getName(), "remove");
+	getMSXCliComm().update(CliComm::UpdateType::EXTENSION, extension.getName(), "remove");
 	auto it = rfind_unguarded(extensions, &extension,
 	                          [](auto& e) { return e.get(); });
 	extensions.erase(it);
@@ -535,7 +540,7 @@ InfoCommand& MSXMotherBoard::getMachineInfoCommand()
 	return msxCommandController->getMachineInfoCommand();
 }
 
-EmuTime::param MSXMotherBoard::getCurrentTime()
+EmuTime::param MSXMotherBoard::getCurrentTime() const
 {
 	return scheduler->getCurrentTime();
 }
@@ -612,7 +617,7 @@ void MSXMotherBoard::doReset()
 	reactor.getEventDistributor().distributeEvent(BootEvent());
 }
 
-byte MSXMotherBoard::readIRQVector()
+byte MSXMotherBoard::readIRQVector() const
 {
 	byte result = 0xff;
 	for (auto& d : availableDevices) {
@@ -705,8 +710,8 @@ MSXMapperIO& MSXMotherBoard::createMapperIO()
 
 		MSXCPUInterface& cpuInterface = getCPUInterface();
 		for (auto port : {0xfc, 0xfd, 0xfe, 0xff}) {
-			cpuInterface.register_IO_Out(port, mapperIO.get());
-			cpuInterface.register_IO_In (port, mapperIO.get());
+			cpuInterface.register_IO_Out(narrow_cast<byte>(port), mapperIO.get());
+			cpuInterface.register_IO_In (narrow_cast<byte>(port), mapperIO.get());
 		}
 	}
 	++mapperIOCounter;
@@ -721,8 +726,8 @@ void MSXMotherBoard::destroyMapperIO()
 	if (mapperIOCounter == 0) {
 		MSXCPUInterface& cpuInterface = getCPUInterface();
 		for (auto port : {0xfc, 0xfd, 0xfe, 0xff}) {
-			cpuInterface.unregister_IO_Out(port, mapperIO.get());
-			cpuInterface.unregister_IO_In (port, mapperIO.get());
+			cpuInterface.unregister_IO_Out(narrow_cast<byte>(port), mapperIO.get());
+			cpuInterface.unregister_IO_In (narrow_cast<byte>(port), mapperIO.get());
 		}
 
 		mapperIO.reset();
@@ -764,13 +769,13 @@ AddRemoveUpdate::AddRemoveUpdate(MSXMotherBoard& motherBoard_)
 	: motherBoard(motherBoard_)
 {
 	motherBoard.getReactor().getGlobalCliComm().update(
-		CliComm::HARDWARE, motherBoard.getMachineID(), "add");
+		CliComm::UpdateType::HARDWARE, motherBoard.getMachineID(), "add");
 }
 
 AddRemoveUpdate::~AddRemoveUpdate()
 {
 	motherBoard.getReactor().getGlobalCliComm().update(
-		CliComm::HARDWARE, motherBoard.getMachineID(), "remove");
+		CliComm::UpdateType::HARDWARE, motherBoard.getMachineID(), "remove");
 }
 
 
@@ -858,8 +863,7 @@ ListExtCmd::ListExtCmd(MSXMotherBoard& motherBoard_)
 void ListExtCmd::execute(std::span<const TclObject> /*tokens*/, TclObject& result)
 {
 	result.addListElements(
-		view::transform(motherBoard.getExtensions(),
-		                [&](auto& e) { return e->getName(); }));
+		view::transform(motherBoard.getExtensions(), &HardwareConfig::getName));
 }
 
 string ListExtCmd::help(std::span<const TclObject> /*tokens*/) const
@@ -893,7 +897,7 @@ void ExtCmd::execute(std::span<const TclObject> tokens, TclObject& result,
 			: "any";
 		auto extension = motherBoard.loadExtension(name, slotName);
 		if (slotName != "any") {
-			auto& manager = motherBoard.getSlotManager();
+			const auto& manager = motherBoard.getSlotManager();
 			if (const auto* extConf = manager.getConfigForSlot(commandName[3] - 'a')) {
 				// still a cartridge inserted, (try to) remove it now
 				motherBoard.removeExtension(*extConf);
@@ -1011,11 +1015,10 @@ void MachineExtensionInfo::execute(std::span<const TclObject> tokens,
 	checkNumArgs(tokens, Between{2, 3}, Prefix{2}, "?extension-instance-name?");
 	if (tokens.size() == 2) {
 		result.addListElements(
-			view::transform(motherBoard.getExtensions(),
-					[&](auto& e) { return e->getName(); }));
+			view::transform(motherBoard.getExtensions(), &HardwareConfig::getName));
 	} else if (tokens.size() == 3) {
 		std::string_view extName = tokens[2].getString();
-		HardwareConfig* extension = motherBoard.findExtension(extName);
+		const HardwareConfig* extension = motherBoard.findExtension(extName);
 		if (!extension) {
 			throw CommandException("No such extension: ", extName);
 		}
@@ -1032,8 +1035,7 @@ void MachineExtensionInfo::execute(std::span<const TclObject> tokens,
 		}
 		TclObject deviceList;
 		deviceList.addListElements(
-			view::transform(extension->getDevices(),
-					[&](auto& e) { return e->getName(); }));
+			view::transform(extension->getDevices(), &MSXDevice::getName));
 		result.addDictKeyValue("devices", deviceList);
 	}
 }
@@ -1095,7 +1097,7 @@ void MachineMediaInfo::registerProvider(std::string_view name, MediaInfoProvider
 {
 	assert(!contains(providers, name, &ProviderInfo::name));
 	assert(!contains(providers, &provider, &ProviderInfo::provider));
-	providers.push_back(ProviderInfo{name, &provider});
+	providers.emplace_back(name, &provider);
 }
 
 void MachineMediaInfo::unregisterProvider(MediaInfoProvider& provider)
@@ -1123,7 +1125,7 @@ void DeviceInfo::execute(std::span<const TclObject> tokens, TclObject& result) c
 		break;
 	case 3: {
 		std::string_view deviceName = tokens[2].getString();
-		MSXDevice* device = motherBoard.findDevice(deviceName);
+		const MSXDevice* device = motherBoard.findDevice(deviceName);
 		if (!device) {
 			throw CommandException("No such device: ", deviceName);
 		}
@@ -1240,8 +1242,8 @@ void MSXMotherBoard::serialize(Archive& ar, unsigned version)
 
 	if (mapperIO) ar.serialize("mapperIO", *mapperIO);
 
-	MSXDeviceSwitch& devSwitch = getDeviceSwitch();
-	if (devSwitch.hasRegisteredDevices()) {
+	if (auto& devSwitch = getDeviceSwitch();
+	    devSwitch.hasRegisteredDevices()) {
 		ar.serialize("deviceSwitch", devSwitch);
 	}
 

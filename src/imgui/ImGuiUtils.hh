@@ -5,6 +5,7 @@
 
 #include "Reactor.hh"
 
+#include "function_ref.hh"
 #include "ranges.hh"
 #include "strCat.hh"
 #include "StringOp.hh"
@@ -13,7 +14,6 @@
 
 #include <algorithm>
 #include <concepts>
-#include <functional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -44,6 +44,17 @@ void StrCat(Ts&& ...ts)
 {
 	auto s = tmpStrCat(std::forward<Ts>(ts)...);
 	TextUnformatted(std::string_view(s));
+}
+
+inline void RightAlignText(std::string_view text, std::string_view maxWidthText)
+{
+	auto maxWidth = ImGui::CalcTextSize(maxWidthText).x;
+	auto actualWidth = ImGui::CalcTextSize(text).x;
+	if (auto spacing = maxWidth - actualWidth; spacing > 0.0f) {
+		auto pos = ImGui::GetCursorPosX();
+		ImGui::SetCursorPosX(pos + spacing);
+	}
+	ImGui::TextUnformatted(text);
 }
 
 } // namespace ImGui
@@ -87,14 +98,21 @@ void simpleToolTip(std::invocable<> auto descFunc)
 
 void HelpMarker(std::string_view desc);
 
-void drawURL(std::string_view text, zstring_view url);
+inline void centerNextWindowOverCurrent()
+{
+	static constexpr gl::vec2 center{0.5f, 0.5f};
+	gl::vec2 windowPos = ImGui::GetWindowPos();
+	gl::vec2 windowSize = ImGui::GetWindowSize();
+	auto windowCenter = windowPos + center * windowSize;
+	ImGui::SetNextWindowPos(windowCenter, ImGuiCond_Appearing, center);
+}
 
 struct GetSettingDescription {
 	std::string operator()(const Setting& setting) const;
 };
 
 bool Checkbox(const HotKey& hotkey, BooleanSetting& setting);
-bool Checkbox(const HotKey& hotkey, const char* label, BooleanSetting& setting, std::function<std::string(const Setting&)> getTooltip = GetSettingDescription{});
+bool Checkbox(const HotKey& hotkey, const char* label, BooleanSetting& setting, function_ref<std::string(const Setting&)> getTooltip = GetSettingDescription{});
 bool SliderInt(IntegerSetting& setting, ImGuiSliderFlags flags = 0);
 bool SliderInt(const char* label, IntegerSetting& setting, ImGuiSliderFlags flags = 0);
 bool SliderFloat(FloatSetting& setting, const char* format = "%.3f", ImGuiSliderFlags flags = 0);
@@ -103,25 +121,25 @@ bool InputText(Setting& setting);
 bool InputText(const char* label, Setting& setting);
 void ComboBox(Setting& setting, EnumToolTips toolTips = {}); // must be an EnumSetting
 void ComboBox(const char* label, Setting& setting, EnumToolTips toolTips = {}); // must be an EnumSetting
-void ComboBox(const char* label, Setting& setting, std::function<std::string(const std::string&)> displayValue, EnumToolTips toolTips = {});
+void ComboBox(const char* label, Setting& setting, function_ref<std::string(const std::string&)> displayValue, EnumToolTips toolTips = {});
 void ComboBox(VideoSourceSetting& setting);
 void ComboBox(const char* label, VideoSourceSetting& setting);
 
 const char* getComboString(int item, const char* itemsSeparatedByZeros);
 
-std::string formatTime(double time);
+std::string formatTime(std::optional<double> time);
 float calculateFade(float current, float target, float period);
 
 template<int HexDigits>
-void comboHexSequence(const char* label, int* value, int mult, int offset = 0) {
+void comboHexSequence(const char* label, int* value, int mult, int max, int offset) {
 	assert(offset < mult);
 	*value &= ~(mult - 1);
 	// only apply offset in display, not in the actual value
 	auto preview = tmpStrCat("0x", hex_string<HexDigits>(*value | offset));
 	im::Combo(label, preview.c_str(), [&]{
-		for (int addr = 0; addr < 0x1ffff; addr += mult) {
-			auto str = tmpStrCat("0x", hex_string<HexDigits>(addr | offset));
-			if (ImGui::Selectable(str.c_str(), *value == addr)) {
+		for (int addr = 0; addr < max; addr += mult) {
+			if (auto str = tmpStrCat("0x", hex_string<HexDigits>(addr | offset));
+			    ImGui::Selectable(str.c_str(), *value == addr)) {
 				*value = addr;
 			}
 			if (*value == addr) {
@@ -189,7 +207,7 @@ void displayFilterCombo(std::string& selection, zstring_view key, const std::vec
 }
 
 template<typename T>
-void applyComboFilter(std::string_view key, const std::string& value, const std::vector<T>& items, std::vector<size_t>& indices)
+void applyComboFilter(std::string_view key, std::string_view value, const std::vector<T>& items, std::vector<size_t>& indices)
 {
 	if (value.empty()) return;
 	std::erase_if(indices, [&](auto idx) {
@@ -206,7 +224,7 @@ void filterIndices(std::string_view filterString, GetName getName, std::vector<s
 	if (filterString.empty()) return;
 	std::erase_if(indices, [&](auto idx) {
 		const auto& name = getName(idx);
-		return !ranges::all_of(StringOp::split_view<StringOp::REMOVE_EMPTY_PARTS>(filterString, ' '),
+		return !ranges::all_of(StringOp::split_view<StringOp::EmptyParts::REMOVE>(filterString, ' '),
 			[&](auto part) { return StringOp::containsCaseInsensitive(name, part); });
 	});
 }
@@ -235,6 +253,36 @@ static void chunk_by(Range&& range, BinaryPred pred, Action action)
 
 std::string getShortCutForCommand(const HotKey& hotkey, std::string_view command);
 
+std::string getKeyChordName(ImGuiKeyChord keyChord);
+std::optional<ImGuiKeyChord> parseKeyChord(std::string_view name);
+
+// Read from VRAM-table, including mirroring behavior
+//  shared between ImGuiCharacter, ImGuiSpriteViewer
+class VramTable {
+public:
+	VramTable(std::span<const uint8_t> vram_, bool planar_ = false)
+		: vram(vram_), planar(planar_) {}
+
+	void setRegister(unsigned value, unsigned extraLsbBits) {
+		registerMask = (value << extraLsbBits) | ~(~0u << extraLsbBits);
+	}
+	void setIndexSize(unsigned bits) {
+		indexMask = ~0u << bits;
+	}
+
+	[[nodiscard]] uint8_t operator[](unsigned index) const {
+		auto addr = registerMask & (indexMask | index);
+		if (planar) {
+			addr = ((addr << 16) | (addr >> 1)) & 0x1'FFFF;
+		}
+		return vram[addr];
+	}
+private:
+	std::span<const uint8_t> vram;
+	unsigned registerMask = 0;
+	unsigned indexMask = 0;
+	bool planar = false;
+};
 
 enum class imColor : unsigned {
 	TRANSPARENT,

@@ -2,7 +2,9 @@
 
 #include "ImGuiCpp.hh"
 #include "ImGuiManager.hh"
+#include "ImGuiSettings.hh"
 #include "ImGuiUtils.hh"
+#include "Shortcuts.hh"
 
 #include "CommandException.hh"
 #include "Debuggable.hh"
@@ -60,7 +62,7 @@ void DebuggableEditor::loadEnd()
 	updateAddr = true;
 }
 
-DebuggableEditor::Sizes DebuggableEditor::calcSizes(unsigned memSize)
+DebuggableEditor::Sizes DebuggableEditor::calcSizes(unsigned memSize) const
 {
 	Sizes s;
 	const auto& style = ImGui::GetStyle();
@@ -143,7 +145,7 @@ struct ParseAddrResult { // TODO c++23 std::expected might be a good fit here
 	unsigned addr = 0;
 };
 [[nodiscard]] static ParseAddrResult parseAddressExpr(
-	std::string_view str, SymbolManager& symbolManager, Interpreter& interp)
+	std::string_view str, const SymbolManager& symbolManager, Interpreter& interp)
 {
 	ParseAddrResult r;
 	if (str.empty()) return r;
@@ -173,7 +175,7 @@ struct ParseAddrResult { // TODO c++23 std::expected might be a good fit here
 	return (val < 32 || val >= 128) ? '.' : char(val);
 }
 
-[[nodiscard]] std::string DebuggableEditor::formatAddr(const Sizes& s, unsigned addr)
+[[nodiscard]] std::string DebuggableEditor::formatAddr(const Sizes& s, unsigned addr) const
 {
 	return strCat(hex_string<HexCase::upper>(Digits{size_t(s.addrDigitsCount)}, addr));
 }
@@ -192,9 +194,9 @@ bool DebuggableEditor::setAddr(const Sizes& s, Debuggable& debuggable, unsigned 
 	setStrings(s, debuggable);
 	return true;
 }
-void DebuggableEditor::scrollAddr(const Sizes& s, Debuggable& debuggable, unsigned memSize, unsigned addr)
+void DebuggableEditor::scrollAddr(const Sizes& s, Debuggable& debuggable, unsigned memSize, unsigned addr, bool forceScroll)
 {
-	if (setAddr(s, debuggable, memSize, addr)) {
+	if (setAddr(s, debuggable, memSize, addr) || forceScroll) {
 		im::Child("##scrolling", [&]{
 			int row = narrow<int>(currentAddr) / columns;
 			ImGui::SetScrollFromPosY(ImGui::GetCursorStartPos().y + float(row) * ImGui::GetTextLineHeight());
@@ -207,9 +209,7 @@ void DebuggableEditor::drawContents(const Sizes& s, Debuggable& debuggable, unsi
 	const auto& style = ImGui::GetStyle();
 	if (updateAddr) {
 		updateAddr = false;
-		auto addr = currentAddr;
-		++currentAddr; // any change
-		scrollAddr(s, debuggable, memSize, addr);
+		scrollAddr(s, debuggable, memSize, currentAddr, true);
 	} else {
 		// still clip addr (for the unlikely case that 'memSize' got smaller)
 		setAddr(s, debuggable, memSize, currentAddr);
@@ -239,18 +239,22 @@ void DebuggableEditor::drawContents(const Sizes& s, Debuggable& debuggable, unsi
 
 	std::optional<unsigned> nextAddr;
 	// Move cursor but only apply on next frame so scrolling with be synchronized (because currently we can't change the scrolling while the window is being rendered)
-	if (addrMode == CURSOR && ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)) {
-		if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_UpArrow)) &&
-			int(currentAddr) >= columns) {
+	if (addrMode == CURSOR) {
+		const auto& shortcuts = manager.getShortcuts();
+		if ((int(currentAddr) >= columns) &&
+		    shortcuts.checkShortcut({.keyChord = ImGuiKey_UpArrow, .repeat = true})) {
 			nextAddr = currentAddr - columns;
-		} else if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_DownArrow)) &&
-				int(currentAddr) < int(memSize - columns)) {
+		}
+		if ((int(currentAddr) < int(memSize - columns)) &&
+		    shortcuts.checkShortcut({.keyChord = ImGuiKey_DownArrow, .repeat = true})) {
 			nextAddr = currentAddr + columns;
-		} else if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_LeftArrow)) &&
-				int(currentAddr) > 0) {
+		}
+		if ((int(currentAddr) > 0) &&
+		    shortcuts.checkShortcut({.keyChord = ImGuiKey_LeftArrow, .repeat = true})) {
 			nextAddr = currentAddr - 1;
-		} else if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_RightArrow)) &&
-				int(currentAddr) < int(memSize - 1)) {
+		}
+		if ((int(currentAddr) < int(memSize - 1)) &&
+		    shortcuts.checkShortcut({.keyChord = ImGuiKey_RightArrow, .repeat = true})) {
 			nextAddr = currentAddr + 1;
 		}
 	}
@@ -267,11 +271,11 @@ void DebuggableEditor::drawContents(const Sizes& s, Debuggable& debuggable, unsi
 	auto handleInput = [&](unsigned addr, int width, auto formatData, auto parseData, int extraFlags = 0) {
 		// Display text input on current byte
 		if (dataEditingTakeFocus) {
-			ImGui::SetKeyboardFocusHere(0);
+			ImGui::SetKeyboardFocusHere();
 			setStrings(s, debuggable);
 		}
 		struct UserData {
-			// FIXME: We should have a way to retrieve the text edit cursor position more easily in the API, this is rather tedious. This is such a ugly mess we may be better off not using InputText() at all here.
+			// TODO: We should have a way to retrieve the text edit cursor position more easily in the API, this is rather tedious. This is such a ugly mess we may be better off not using InputText() at all here.
 			static int Callback(ImGuiInputTextCallbackData* data) {
 				auto* userData = static_cast<UserData*>(data->UserData);
 				if (!data->HasSelection()) {
@@ -454,6 +458,8 @@ void DebuggableEditor::drawContents(const Sizes& s, Debuggable& debuggable, unsi
 	}
 
 	if (showAddress) {
+		bool forceScroll = ImGui::IsWindowAppearing();
+
 		ImGui::Separator();
 		ImGui::AlignTextToFramePadding();
 		ImGui::TextUnformatted("Address");
@@ -461,6 +467,7 @@ void DebuggableEditor::drawContents(const Sizes& s, Debuggable& debuggable, unsi
 		ImGui::SetNextItemWidth(2.0f * style.FramePadding.x + ImGui::CalcTextSize("Expression").x + ImGui::GetFrameHeight());
 		if (ImGui::Combo("##mode", &addrMode, "Cursor\0Expression\0Link BC\0Link DE\0Link HL\0")) {
 			dataEditingTakeFocus = true;
+			forceScroll = true;
 			if (addrMode >=2) {
 				static constexpr std::array linkExpr = {
 					"[reg bc]", "[reg de]", "[reg hl]"
@@ -475,13 +482,16 @@ void DebuggableEditor::drawContents(const Sizes& s, Debuggable& debuggable, unsi
 		auto r = parseAddressExpr(*as, symbolManager, manager.getInterpreter());
 		im::StyleColor(!r.error.empty(), ImGuiCol_Text, getColor(imColor::ERROR), [&] {
 			if (addrMode == EXPRESSION && r.error.empty()) {
-				scrollAddr(s, debuggable, memSize, r.addr);
+				scrollAddr(s, debuggable, memSize, r.addr, forceScroll);
+			}
+			if (manager.getShortcuts().checkShortcut(Shortcuts::ID::HEX_GOTO_ADDR)) {
+				ImGui::SetKeyboardFocusHere();
 			}
 			ImGui::SetNextItemWidth(15.0f * ImGui::GetFontSize());
 			if (ImGui::InputText("##addr", as, ImGuiInputTextFlags_EnterReturnsTrue)) {
 				auto r2 = parseAddressExpr(addrStr, symbolManager, manager.getInterpreter());
 				if (r2.error.empty()) {
-					scrollAddr(s, debuggable, memSize, r2.addr);
+					scrollAddr(s, debuggable, memSize, r2.addr, forceScroll);
 					dataEditingTakeFocus = true;
 				}
 			}
@@ -737,7 +747,7 @@ void DebuggableEditor::search(const Sizes& s, Debuggable& debuggable, unsigned m
 	}
 	if (found) {
 		searchResult = *found;
-		scrollAddr(s, debuggable, memSize, *found);
+		scrollAddr(s, debuggable, memSize, *found, false);
 		dataEditingTakeFocus = true;
 		addrMode = CURSOR;
 	} else {
@@ -754,9 +764,9 @@ void DebuggableEditor::drawPreviewLine(const Sizes& s, Debuggable& debuggable, u
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth((s.glyphWidth * 10.0f) + style.FramePadding.x * 2.0f + style.ItemInnerSpacing.x);
 	if (ImGui::BeginCombo("##combo_type", DataTypeGetDesc(previewDataType), ImGuiComboFlags_HeightLargest)) {
-		for (int n = 0; n < (ImGuiDataType_COUNT - 2); ++n) {
-			if (ImGui::Selectable(DataTypeGetDesc((ImGuiDataType)n), previewDataType == n)) {
-				previewDataType = ImGuiDataType(n);
+		for (ImGuiDataType n = 0; n < (ImGuiDataType_COUNT - 2); ++n) {
+			if (ImGui::Selectable(DataTypeGetDesc(n), previewDataType == n)) {
+				previewDataType = n;
 			}
 		}
 		ImGui::EndCombo();
@@ -773,8 +783,8 @@ void DebuggableEditor::drawPreviewLine(const Sizes& s, Debuggable& debuggable, u
 	}
 
 	static constexpr bool nativeIsLittle = std::endian::native == std::endian::little;
-	bool previewIsLittle = previewEndianess == LE;
-	if (nativeIsLittle != previewIsLittle) {
+	if (bool previewIsLittle = previewEndianess == LE;
+	    nativeIsLittle != previewIsLittle) {
 		std::reverse(dataBuf.begin(), dataBuf.begin() + elemSize);
 	}
 

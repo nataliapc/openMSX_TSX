@@ -88,10 +88,10 @@ ChakkariCopy::ChakkariCopy(const DeviceConfig& config)
 	, rom(getName() + " ROM", "rom", config)
 	, pauseButtonPressedSetting(getCommandController(),
 		getName() + " PAUSE button pressed",
-		"controls the PAUSE button state", false, Setting::DONT_SAVE)
+		"controls the PAUSE button state", false, Setting::Save::NO)
 	, copyButtonPressedSetting(getCommandController(),
 		getName() + " COPY button pressed",
-		"controls the COPY button state", false, Setting::DONT_SAVE)
+		"controls the COPY button state", false, Setting::Save::NO)
 	, modeSetting(getCommandController(), getName() + " mode",
 		"Sets mode of the cartridge: in COPY mode you can hardcopy MSX1 screens, "
 		"in RAM mode you just have a 16kB RAM expansion", ChakkariCopy::COPY,
@@ -185,22 +185,22 @@ void ChakkariCopy::writeMem(word address, byte value, EmuTime::param /*time*/)
 	*getWriteCacheLine(address) = value;
 }
 
-byte* ChakkariCopy::getWriteCacheLine(word address) const
+byte* ChakkariCopy::getWriteCacheLine(word address)
 {
 	if (modeSetting.getEnum() == COPY) {
 		// page 0
 		if ((address < 0x4000) && ((reg & 0x04) == 0)) {
-			return const_cast<byte*>(&biosRam[address & 0x3FFF]);
+			return &biosRam[address & 0x3FFF];
 		}
 		// page 1
 		// the work RAM is mirrored in 0x6000-0x8000, see above
 		if ((0x6000 <= address) && (address < 0x8000)) {
-			return const_cast<byte*>(&workRam[address & 0x07FF]);
+			return &workRam[address & 0x07FF];
 		}
 	} else {
 		// page 1 RAM mode
 		if ((0x4000 <= address) && (address < 0x8000)) {
-			return const_cast<byte*>(&biosRam[address & 0x3FFF]);
+			return &biosRam[address & 0x3FFF];
 		}
 	}
 	return unmappedWrite.data();

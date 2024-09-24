@@ -3,6 +3,7 @@
 
 #include "EmuTime.hh"
 #include "SRAM.hh"
+
 #include <climits>
 #include <string>
 
@@ -39,7 +40,7 @@ public:
 	}
 
 private:
-	[[nodiscard]] uint8_t read(unsigned addr);
+	[[nodiscard]] uint8_t read(unsigned addr) const;
 	void write(unsigned addr, uint8_t value, EmuTime::param time);
 	void writeAll(uint8_t value, EmuTime::param time);
 	void erase(unsigned addr, EmuTime::param time);
@@ -50,7 +51,7 @@ private:
 	void execute_command(EmuTime::param time);
 
 public: // for serialize
-	enum State {
+	enum class State {
 		IN_RESET,
 		WAIT_FOR_START_BIT,
 		WAIT_FOR_COMMAND,
@@ -63,7 +64,7 @@ private:
 	SRAM sram;
 	EmuTime completionTime = EmuTime::zero();
 	EmuTime csTime = EmuTime::zero();
-	State state = IN_RESET;
+	State state = State::IN_RESET;
 	uint16_t shiftRegister = 0;
 	uint8_t bits = 0;
 	uint8_t address = 0;

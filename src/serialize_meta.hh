@@ -66,7 +66,7 @@ template<typename T> struct PolymorphicBaseClass;
 template<typename Base> struct MapConstrArgsEmpty
 {
 	using TUPLEIn = typename PolymorphicConstructorArgs<Base>::type;
-	std::tuple<> operator()(const TUPLEIn& /*t*/)
+	std::tuple<> operator()(const TUPLEIn& /*t*/) const
 	{
 		return {};
 	}
@@ -116,7 +116,9 @@ class PolymorphicSaverRegistry
 {
 public:
 	PolymorphicSaverRegistry(const PolymorphicSaverRegistry&) = delete;
+	PolymorphicSaverRegistry(PolymorphicSaverRegistry&&) = delete;
 	PolymorphicSaverRegistry& operator=(const PolymorphicSaverRegistry&) = delete;
+	PolymorphicSaverRegistry& operator=(PolymorphicSaverRegistry&&) = delete;
 
 	static PolymorphicSaverRegistry& instance();
 
@@ -157,6 +159,9 @@ private:
 	                 const std::type_info& typeInfo);
 
 	struct Entry {
+		Entry(std::type_index i, SaveFunction s)
+			: index(i), saver(std::move(s)) {} // clang-15 workaround
+
 		std::type_index index;
 		SaveFunction saver;
 	};
@@ -169,7 +174,9 @@ class PolymorphicLoaderRegistry
 {
 public:
 	PolymorphicLoaderRegistry(const PolymorphicLoaderRegistry&) = delete;
+	PolymorphicLoaderRegistry(PolymorphicLoaderRegistry&&) = delete;
 	PolymorphicLoaderRegistry& operator=(const PolymorphicLoaderRegistry&) = delete;
+	PolymorphicLoaderRegistry& operator=(PolymorphicLoaderRegistry&&) = delete;
 
 	static PolymorphicLoaderRegistry& instance();
 
@@ -208,7 +215,9 @@ class PolymorphicInitializerRegistry
 {
 public:
 	PolymorphicInitializerRegistry(const PolymorphicInitializerRegistry&) = delete;
+	PolymorphicInitializerRegistry(PolymorphicInitializerRegistry&&) = delete;
 	PolymorphicInitializerRegistry& operator=(const PolymorphicInitializerRegistry&) = delete;
+	PolymorphicInitializerRegistry& operator=(PolymorphicInitializerRegistry&&) = delete;
 
 	static PolymorphicInitializerRegistry& instance();
 

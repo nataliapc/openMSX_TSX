@@ -15,7 +15,7 @@ public:
 	static void registerAll(PluggingController& controller);
 
 	explicit MidiOutWindows(unsigned num);
-	~MidiOutWindows();
+	~MidiOutWindows() override;
 
 	// Pluggable
 	void plugHelper(Connector& connector, EmuTime::param time) override;
@@ -30,7 +30,7 @@ public:
 	void serialize(Archive& ar, unsigned version);
 
 private:
-	unsigned devIdx;
+	unsigned devIdx = unsigned(-1);
 	std::string name;
 	std::string desc;
 };

@@ -91,7 +91,7 @@ const byte* RomHolyQuran2::getReadCacheLine(word address) const
 	}
 }
 
-byte* RomHolyQuran2::getWriteCacheLine(word address) const
+byte* RomHolyQuran2::getWriteCacheLine(word address)
 {
 	if ((0x5000 <= address) && (address < 0x6000)) {
 		return nullptr;
@@ -125,7 +125,7 @@ INSTANTIATE_SERIALIZE_METHODS(RomHolyQuran2);
 REGISTER_MSXDEVICE(RomHolyQuran2, "RomHolyQuran2");
 
 
-RomHolyQuran2::Blocks::Blocks(RomHolyQuran2& device_)
+RomHolyQuran2::Blocks::Blocks(const RomHolyQuran2& device_)
 	: RomBlockDebuggableBase(device_)
 {
 }

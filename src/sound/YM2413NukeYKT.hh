@@ -59,7 +59,10 @@
 #define YM2413NUKEYKT_HH
 
 #include "YM2413Core.hh"
+
 #include "inline.hh"
+#include "stl.hh"
+
 #include <array>
 #include <span>
 
@@ -85,6 +88,15 @@ public:
 		decay,
 		sustain,
 		release,
+	};
+	enum class RmNum : uint8_t {
+		bd0, // cycles == 11
+		hh,  //           12
+		tom, //           13
+		bd1, //           14
+		sd,  //           15
+		tc,  //           16
+		NUM
 	};
 
 private:
@@ -193,7 +205,7 @@ private:
 
 private:
 	static const std::array<Patch, 15> m_patches;
-	static const std::array<Patch,  6> r_patches;
+	static const array_with_enum_index<RmNum, Patch> r_patches;
 
 	// IO
 	std::array<Write, 18> writes;

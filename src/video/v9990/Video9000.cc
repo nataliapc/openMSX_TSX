@@ -74,14 +74,12 @@ void Video9000::recalculate()
 	bool showV99x8   = ((value & 0x10) == 0x10);
 	bool showV9990   = ((value & 0x18) != 0x10);
 	assert(showV99x8 || showV9990);
+	using enum VideoLayer::Video9000Active;
 	if (v99x8Layer) v99x8Layer->setVideo9000Active(
 		video9000id,
-		showV99x8 ? (showV9990 ? VideoLayer::ACTIVE_BACK
-		                       : VideoLayer::ACTIVE_FRONT)
-		          : VideoLayer::INACTIVE);
+		showV99x8 ? (showV9990 ? BACK : FRONT) : NO);
 	if (v9990Layer) v9990Layer->setVideo9000Active(
-		video9000id,
-		showV9990 ? VideoLayer::ACTIVE_FRONT : VideoLayer::INACTIVE);
+		video9000id, showV9990 ? FRONT : NO);
 	activeLayer = showV9990 ? v9990Layer : v99x8Layer;
 	// activeLayer==nullptr is possible for renderer=none
 	recalculateVideoSource();
@@ -127,14 +125,14 @@ void Video9000::takeRawScreenShot(unsigned height, const std::string& filename)
 	layer->takeRawScreenShot(height, filename);
 }
 
-int Video9000::signalEvent(const Event& event)
+bool Video9000::signalEvent(const Event& event)
 {
 	int video9000id = getVideoSource();
 
 	assert(getType(event) == EventType::FINISH_FRAME);
 	const auto& ffe = get_event<FinishFrameEvent>(event);
-	if (ffe.isSkipped()) return 0;
-	if (videoSourceSetting.getSource() != video9000id) return 0;
+	if (ffe.isSkipped()) return false;
+	if (videoSourceSetting.getSource() != video9000id) return false;
 
 	bool superimpose = ((value & 0x18) == 0x18);
 	if (superimpose && v99x8Layer && v9990Layer &&
@@ -149,7 +147,7 @@ int Video9000::signalEvent(const Event& event)
 		getReactor().getEventDistributor().distributeEvent(
 			FinishFrameEvent(video9000id, video9000id, false));
 	}
-	return 0;
+	return false;
 }
 
 void Video9000::update(const Setting& setting) noexcept

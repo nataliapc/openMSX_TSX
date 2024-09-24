@@ -1,13 +1,16 @@
 #include "OSDGUI.hh"
-#include "OSDWidget.hh"
+
+#include "CommandException.hh"
+#include "Display.hh"
 #include "OSDRectangle.hh"
 #include "OSDText.hh"
-#include "Display.hh"
-#include "CommandException.hh"
+#include "OSDWidget.hh"
 #include "TclObject.hh"
+
 #include "StringOp.hh"
 #include "one_of.hh"
 #include "outer.hh"
+
 #include <array>
 #include <memory>
 #include <utility>
@@ -70,7 +73,7 @@ void OSDGUI::OSDCommand::create(std::span<const TclObject> tokens, TclObject& re
 	}
 
 	auto widget = create(type, fullname);
-	auto* widget2 = widget.get();
+	const auto* widget2 = widget.get();
 	configure(*widget, tokens.subspan(4));
 	top.addName(*widget);
 	parent->addWidget(std::move(widget));
@@ -152,7 +155,7 @@ void OSDGUI::OSDCommand::exists(std::span<const TclObject> tokens, TclObject& re
 {
 	checkNumArgs(tokens, 3, "name");
 	auto& gui = OUTER(OSDGUI, osdCommand);
-	auto* widget = gui.getTopWidget().findByName(tokens[2].getString());
+	const auto* widget = gui.getTopWidget().findByName(tokens[2].getString());
 	result = widget != nullptr;
 }
 
@@ -162,12 +165,12 @@ void OSDGUI::OSDCommand::configure(std::span<const TclObject> tokens, TclObject&
 	auto& widget = getWidget(tokens[2].getString());
 	configure(widget, tokens.subspan(3));
 	if (widget.isVisible()) {
-		auto& gui = OUTER(OSDGUI, osdCommand);
+		const auto& gui = OUTER(OSDGUI, osdCommand);
 		gui.refresh();
 	}
 }
 
-void OSDGUI::OSDCommand::configure(OSDWidget& widget, std::span<const TclObject> tokens)
+void OSDGUI::OSDCommand::configure(OSDWidget& widget, std::span<const TclObject> tokens) const
 {
 	if (tokens.size() & 1) {
 		// odd number of extra arguments

@@ -5,9 +5,11 @@
 #include "EmuTime.hh"
 #include "InfoTopic.hh"
 #include "Mixer.hh"
-#include "Observer.hh"
 #include "Schedulable.hh"
+
+#include "Observer.hh"
 #include "dynarray.hh"
+
 #include <memory>
 #include <span>
 #include <vector>
@@ -52,11 +54,12 @@ public:
 	};
 
 public:
-	MSXMixer(const MSXMixer&) = delete;
-	MSXMixer& operator=(const MSXMixer&) = delete;
-
 	MSXMixer(Mixer& mixer, MSXMotherBoard& motherBoard,
 	         GlobalSettings& globalSettings);
+	MSXMixer(const MSXMixer&) = delete;
+	MSXMixer(MSXMixer&&) = delete;
+	MSXMixer& operator=(const MSXMixer&) = delete;
+	MSXMixer& operator=(MSXMixer&&) = delete;
 	~MSXMixer();
 
 	/**
@@ -140,7 +143,7 @@ public:
 	void reInit();
 
 private:
-	void updateVolumeParams(SoundDeviceInfo& info);
+	void updateVolumeParams(SoundDeviceInfo& info) const;
 	void updateMasterVolume();
 	void reschedule();
 	void reschedule2();
@@ -160,9 +163,9 @@ private:
 	void changeMuteSetting(const Setting& setting);
 
 private:
-	unsigned fragmentSize;
-	unsigned hostSampleRate; // requested freq by sound driver,
-	                         // not compensated for speed
+	unsigned fragmentSize = 0;
+	unsigned hostSampleRate = 44100; // requested freq by sound driver,
+	                                 // not compensated for speed
 
 	std::vector<SoundDeviceInfo> infos;
 
@@ -187,7 +190,7 @@ private:
 	AviRecorder* recorder = nullptr;
 	unsigned synchronousCounter = 0;
 
-	unsigned muteCount;
+	unsigned muteCount = 1; // start muted
 	float tl0, tr0; // internal DC-filter state
 };
 

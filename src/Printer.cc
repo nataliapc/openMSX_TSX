@@ -21,6 +21,10 @@ namespace openmsx {
 class Paper
 {
 public:
+	static constexpr std::string_view PRINT_DIR = "prints";
+	static constexpr std::string_view PRINT_EXTENSION = ".png";
+
+public:
 	Paper(unsigned x, unsigned y, double dotSizeX, double dotSizeY);
 
 	[[nodiscard]] std::string save() const;
@@ -71,36 +75,6 @@ void PrinterCore::unplugHelper(EmuTime::param /*time*/)
 {
 	forceFormFeed();
 }
-
-
-/*
-// class RawPrinter
-
-RawPrinter::RawPrinter()
-{
-	Properties* properties = propGetGlobalProperties();
-	hFile = CreateFile(properties->ports.Lpt.portName, GENERIC_WRITE,
-	                   0, nullptr, OPEN_EXISTING, FILE_FLAG_WRITE_THROUGH, nullptr);
-	if (hFile == INVALID_HANDLE_VALUE) {
-		throw MSXException();
-	}
-}
-
-void RawPrinter::~RawPrinter()
-{
-	CloseHandle(hFile);
-}
-
-void RawPrinter::write(uint8_t value)
-{
-	unsigned dwWritten;
-	WriteFile(hFile, &value, 1, &dwWritten, nullptr);
-}
-
-void RawPrinter::forceFormFeed()
-{
-}
-*/
 
 
 // class ImagePrinter
@@ -1413,7 +1387,7 @@ void ImagePrinterEpson::processEscSequence()
 			break;
 		case 'Q': { // Set Right Margin
 			auto width = parseNumber(1, 2);
-			if (width > 78) width = 78; // FIXME Font dependent !!
+			if (width > 78) width = 78; // TODO Font dependent !!
 			rightBorder = 6 * width;
 			break;
 		}
@@ -1615,8 +1589,8 @@ Paper::Paper(unsigned x, unsigned y, double dotSizeX, double dotSizeY)
 std::string Paper::save() const
 {
 	auto filename = FileOperations::getNextNumberedFileName(
-		"prints", "page", ".png");
-	VLA(const void*, rowPointers, sizeY);
+		PRINT_DIR, "page", PRINT_EXTENSION);
+	VLA(const uint8_t*, rowPointers, sizeY);
 	for (size_t y : xrange(sizeY)) {
 		rowPointers[y] = &buf[sizeX * y];
 	}

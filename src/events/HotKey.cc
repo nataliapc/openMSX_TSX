@@ -47,8 +47,8 @@ HotKey::HotKey(RTScheduler& rtScheduler,
 	, deactivateCmd   (commandController_)
 	, commandController(commandController_)
 	, eventDistributor(eventDistributor_)
-	, listenerHigh(*this, EventDistributor::HOTKEY_HIGH)
-	, listenerLow (*this, EventDistributor::HOTKEY_LOW)
+	, listenerHigh(*this, EventDistributor::Priority::HOTKEY_HIGH)
+	, listenerLow (*this, EventDistributor::Priority::HOTKEY_LOW)
 {
 	initDefaultBindings();
 }
@@ -57,21 +57,11 @@ HotKey::Listener::Listener(HotKey& hotKey_, EventDistributor::Priority priority_
 	: hotKey(hotKey_), priority(priority_)
 {
 	auto& distributor = hotKey.eventDistributor;
-	for (auto type : {
-			EventType::KEY_DOWN,
-			EventType::KEY_UP,
-			EventType::MOUSE_MOTION,
-			EventType::MOUSE_BUTTON_DOWN,
-			EventType::MOUSE_BUTTON_UP,
-			EventType::MOUSE_WHEEL,
-			EventType::JOY_BUTTON_DOWN,
-			EventType::JOY_BUTTON_UP,
-			EventType::JOY_AXIS_MOTION,
-			EventType::JOY_HAT,
-			EventType::WINDOW,
-			EventType::FILE_DROP,
-			EventType::OSD_CONTROL_RELEASE,
-			EventType::OSD_CONTROL_PRESS}) {
+	using enum EventType;
+	for (auto type : {KEY_DOWN, KEY_UP,
+	                  MOUSE_MOTION, MOUSE_BUTTON_DOWN, MOUSE_BUTTON_UP, MOUSE_WHEEL,
+	                  JOY_BUTTON_DOWN, JOY_BUTTON_UP, JOY_AXIS_MOTION, JOY_HAT,
+	                  WINDOW, FILE_DROP, OSD_CONTROL_RELEASE, OSD_CONTROL_PRESS}) {
 		distributor.registerEventListener(type, *this, priority);
 	}
 }
@@ -79,21 +69,11 @@ HotKey::Listener::Listener(HotKey& hotKey_, EventDistributor::Priority priority_
 HotKey::Listener::~Listener()
 {
 	auto& distributor = hotKey.eventDistributor;
-	for (auto type : {
-			EventType::OSD_CONTROL_PRESS,
-			EventType::OSD_CONTROL_RELEASE,
-			EventType::FILE_DROP,
-			EventType::WINDOW,
-			EventType::JOY_BUTTON_UP,
-			EventType::JOY_BUTTON_DOWN,
-			EventType::JOY_AXIS_MOTION,
-			EventType::JOY_HAT,
-			EventType::MOUSE_WHEEL,
-			EventType::MOUSE_BUTTON_UP,
-			EventType::MOUSE_BUTTON_DOWN,
-			EventType::MOUSE_MOTION,
-			EventType::KEY_UP,
-			EventType::KEY_DOWN}) {
+	using enum EventType;
+	for (auto type : {OSD_CONTROL_PRESS, OSD_CONTROL_RELEASE, FILE_DROP, WINDOW,
+	                  JOY_BUTTON_UP, JOY_BUTTON_DOWN, JOY_AXIS_MOTION, JOY_HAT,
+	                  MOUSE_WHEEL, MOUSE_BUTTON_UP, MOUSE_BUTTON_DOWN, MOUSE_MOTION,
+	                  KEY_UP, KEY_DOWN}) {
 		distributor.unregisterEventListener(type, *this);
 	}
 }
@@ -144,13 +124,11 @@ void HotKey::initDefaultBindings()
 static Event createEvent(const TclObject& obj, Interpreter& interp)
 {
 	auto event = InputEventFactory::createInputEvent(obj, interp);
-	if (getType(event) != one_of(EventType::KEY_UP, EventType::KEY_DOWN,
-	                             EventType::MOUSE_BUTTON_UP, EventType::MOUSE_BUTTON_DOWN,
-				     EventType::GROUP,
-				     EventType::JOY_BUTTON_UP, EventType::JOY_BUTTON_DOWN,
-				     EventType::JOY_AXIS_MOTION, EventType::JOY_HAT,
-				     EventType::OSD_CONTROL_PRESS, EventType::OSD_CONTROL_RELEASE,
-				     EventType::WINDOW)) {
+	using enum EventType;
+	if (getType(event) != one_of(KEY_UP, KEY_DOWN,
+	                             MOUSE_BUTTON_UP, MOUSE_BUTTON_DOWN, GROUP,
+	                             JOY_BUTTON_UP, JOY_BUTTON_DOWN, JOY_AXIS_MOTION, JOY_HAT,
+	                             OSD_CONTROL_PRESS, OSD_CONTROL_RELEASE, WINDOW)) {
 		throw CommandException("Unsupported event type");
 	}
 	return event;
@@ -286,7 +264,7 @@ void HotKey::activateLayer(std::string layer, bool blocking)
 	// (it's not an error if the same layer was already active, in such
 	// as case it will now appear twice in the list of active layer,
 	// and it must also be deactivated twice).
-	activeLayers.push_back({std::move(layer), blocking});
+	activeLayers.emplace_back(std::move(layer), blocking);
 }
 
 void HotKey::deactivateLayer(std::string_view layer)
@@ -311,17 +289,17 @@ static HotKey::BindMap::const_iterator findMatch(
 void HotKey::executeRT()
 {
 	if (lastEvent) {
-		executeEvent(*lastEvent, EventDistributor::HOTKEY_HIGH);
-		executeEvent(*lastEvent, EventDistributor::HOTKEY_LOW);
+		executeEvent(*lastEvent, EventDistributor::Priority::HOTKEY_HIGH);
+		executeEvent(*lastEvent, EventDistributor::Priority::HOTKEY_LOW);
 	}
 }
 
-int HotKey::Listener::signalEvent(const Event& event)
+bool HotKey::Listener::signalEvent(const Event& event)
 {
 	return hotKey.signalEvent(event, priority);
 }
 
-int HotKey::signalEvent(const Event& event, EventDistributor::Priority priority)
+bool HotKey::signalEvent(const Event& event, EventDistributor::Priority priority)
 {
 	if (lastEvent && *lastEvent != event) {
 		// If the newly received event is different from the repeating
@@ -337,20 +315,19 @@ int HotKey::signalEvent(const Event& event, EventDistributor::Priority priority)
 	return executeEvent(event, priority);
 }
 
-int HotKey::executeEvent(const Event& event, EventDistributor::Priority priority)
+bool HotKey::executeEvent(const Event& event, EventDistributor::Priority priority)
 {
-	bool msx = priority == EventDistributor::HOTKEY_LOW;
-	auto block = EventDistributor::Priority(priority + 1); // lower priority than this listener
+	bool msx = priority == EventDistributor::Priority::HOTKEY_LOW;
 
 	// First search in active layers (from back to front)
 	bool blocking = false;
-	for (auto& info : view::reverse(activeLayers)) {
+	for (const auto& info : view::reverse(activeLayers)) {
 		auto& cmap = layerMap[info.layer]; // ok, if this entry doesn't exist yet
 		if (auto it = findMatch(cmap, event, msx); it != end(cmap)) {
 			executeBinding(event, *it);
 			// Deny event to lower priority listeners, also don't pass event
 			// to other layers (including the default layer).
-			return block;
+			return true;
 		}
 		blocking = info.blocking;
 		if (blocking) break; // don't try lower layers
@@ -359,12 +336,12 @@ int HotKey::executeEvent(const Event& event, EventDistributor::Priority priority
 	// If the event was not yet handled, try the default layer.
 	if (auto it = findMatch(cmdMap, event, msx); it != end(cmdMap)) {
 		executeBinding(event, *it);
-		return block; // deny event to lower priority listeners
+		return true; // deny event to lower priority listeners
 	}
 
 	// Event is not handled, only let it pass to the MSX if there was no
 	// blocking layer active.
-	return blocking ? block : 0;
+	return blocking;
 }
 
 void HotKey::executeBinding(const Event& event, const HotKeyInfo& info)
@@ -488,7 +465,7 @@ void HotKey::BindCmd::execute(std::span<const TclObject> tokens, TclObject& resu
 	case 0: {
 		// show all bounded keys (for this layer)
 		string r;
-		for (auto& p : cMap) {
+		for (const auto& p : cMap) {
 			r += formatBinding(p);
 		}
 		result = r;
@@ -615,7 +592,7 @@ void HotKey::ActivateCmd::execute(std::span<const TclObject> tokens, TclObject& 
 	switch (args.size()) {
 	case 0: {
 		string r;
-		for (auto& layerInfo : view::reverse(hotKey.activeLayers)) {
+		for (const auto& layerInfo : view::reverse(hotKey.activeLayers)) {
 			r += layerInfo.layer;
 			if (layerInfo.blocking) {
 				r += " -blocking";

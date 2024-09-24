@@ -32,16 +32,27 @@ public:
 	void save(ImGuiTextBuffer& buf) override;
 	void loadStart() override;
 	void loadLine(std::string_view name, zstring_view value) override;
+	void loadEnd() override;
 	void showMenu(MSXMotherBoard* motherBoard) override;
 	void paint(MSXMotherBoard* motherBoard) override;
+	void setGotoTarget(uint16_t target);
 
 private:
-	void drawControl(MSXCPUInterface& cpuInterface);
-	void drawDisassembly(CPURegs& regs, MSXCPUInterface& cpuInterface, Debugger& debugger, EmuTime::param time);
+	void drawControl(MSXCPUInterface& cpuInterface, MSXMotherBoard& motherBoard);
+	void drawDisassembly(CPURegs& regs, MSXCPUInterface& cpuInterface, Debugger& debugger,
+	                     MSXMotherBoard& motherBoard, EmuTime::param time);
 	void drawSlots(MSXCPUInterface& cpuInterface, Debugger& debugger);
-	void drawStack(CPURegs& regs, MSXCPUInterface& cpuInterface, EmuTime::param time);
+	void drawStack(const CPURegs& regs, const MSXCPUInterface& cpuInterface, EmuTime::param time);
 	void drawRegisters(CPURegs& regs);
 	void drawFlags(CPURegs& regs);
+
+	void checkShortcuts(MSXCPUInterface& cpuInterface, MSXMotherBoard& motherBoard);
+	void actionBreakContinue(MSXCPUInterface& cpuInterface);
+	void actionStepIn(MSXCPUInterface& cpuInterface);
+	void actionStepOver();
+	void actionStepOut();
+	void actionStepBack();
+	void actionToggleBp(MSXMotherBoard& motherBoard);
 
 private:
 	SymbolManager& symbolManager;
@@ -52,6 +63,7 @@ private:
 	std::string gotoAddr;
 	std::string runToAddr;
 	std::optional<unsigned> gotoTarget;
+	std::optional<float> setDisassemblyScrollY;
 	bool followPC = false;
 
 	bool showControl = false;
@@ -64,6 +76,7 @@ private:
 	int flagsLayout = 1;
 
 	bool syncDisassemblyWithPC = false;
+	float disassemblyScrollY = 0.0f;
 
 	static constexpr auto persistentElements = std::tuple{
 		PersistentElement{"showControl",     &ImGuiDebugger::showControl},
@@ -74,6 +87,7 @@ private:
 		PersistentElement{"showStack",       &ImGuiDebugger::showStack},
 		PersistentElement{"showFlags",       &ImGuiDebugger::showFlags},
 		PersistentElement{"showXYFlags",     &ImGuiDebugger::showXYFlags},
+		PersistentElement{"disassemblyY",    &ImGuiDebugger::disassemblyScrollY},
 		PersistentElementMax{"flagsLayout",  &ImGuiDebugger::flagsLayout, 2}
 		// manually handle "showDebuggable.xxx"
 	};

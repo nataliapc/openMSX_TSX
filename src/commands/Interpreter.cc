@@ -73,7 +73,7 @@ Tcl_ChannelType Interpreter::channelType = {
 	nullptr,		 // Tcl_DriverTruncateProc
 };
 
-void Interpreter::init(const char* programName)
+void Interpreter::init(const char* programName) const
 {
 	Tcl_FindExecutable(programName);
 }
@@ -182,8 +182,8 @@ int Interpreter::commandProc(ClientData clientData, Tcl_Interp* interp,
 		TclObject result;
 		try {
 			if (!command.isAllowedInEmptyMachine()) {
-				if (auto* controller =
-					dynamic_cast<MSXCommandController*>(
+				if (const auto* controller =
+					dynamic_cast<const MSXCommandController*>(
 						&command.getCommandController())) {
 					if (!controller->getMSXMotherBoard().getMachineConfig()) {
 						throw CommandException(
@@ -219,8 +219,7 @@ bool Interpreter::isComplete(zstring_view command) const
 
 TclObject Interpreter::execute(zstring_view command)
 {
-	int success = Tcl_Eval(interp, command.c_str());
-	if (success != TCL_OK) {
+	if (Tcl_Eval(interp, command.c_str()) != TCL_OK) {
 		throw CommandException(Tcl_GetStringResult(interp));
 	}
 	return TclObject(Tcl_GetObjResult(interp));
@@ -228,8 +227,7 @@ TclObject Interpreter::execute(zstring_view command)
 
 TclObject Interpreter::executeFile(zstring_view filename)
 {
-	int success = Tcl_EvalFile(interp, filename.c_str());
-	if (success != TCL_OK) {
+	if (Tcl_EvalFile(interp, filename.c_str()) != TCL_OK) {
 		throw CommandException(Tcl_GetStringResult(interp));
 	}
 	return TclObject(Tcl_GetObjResult(interp));
@@ -273,7 +271,7 @@ void Interpreter::unsetVariable(const char* name)
 	Tcl_UnsetVar(interp, name, TCL_GLOBAL_ONLY);
 }
 
-static TclObject getSafeValue(BaseSetting& setting)
+static TclObject getSafeValue(const BaseSetting& setting)
 {
 	// TODO use c++23 std::optional<T>::or_else()
 	if (auto val = setting.getOptionalValue()) {
@@ -460,7 +458,7 @@ void Interpreter::deleteNamespace(const std::string& name)
 	execute(tmpStrCat("namespace delete ", name));
 }
 
-void Interpreter::poll()
+void Interpreter::poll() const
 {
 	//Tcl_ServiceAll();
 	Tcl_DoOneEvent(TCL_DONT_WAIT);

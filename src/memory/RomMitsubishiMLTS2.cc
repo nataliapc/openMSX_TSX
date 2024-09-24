@@ -31,10 +31,7 @@ void RomMitsubishiMLTS2::writeMem(word address, byte value, EmuTime::param /*tim
 	} else if (address == 0x7f03) {
 		// TODO
 	} else if (address == 0x7FC0) {
-		byte bank = ((value & 0x10) >> 2) | // transform bit-pattern
-		            ((value & 0x04) >> 1) | //        ...a.b.c
-		            ((value & 0x01) >> 0);  //  into  00000abc
-		std::cerr << "Setting MLTS2 mapper page 1 to bank " << int(bank) << '\n';
+		byte bank = value & 0b111;
 		setRom(2, bank);
 	} else if ((0x6000 <= address) && (address < 0x8000)) {
 		ram[address & 0x1FFF] = value;
@@ -75,11 +72,11 @@ const byte* RomMitsubishiMLTS2::getReadCacheLine(word address) const
 	return Rom8kBBlocks::getReadCacheLine(address);
 }
 
-byte* RomMitsubishiMLTS2::getWriteCacheLine(word address) const
+byte* RomMitsubishiMLTS2::getWriteCacheLine(word address)
 {
 	if (address == (0x7FC0 & CacheLine::HIGH)) return nullptr;
 	if ((0x6000 <= address) && (address < 0x8000)) {
-		return const_cast<byte*>(&ram[address & 0x1FFF]);
+		return &ram[address & 0x1FFF];
 	}
 	return unmappedWrite.data();
 }

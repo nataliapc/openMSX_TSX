@@ -281,7 +281,7 @@ void MSXMidi::Interface::setRTS(bool status, EmuTime::param /*time*/)
 
 bool MSXMidi::Interface::getDSR(EmuTime::param /*time*/)
 {
-	auto& midi = OUTER(MSXMidi, interface);
+	const auto& midi = OUTER(MSXMidi, interface);
 	return midi.timerIRQ.getState();
 }
 
@@ -302,7 +302,7 @@ void MSXMidi::Interface::setStopBits(StopBits bits)
 	midi.outConnector.setStopBits(bits);
 }
 
-void MSXMidi::Interface::setParityBit(bool enable, ParityBit parity)
+void MSXMidi::Interface::setParityBit(bool enable, Parity parity)
 {
 	auto& midi = OUTER(MSXMidi, interface);
 	midi.outConnector.setParityBit(enable, parity);
@@ -316,7 +316,7 @@ void MSXMidi::Interface::recvByte(byte value, EmuTime::param time)
 
 void MSXMidi::Interface::signal(EmuTime::param time)
 {
-	auto& midi = OUTER(MSXMidi, interface);
+	const auto& midi = OUTER(MSXMidi, interface);
 	midi.getPluggedMidiInDev().signal(time);
 }
 
@@ -384,7 +384,7 @@ void MSXMidi::setStopBits(StopBits bits)
 	i8251.setStopBits(bits);
 }
 
-void MSXMidi::setParityBit(bool enable, ParityBit parity)
+void MSXMidi::setParityBit(bool enable, Parity parity)
 {
 	i8251.setParityBit(enable, parity);
 }

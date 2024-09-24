@@ -1,31 +1,34 @@
 #include "ReverseManager.hh"
-#include "Event.hh"
-#include "MSXMotherBoard.hh"
-#include "EventDistributor.hh"
-#include "StateChangeDistributor.hh"
-#include "Keyboard.hh"
+
+#include "CommandException.hh"
 #include "Debugger.hh"
+#include "Display.hh"
+#include "Event.hh"
 #include "EventDelay.hh"
-#include "MSXMixer.hh"
+#include "EventDistributor.hh"
+#include "FileContext.hh"
+#include "FileOperations.hh"
+#include "Keyboard.hh"
+#include "MSXCliComm.hh"
 #include "MSXCommandController.hh"
-#include "XMLException.hh"
+#include "MSXMixer.hh"
+#include "MSXMotherBoard.hh"
+#include "Reactor.hh"
+#include "StateChange.hh"
+#include "StateChangeDistributor.hh"
 #include "TclArgParser.hh"
 #include "TclObject.hh"
-#include "FileOperations.hh"
-#include "FileContext.hh"
-#include "StateChange.hh"
 #include "Timer.hh"
-#include "MSXCliComm.hh"
-#include "Display.hh"
-#include "Reactor.hh"
-#include "CommandException.hh"
+#include "XMLException.hh"
+#include "serialize.hh"
+#include "serialize_meta.hh"
+
 #include "MemBuffer.hh"
 #include "narrow.hh"
 #include "one_of.hh"
 #include "ranges.hh"
-#include "serialize.hh"
-#include "serialize_meta.hh"
 #include "view.hh"
+
 #include <array>
 #include <cassert>
 #include <cmath>
@@ -55,13 +58,13 @@ static constexpr auto MAX_DIST_1_BEFORE_LAST_SNAPSHOT = EmuDuration(30.0);
 struct Replay
 {
 	explicit Replay(Reactor& reactor_)
-		: reactor(reactor_), currentTime(EmuTime::dummy()) {}
+		: reactor(reactor_) {}
 
 	Reactor& reactor;
 
 	ReverseManager::Events* events;
 	std::vector<Reactor::Board> motherBoards;
-	EmuTime currentTime;
+	EmuTime currentTime = EmuTime::dummy();
 	// this is the amount of times the reverse goto command was used, which
 	// is interesting for the TAS community (see tasvideos.org). It's an
 	// indication of the effort it took to create the replay. Note that
@@ -218,12 +221,6 @@ double ReverseManager::getCurrent() const
 {
 	EmuTime current(isCollecting() ? getCurrentTime() : EmuTime::zero());
 	return (current - EmuTime::zero()).toDouble();
-}
-std::vector<double> ReverseManager::getSnapshotTimes() const
-{
-	return to_vector(view::transform(history.chunks, [](auto& p) {
-		return (p.second.time - EmuTime::zero()).toDouble();
-	}));
 }
 
 void ReverseManager::status(TclObject& result) const
@@ -462,8 +459,8 @@ void ReverseManager::goTo(
 					));
 			auto nextTarget = std::min(nextSnapshotTarget, currentTimeNewBoard + EmuDuration::sec(1));
 			newBoard->fastForward(nextTarget, true);
-			auto now = Timer::getTime();
-			if (((now - lastProgress) > 1000000) || ((currentTimeNewBoard >= preTarget) && everShowedProgress)) {
+			if (auto now = Timer::getTime();
+			    ((now - lastProgress) > 1000000) || ((currentTimeNewBoard >= preTarget) && everShowedProgress)) {
 				everShowedProgress = true;
 				lastProgress = now;
 				auto fraction = (currentTimeNewBoard - startMSXTime).toDouble() / (preTarget - startMSXTime).toDouble();
@@ -525,8 +522,10 @@ void ReverseManager::transferState(MSXMotherBoard& newBoard)
 
 	// transfer keyboard state
 	auto& newManager = newBoard.getReverseManager();
-	if (newManager.keyboard && keyboard) {
-		newManager.keyboard->transferHostKeyMatrix(*keyboard);
+	if (auto* newKeyb = newManager.motherBoard.getKeyboard()) {
+		if (const auto* oldKeyb = motherBoard.getKeyboard()) {
+			newKeyb->transferHostKeyMatrix(*oldKeyb);
+		}
 	}
 
 	// transfer watchpoints
@@ -562,7 +561,7 @@ void ReverseManager::saveReplay(
 	}
 
 	auto filename = FileOperations::parseCommandFileArgument(
-		filenameArg, REPLAY_DIR, "openmsx", ".omr");
+		filenameArg, REPLAY_DIR, "openmsx", REPLAY_EXTENSION);
 
 	auto& reactor = motherBoard.getReactor();
 	Replay replay(reactor);
@@ -670,8 +669,8 @@ void ReverseManager::loadReplay(
 		// Try filename as typed by user.
 		filename = context.resolve(fileNameArg);
 	} catch (MSXException& /*e1*/) { try {
-		// Not found, try adding '.omr'.
-		filename = context.resolve(tmpStrCat(fileNameArg, ".omr"));
+		// Not found, try adding the normal extension
+		filename = context.resolve(tmpStrCat(fileNameArg, REPLAY_EXTENSION));
 	} catch (MSXException& e2) { try {
 		// Again not found, try adding '.gz'.
 		// (this is for backwards compatibility).
@@ -731,7 +730,7 @@ void ReverseManager::loadReplay(
 
 	// Restore snapshots
 	unsigned replayIdx = 0;
-	for (auto& m : replay.motherBoards) {
+	for (const auto& m : replay.motherBoards) {
 		ReverseChunk newChunk;
 		newChunk.time = m->getCurrentTime();
 
@@ -836,7 +835,7 @@ void ReverseManager::execInputEvent()
 	}
 }
 
-int ReverseManager::signalEvent(const Event& event)
+bool ReverseManager::signalEvent(const Event& event)
 {
 	(void)event;
 	assert(getType(event) == EventType::TAKE_REVERSE_SNAPSHOT);
@@ -849,7 +848,7 @@ int ReverseManager::signalEvent(const Event& event)
 		// schedule creation of next snapshot
 		schedule(getCurrentTime());
 	}
-	return 0;
+	return false;
 }
 
 unsigned ReverseManager::ReverseHistory::getNextSeqNum(EmuTime::param time) const

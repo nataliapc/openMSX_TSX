@@ -55,10 +55,8 @@ Display::Display(Reactor& reactor_)
 	prevTimeStamp = Timer::getTime();
 
 	EventDistributor& eventDistributor = reactor.getEventDistributor();
-	for (auto type : {EventType::FINISH_FRAME,
-	                  EventType::SWITCH_RENDERER,
-	                  EventType::MACHINE_LOADED,
-	                  EventType::WINDOW}) {
+	using enum EventType;
+	for (auto type : {FINISH_FRAME, SWITCH_RENDERER, MACHINE_LOADED, WINDOW}) {
 		eventDistributor.registerEventListener(type, *this);
 	}
 
@@ -70,10 +68,8 @@ Display::~Display()
 	renderSettings.getRendererSetting().detach(*this);
 
 	EventDistributor& eventDistributor = reactor.getEventDistributor();
-	for (auto type : {EventType::WINDOW,
-	                  EventType::MACHINE_LOADED,
-	                  EventType::SWITCH_RENDERER,
-	                  EventType::FINISH_FRAME}) {
+	using enum EventType;
+	for (auto type : {WINDOW, MACHINE_LOADED, SWITCH_RENDERER, FINISH_FRAME}) {
 		eventDistributor.unregisterEventListener(type, *this);
 	}
 
@@ -85,7 +81,7 @@ Display::~Display()
 void Display::createVideoSystem()
 {
 	assert(!videoSystem);
-	assert(currentRenderer == RenderSettings::UNINITIALIZED);
+	assert(currentRenderer == RenderSettings::RendererID::UNINITIALIZED);
 	assert(!switchInProgress);
 	currentRenderer = renderSettings.getRenderer();
 	switchInProgress = true;
@@ -148,7 +144,7 @@ Display::Layers::iterator Display::baseLayer()
 			return it;
 		}
 		--it;
-		if ((*it)->getCoverage() == Layer::COVER_FULL) return it;
+		if ((*it)->getCoverage() == Layer::Coverage::FULL) return it;
 	}
 }
 
@@ -157,7 +153,7 @@ void Display::executeRT()
 	repaint();
 }
 
-int Display::signalEvent(const Event& event)
+bool Display::signalEvent(const Event& event)
 {
 	std::visit(overloaded{
 		[&](const FinishFrameEvent& e) {
@@ -203,7 +199,7 @@ int Display::signalEvent(const Event& event)
 		},
 		[](const EventBase&) { /*ignore*/ }
 	}, event);
-	return 0;
+	return false;
 }
 
 string Display::getWindowTitle()
@@ -247,13 +243,21 @@ gl::ivec2 Display::retrieveWindowPosition()
 	return reactor.getImGuiManager().retrieveWindowPosition();
 }
 
+gl::ivec2 Display::getWindowSize() const
+{
+	int factor = renderSettings.getScaleFactor();
+	return {320 * factor, 240 * factor};
+}
+
+float Display::getFps() const
+{
+	return 1000000.0f * NUM_FRAME_DURATIONS / narrow_cast<float>(frameDurationSum);
+}
+
 void Display::update(const Setting& setting) noexcept
 {
-	if (&setting == &renderSettings.getRendererSetting()) {
-		checkRendererSwitch();
-	} else {
-		UNREACHABLE;
-	}
+	assert(&setting == &renderSettings.getRendererSetting()); (void)setting;
+	checkRendererSwitch();
 }
 
 void Display::checkRendererSwitch()
@@ -360,7 +364,7 @@ void Display::repaintImpl()
 void Display::repaintImpl(OutputSurface& surface)
 {
 	for (auto it = baseLayer(); it != end(layers); ++it) {
-		if ((*it)->getCoverage() != Layer::COVER_NONE) {
+		if ((*it)->getCoverage() != Layer::Coverage::NONE) {
 			(*it)->paint(surface);
 		}
 	}
@@ -384,8 +388,8 @@ void Display::repaintDelayed(uint64_t delta)
 
 void Display::addLayer(Layer& layer)
 {
-	int z = layer.getZ();
-	auto it = ranges::find_if(layers, [&](Layer* l) { return l->getZ() > z; });
+	auto z = layer.getZ();
+	auto it = ranges::find_if(layers, [&](const Layer* l) { return l->getZ() > z; });
 	layers.insert(it, &layer);
 	layer.setDisplay(*this);
 }
@@ -395,12 +399,19 @@ void Display::removeLayer(Layer& layer)
 	layers.erase(rfind_unguarded(layers, &layer));
 }
 
-void Display::updateZ(Layer& layer) noexcept
+void Display::updateZ(Layer& layer)
 {
-	// Remove at old Z-index...
-	removeLayer(layer);
-	// ...and re-insert at new Z-index.
-	addLayer(layer);
+	auto oldPos = rfind_unguarded(layers, &layer);
+	auto z = layer.getZ();
+	auto newPos = ranges::find_if(layers, [&](const Layer* l) { return l->getZ() >= z; });
+
+	if (oldPos == newPos) {
+		return;
+	} else if (oldPos < newPos) {
+		std::rotate(oldPos, oldPos + 1, newPos);
+	} else {
+		std::rotate(newPos, oldPos, oldPos + 1);
+	}
 }
 
 
@@ -456,10 +467,10 @@ void Display::ScreenShotCmd::execute(std::span<const TclObject> tokens, TclObjec
 		throw SyntaxError();
 	}
 	string filename = FileOperations::parseCommandFileArgument(
-		fname, "screenshots", prefix, ".png");
+		fname, SCREENSHOT_DIR, prefix, SCREENSHOT_EXTENSION);
 
 	if (!rawShot) {
-		// include all layers (OSD stuff, console)
+		// take screenshot as displayed, possibly with other layers (OSD stuff, ImGUI)
 		try {
 			display.getVideoSystem().takeScreenShot(filename, withOsd);
 		} catch (MSXException& e) {
@@ -522,7 +533,7 @@ void Display::FpsInfoTopic::execute(std::span<const TclObject> /*tokens*/,
                                     TclObject& result) const
 {
 	auto& display = OUTER(Display, fpsInfo);
-	result = 1000000.0f * Display::NUM_FRAME_DURATIONS / narrow_cast<float>(display.frameDurationSum);
+	result = display.getFps();
 }
 
 string Display::FpsInfoTopic::help(std::span<const TclObject> /*tokens*/) const

@@ -1,10 +1,12 @@
 #ifndef MIXER_HH
 #define MIXER_HH
 
-#include "Observer.hh"
 #include "BooleanSetting.hh"
 #include "EnumSetting.hh"
 #include "IntegerSetting.hh"
+
+#include "Observer.hh"
+
 #include <vector>
 #include <memory>
 
@@ -16,14 +18,16 @@ class CommandController;
 class MSXMixer;
 
 struct StereoFloat {
-	float left  = 0.0f;
-	float right = 0.0f;
+	// Note: important to keep this uninitialized, we have large arrays of
+	// these objects and needlessly initializing those is expensive
+	float left;
+	float right;
 };
 
 class Mixer final : private Observer<Setting>
 {
 public:
-	enum SoundDriverType { SND_NULL, SND_SDL };
+	enum class SoundDriverType { NONE, SDL };
 
 	Mixer(Reactor& reactor, CommandController& commandController);
 	~Mixer();

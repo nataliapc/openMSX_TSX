@@ -40,7 +40,7 @@ void ImGuiMachine::showMenu(MSXMotherBoard* motherBoard)
 		ImGui::MenuItem("Select MSX machine ...", nullptr, &showSelectMachine);
 
 		if (motherBoard) {
-			auto& controller = motherBoard->getMSXCommandController();
+			const auto& controller = motherBoard->getMSXCommandController();
 			if (auto* firmwareSwitch = dynamic_cast<BooleanSetting*>(controller.findSetting("firmwareswitch"))) {
 				Checkbox(hotKey, "Firmware switch", *firmwareSwitch);
 			}
@@ -48,20 +48,20 @@ void ImGuiMachine::showMenu(MSXMotherBoard* motherBoard)
 
 		auto& pauseSetting = reactor.getGlobalSettings().getPauseSetting();
 		bool pause = pauseSetting.getBoolean();
-		auto pauseShortCut = getShortCutForCommand(hotKey, "toggle pause");
-		if (ImGui::MenuItem("Pause", pauseShortCut.c_str(), &pause)) {
+		if (auto shortCut = getShortCutForCommand(hotKey, "toggle pause");
+		    ImGui::MenuItem("Pause", shortCut.c_str(), &pause)) {
 			pauseSetting.setBoolean(pause);
 		}
 
-		auto resetShortCut = getShortCutForCommand(hotKey, "reset");
-		if (ImGui::MenuItem("Reset", resetShortCut.c_str(), nullptr, motherBoard != nullptr)) {
+		if (auto shortCut = getShortCutForCommand(hotKey, "reset");
+		    ImGui::MenuItem("Reset", shortCut.c_str(), nullptr, motherBoard != nullptr)) {
 			manager.executeDelayed(TclObject("reset"));
 		}
 
 		auto& powerSetting = reactor.getGlobalSettings().getPowerSetting();
 		bool power = powerSetting.getBoolean();
-		auto powerShortCut = getShortCutForCommand(hotKey, "toggle power");
-		if (ImGui::MenuItem("Power", powerShortCut.c_str(), &power)) {
+		if (auto shortCut = getShortCutForCommand(hotKey, "toggle power");
+		    ImGui::MenuItem("Power", shortCut.c_str(), &power)) {
 			powerSetting.setBoolean(power);
 		}
 
@@ -81,7 +81,7 @@ void ImGuiMachine::paint(MSXMotherBoard* motherBoard)
 }
 
 
-void ImGuiMachine::paintSelectMachine(MSXMotherBoard* motherBoard)
+void ImGuiMachine::paintSelectMachine(const MSXMotherBoard* motherBoard)
 {
 	ImGui::SetNextWindowSize(gl::vec2{29, 26} * ImGui::GetFontSize(), ImGuiCond_FirstUseEver);
 	im::Window("Select MSX machine", &showSelectMachine, [&]{
@@ -132,8 +132,8 @@ void ImGuiMachine::paintSelectMachine(MSXMotherBoard* motherBoard)
 				printConfigInfo(*info);
 			});
 			if (newMachineConfig.empty()) newMachineConfig = configName;
-			auto& defaultMachine = reactor.getMachineSetting();
-			if (defaultMachine.getString() != configName) {
+			if (auto& defaultMachine = reactor.getMachineSetting();
+			    defaultMachine.getString() != configName) {
 				if (ImGui::Button("Make this the default machine")) {
 					defaultMachine.setValue(TclObject(configName));
 				}
@@ -153,8 +153,8 @@ void ImGuiMachine::paintSelectMachine(MSXMotherBoard* motherBoard)
 		im::TreeNode(filterDisplay.c_str(), ImGuiTreeNodeFlags_DefaultOpen, [&]{
 			displayFilterCombo(filterType, "Type", allMachines);
 			displayFilterCombo(filterRegion, "Region", allMachines);
-			ImGui::InputText(ICON_IGFD_SEARCH, &filterString);
-			if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere(-1);
+			if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+			ImGui::InputText(ICON_IGFD_FILTER, &filterString);
 			simpleToolTip("A list of substrings that must be part of the machine name.\n"
 					"\n"
 					"For example: enter 'pa' to search for 'Panasonic' machines. "
@@ -166,25 +166,33 @@ void ImGuiMachine::paintSelectMachine(MSXMotherBoard* motherBoard)
 		applyComboFilter("Region", filterRegion, allMachines, filteredMachines);
 		applyDisplayNameFilter(filterString, allMachines, filteredMachines);
 
-		bool inFilteredList = contains(filteredMachines, newMachineConfig,
-						[&](auto idx) { return allMachines[idx].configName; });
+		auto it = ranges::find(filteredMachines, newMachineConfig,
+			[&](auto idx) { return allMachines[idx].configName; });
+		bool inFilteredList = it != filteredMachines.end();
+		int selectedIdx = inFilteredList ? narrow<int>(*it) : -1;
 
 		im::ListBox("##list", {-FLT_MIN, -ImGui::GetFrameHeightWithSpacing()}, [&]{
-			im::ListClipper(filteredMachines.size(), [&](int i) {
+			im::ListClipper(filteredMachines.size(), selectedIdx, [&](int i) {
 				auto idx = filteredMachines[i];
 				auto& info = allMachines[idx];
 				bool ok = getTestResult(info).empty();
 				im::StyleColor(!ok, ImGuiCol_Text, getColor(imColor::ERROR), [&]{
-					if (ImGui::Selectable(info.displayName.c_str(), info.configName == newMachineConfig, ImGuiSelectableFlags_AllowDoubleClick)) {
+					bool selected = info.configName == newMachineConfig;
+					if (ImGui::Selectable(info.displayName.c_str(), selected, ImGuiSelectableFlags_AllowDoubleClick)) {
 						newMachineConfig = info.configName;
 						if (ok && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
 							showSelectMachine = false; // close window
 							manager.executeDelayed(makeTclList("machine", newMachineConfig));
 						}
 					}
-					im::ItemTooltip([&]{
-						printConfigInfo(info);
-					});
+					if (selected) {
+						if (ImGui::IsWindowAppearing()) ImGui::SetScrollHereY();
+					}
+					if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_NoSharedDelay | ImGuiHoveredFlags_Stationary)) {
+						im::ItemTooltip([&]{
+							printConfigInfo(info);
+						});
+					}
 				});
 			});
 		});
@@ -331,6 +339,17 @@ void ImGuiMachine::paintTestHardware()
 				machineInfo.clear();
 			}
 		});
+		ImGui::Separator();
+		// TODO: what to do if the folder doesn't exist? Should we go
+		// one higher? (But then the button doesn't browse to where it
+		// promises to browse to and that may be confusing, e.g. if
+		// people put their system roms there...
+		if (ImGui::Button("Open user system ROMs folder...")) {
+			SDL_OpenURL(strCat("file://", FileOperations::getUserDataDir(), "/systemroms").c_str());
+		}
+		if (ImGui::Button("Open system wide system ROMs folder...")) {
+			SDL_OpenURL(strCat("file://", FileOperations::getSystemDataDir(), "/systemroms").c_str());
+		}
 	});
 }
 
@@ -346,7 +365,7 @@ static void amendConfigInfo(MSXMotherBoard& mb, ImGuiMachine::MachineInfo& info)
 {
 	auto& configInfo = info.configInfo;
 
-	auto& debugger = mb.getDebugger();
+	const auto& debugger = mb.getDebugger();
 	unsigned ramSize = 0;
 	for (const auto& [name, debuggable] : debugger.getDebuggables()) {
 		if (debuggable->getDescription() == one_of("memory mapper", "ram")) {
@@ -364,7 +383,7 @@ static void amendConfigInfo(MSXMotherBoard& mb, ImGuiMachine::MachineInfo& info)
 		configInfo.emplace_back("Disk drives", strCat(narrow<int>(drives->count())));
 	}
 
-	auto& carts = mb.getSlotManager();
+	const auto& carts = mb.getSlotManager();
 	configInfo.emplace_back("Cartridge slots", strCat(carts.getNumberOfSlots()));
 }
 
