@@ -1,6 +1,11 @@
 name: Build Snapshots
 
 on:
+  workflow_dispatch:
+    branches:
+      - master
+      - tsx_format_support
+      - tsx_local
   push:
     branches:
       - master
