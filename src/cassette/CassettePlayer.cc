@@ -61,7 +61,7 @@ namespace openmsx {
 // TODO: this description is not entirely accurate, but it is used
 // as an identifier for this audio device in e.g. Catapult. We should
 // use another way to identify audio devices A.S.A.P.!
-static constexpr static_string_view DESCRIPTION = "Cassetteplayer, use to read .cas or .wav files.";
+static constexpr static_string_view DESCRIPTION = "Cassetteplayer, use to read .cas, .tsx, or .wav files.";
 
 static constexpr unsigned DUMMY_INPUT_RATE = 44100; // actual rate depends on .cas/.wav file
 static constexpr unsigned RECORD_FREQ = 44100;
