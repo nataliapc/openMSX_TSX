@@ -6,8 +6,8 @@
     <manufacturer>Yamaha</manufacturer>
     <code>CX5MII/128</code>
     <release_year>1985</release_year>
-    <description>Japanese MSX2 with 128kB RAM and SFG-05 module built in.</description>
-    <type>MSX2</type>
+    <description>Japanese MSX with MSX2 videochip, 128kB RAM and SFG-05 module built in.</description>
+    <type>MSX</type>
     <region>jp</region>
   </info>
 
@@ -68,7 +68,7 @@
     <primary slot="3">
 
       <secondary slot="0">
-        <ROM id="CX5MII MSX sub ROM">
+        <ROM id="MSX Sub ROM">
           <rom>
             <sha1>c2340313bfda751181e8a5287d60f77bc6a2f3e6</sha1> <!-- From Gerrit's machine -->
             <sha1>df503d6f5d72a2a355db53c35950348fb7c767bf</sha1>

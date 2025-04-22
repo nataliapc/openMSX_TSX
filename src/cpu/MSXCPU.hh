@@ -9,9 +9,9 @@
 #include "EmuTime.hh"
 #include "TclCallback.hh"
 #include "serialize_meta.hh"
-#include "openmsx.hh"
 
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <span>
 
@@ -30,7 +30,7 @@ class Interpreter;
 class MSXCPU final : private Observer<Setting>
 {
 public:
-	enum class Type { Z80, R800 };
+	enum class Type : uint8_t { Z80, R800 };
 
 	explicit MSXCPU(MSXMotherBoard& motherboard);
 	~MSXCPU();
@@ -49,12 +49,12 @@ public:
 
 	/** Inform CPU of bank switch. This will invalidate memory cache and
 	  * update memory timings on R800. */
-	void updateVisiblePage(byte page, byte primarySlot, byte secondarySlot);
+	void updateVisiblePage(uint8_t page, uint8_t primarySlot, uint8_t secondarySlot);
 
 	/** Invalidate the CPU its cache for the interval [start, start + size)
 	  * For example MSXMemoryMapper and MSXGameCartridge need to call this
 	  * method when a 'memory switch' occurs. */
-	void invalidateAllSlotsRWCache(word start, unsigned size);
+	void invalidateAllSlotsRWCache(uint16_t start, unsigned size);
 
 	/** Similar to the method above, but only invalidates one specific slot.
 	  * One small tweak: lines that are in 'disallowRead/Write' are
@@ -62,14 +62,14 @@ public:
 	  * 'unknown'.
 	  */
 	void invalidateRWCache(unsigned start, unsigned size, int ps, int ss,
-	                       std::span<const byte, 256> disallowRead,
-	                       std::span<const byte, 256> disallowWrite);
+	                       std::span<const uint8_t, 256> disallowRead,
+	                       std::span<const uint8_t, 256> disallowWrite);
 	void invalidateRCache (unsigned start, unsigned size, int ps, int ss,
-	                       std::span<const byte, 256> disallowRead,
-	                       std::span<const byte, 256> disallowWrite);
+	                       std::span<const uint8_t, 256> disallowRead,
+	                       std::span<const uint8_t, 256> disallowWrite);
 	void invalidateWCache (unsigned start, unsigned size, int ps, int ss,
-	                       std::span<const byte, 256> disallowRead,
-	                       std::span<const byte, 256> disallowWrite);
+	                       std::span<const uint8_t, 256> disallowRead,
+	                       std::span<const uint8_t, 256> disallowWrite);
 
 	/** Fill the read and write cache lines for a specific slot with the
 	 * specified value. Except for the lines where the corresponding
@@ -80,15 +80,15 @@ public:
 	 *   as much work as directly setting the correct value.
 	 * - Directly setting the correct value saves work later on.
 	 */
-	void fillRWCache(unsigned start, unsigned size, const byte* rData, byte* wData, int ps, int ss,
-	                 std::span<const byte, 256> disallowRead,
-	                 std::span<const byte, 256> disallowWrite);
-	void fillRCache (unsigned start, unsigned size, const byte* rData, int ps, int ss,
-	                 std::span<const byte, 256> disallowRead,
-	                 std::span<const byte, 256> disallowWrite);
-	void fillWCache (unsigned start, unsigned size, byte* wData, int ps, int ss,
-	                 std::span<const byte, 256> disallowRead,
-	                 std::span<const byte, 256> disallowWrite);
+	void fillRWCache(unsigned start, unsigned size, const uint8_t* rData, uint8_t* wData, int ps, int ss,
+	                 std::span<const uint8_t, 256> disallowRead,
+	                 std::span<const uint8_t, 256> disallowWrite);
+	void fillRCache (unsigned start, unsigned size, const uint8_t* rData, int ps, int ss,
+	                 std::span<const uint8_t, 256> disallowRead,
+	                 std::span<const uint8_t, 256> disallowWrite);
+	void fillWCache (unsigned start, unsigned size, uint8_t* wData, int ps, int ss,
+	                 std::span<const uint8_t, 256> disallowRead,
+	                 std::span<const uint8_t, 256> disallowWrite);
 
 	/** This method raises a maskable interrupt. A device may call this
 	  * method more than once. If the device wants to lower the
@@ -172,8 +172,8 @@ private:
 	void update(const Setting& setting) noexcept override;
 
 	template<bool READ, bool WRITE, bool SUB_START>
-	void setRWCache(unsigned start, unsigned size, const byte* rData, byte* wData, int ps, int ss,
-	                std::span<const byte, 256> disallowRead, std::span<const byte, 256> disallowWrite);
+	void setRWCache(unsigned start, unsigned size, const uint8_t* rData, uint8_t* wData, int ps, int ss,
+	                std::span<const uint8_t, 256> disallowRead, std::span<const uint8_t, 256> disallowWrite);
 
 private:
 	MSXMotherBoard& motherboard;
@@ -182,9 +182,9 @@ private:
 	const std::unique_ptr<CPUCore<Z80TYPE>> z80;
 	const std::unique_ptr<CPUCore<R800TYPE>> r800; // can be nullptr
 
-	std::array<std::array<const byte*, CacheLine::NUM>, 16> slotReadLines;
-	std::array<std::array<      byte*, CacheLine::NUM>, 16> slotWriteLines;
-	std::array<byte, 4> slots; // active slot for page (= 4 * primSlot + secSlot)
+	std::array<std::array<const uint8_t*, CacheLine::NUM>, 16> slotReadLines;
+	std::array<std::array<      uint8_t*, CacheLine::NUM>, 16> slotWriteLines;
+	std::array<uint8_t, 4> slots; // active slot for page (= 4 * primSlot + secSlot)
 
 	struct TimeInfoTopic final : InfoTopic {
 		explicit TimeInfoTopic(InfoCommand& machineInfoCommand);
@@ -208,17 +208,16 @@ private:
 
 	struct Debuggable final : SimpleDebuggable {
 		explicit Debuggable(MSXMotherBoard& motherboard);
-		[[nodiscard]] byte read(unsigned address) override;
-		void write(unsigned address, byte value) override;
+		[[nodiscard]] uint8_t read(unsigned address) override;
+		void write(unsigned address, uint8_t value) override;
 	} debuggable;
 
-	EmuTime reference{EmuTime::zero()};
 	bool z80Active{true};
 	bool newZ80Active{true};
 
 	MSXCPUInterface* interface{nullptr}; // only used for debug
 };
-SERIALIZE_CLASS_VERSION(MSXCPU, 2);
+SERIALIZE_CLASS_VERSION(MSXCPU, 3);
 
 } // namespace openmsx
 

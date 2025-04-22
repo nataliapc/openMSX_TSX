@@ -51,7 +51,7 @@ public:
 		// HACK: repurposed 'unused' field as 'unicode' field
 		return evt.key.keysym.unused;
 	}
-	[[nodiscard]] SDLKey getKey() const { return SDLKey{evt.key.keysym, evt.type == SDL_KEYDOWN}; }
+	[[nodiscard]] SDLKey getKey() const { return {.sym = evt.key.keysym, .down = evt.type == SDL_KEYDOWN}; }
 };
 
 class KeyUpEvent final : public KeyEvent
@@ -257,8 +257,7 @@ class QuitEvent final : public EventBase {};
 class OsdControlEvent : public EventBase
 {
 public:
-	enum class Button {LEFT, RIGHT, UP, DOWN, A, B,
-	                   NUM};
+	enum class Button : uint8_t {LEFT, RIGHT, UP, DOWN, A, B, NUM};
 	[[nodiscard]] Button getButton() const { return button; }
 
 protected:
@@ -376,6 +375,7 @@ class BootEvent                  final : public SimpleEvent {};
 class FrameDrawnEvent            final : public SimpleEvent {};
 
 class BreakEvent                 final : public SimpleEvent {};
+class ContinueEvent              final : public SimpleEvent {};
 class SwitchRendererEvent        final : public SimpleEvent {};
 
 /** Used to schedule 'taking reverse snapshots' between Z80 instructions. */
@@ -427,6 +427,7 @@ using Event = std::variant<
 	BootEvent,
 	FrameDrawnEvent,
 	BreakEvent,
+	ContinueEvent,
 	SwitchRendererEvent,
 	TakeReverseSnapshotEvent,
 	AfterTimedEvent,
@@ -473,6 +474,7 @@ enum class EventType : uint8_t
 	FINISH_FRAME             = event_index<FinishFrameEvent>,
 	FRAME_DRAWN              = event_index<FrameDrawnEvent>,
 	BREAK                    = event_index<BreakEvent>,
+	CONTINUE                 = event_index<ContinueEvent>,
 	SWITCH_RENDERER          = event_index<SwitchRendererEvent>,
 	TAKE_REVERSE_SNAPSHOT    = event_index<TakeReverseSnapshotEvent>,
 	CLICOMMAND               = event_index<CliCommandEvent>,

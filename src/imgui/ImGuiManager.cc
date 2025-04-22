@@ -1,8 +1,6 @@
 #include "ImGuiManager.hh"
 
-#include "ImGuiBitmapViewer.hh"
 #include "ImGuiBreakPoints.hh"
-#include "ImGuiCharacter.hh"
 #include "ImGuiCheatFinder.hh"
 #include "ImGuiConnector.hh"
 #include "ImGuiConsole.hh"
@@ -21,7 +19,6 @@
 #include "ImGuiSCCViewer.hh"
 #include "ImGuiSettings.hh"
 #include "ImGuiSoundChip.hh"
-#include "ImGuiSpriteViewer.hh"
 #include "ImGuiSymbols.hh"
 #include "ImGuiTools.hh"
 #include "ImGuiTrainer.hh"
@@ -57,6 +54,8 @@
 #include <CustomFont.ii> // icons for ImGuiFileDialog
 
 #include <SDL.h>
+
+#include <algorithm>
 
 namespace openmsx {
 
@@ -180,9 +179,6 @@ ImGuiManager::ImGuiManager(Reactor& reactor_)
 	breakPoints = std::make_unique<ImGuiBreakPoints>(*this);
 	symbols = std::make_unique<ImGuiSymbols>(*this);
 	watchExpr = std::make_unique<ImGuiWatchExpr>(*this);
-	bitmap = std::make_unique<ImGuiBitmapViewer>(*this);
-	character = std::make_unique<ImGuiCharacter>(*this);
-	sprite = std::make_unique<ImGuiSpriteViewer>(*this);
 	vdpRegs = std::make_unique<ImGuiVdpRegs>(*this);
 	palette = std::make_unique<ImGuiPalette>(*this);
 	osdIcons = std::make_unique<ImGuiOsdIcons>(*this);
@@ -232,7 +228,7 @@ ImGuiManager::ImGuiManager(Reactor& reactor_)
 	using enum EventType;
 	for (auto type : {MOUSE_BUTTON_UP, MOUSE_BUTTON_DOWN, MOUSE_MOTION, MOUSE_WHEEL,
 	                  KEY_UP, KEY_DOWN, TEXT,
-	                  WINDOW, FILE_DROP, IMGUI_DELAYED_ACTION, BREAK, MACHINE_LOADED}) {
+	                  WINDOW, FILE_DROP, IMGUI_DELAYED_ACTION, BREAK, CONTINUE, MACHINE_LOADED, QUIT}) {
 		eventDistributor.registerEventListener(type, *this, EventDistributor::Priority::IMGUI);
 	}
 
@@ -251,7 +247,7 @@ ImGuiManager::~ImGuiManager()
 
 	auto& eventDistributor = reactor.getEventDistributor();
 	using enum EventType;
-	for (auto type : {MACHINE_LOADED, BREAK, IMGUI_DELAYED_ACTION, FILE_DROP, WINDOW, TEXT,
+	for (auto type : {MACHINE_LOADED, CONTINUE, BREAK, IMGUI_DELAYED_ACTION, FILE_DROP, WINDOW, TEXT,
 	                  KEY_DOWN, KEY_UP,
 	                  MOUSE_WHEEL, MOUSE_MOTION, MOUSE_BUTTON_DOWN, MOUSE_BUTTON_UP}) {
 		eventDistributor.unregisterEventListener(type, *this);
@@ -269,10 +265,10 @@ void ImGuiManager::registerPart(ImGuiPartInterface* part)
 
 void ImGuiManager::unregisterPart(ImGuiPartInterface* part)
 {
-	if (auto it1 = ranges::find(parts, part); it1 != parts.end()) {
+	if (auto it1 = std::ranges::find(parts, part); it1 != parts.end()) {
 		*it1 = nullptr;
 		removeParts = true; // filter nullptr later
-	} else if (auto it2 = ranges::find(toBeAddedParts, part); it2 != toBeAddedParts.end()) {
+	} else if (auto it2 = std::ranges::find(toBeAddedParts, part); it2 != toBeAddedParts.end()) {
 		toBeAddedParts.erase(it2); // fine to remove now
 	}
 }
@@ -281,7 +277,7 @@ void ImGuiManager::updateParts()
 {
 	if (removeParts) {
 		removeParts = false;
-		parts.erase(ranges::remove(parts, nullptr), parts.end());
+		std::erase(parts, nullptr);
 	}
 
 	append(parts, toBeAddedParts);
@@ -314,8 +310,8 @@ static gl::ivec2 ensureVisible(gl::ivec2 windowPos, gl::ivec2 windowSize)
 		       windowBR.y > monitorTL.y;
 	};
 
-	const auto& monitors = ImGui::GetPlatformIO().Monitors;
-	if (!monitors.empty() && ranges::none_of(monitors, overlaps)) {
+	if (const auto& monitors = ImGui::GetPlatformIO().Monitors;
+	    !monitors.empty() && std::ranges::none_of(monitors, overlaps)) {
 		// window isn't visible in any of the monitors
 		// -> place centered on primary monitor
 		return gl::ivec2(SDL_WINDOWPOS_CENTERED);
@@ -384,7 +380,7 @@ void ImGuiManager::printError(std::string_view message)
 
 bool ImGuiManager::signalEvent(const Event& event)
 {
-	if (auto* evt = get_event_if<SdlEvent>(event)) {
+	if (const auto* evt = get_event_if<SdlEvent>(event)) {
 		const ImGuiIO& io = ImGui::GetIO();
 		if (!io.BackendPlatformUserData) {
 			// ImGui backend not (yet) initialized (e.g. after 'set renderer none')
@@ -401,6 +397,9 @@ bool ImGuiManager::signalEvent(const Event& event)
 		}
 	} else {
 		switch (getType(event)) {
+		case EventType::QUIT:
+			debugger->signalQuit();
+			break;
 		case EventType::IMGUI_DELAYED_ACTION: {
 			for (auto& action : delayedActionQueue) {
 				std::invoke(action);
@@ -422,6 +421,9 @@ bool ImGuiManager::signalEvent(const Event& event)
 			[[fallthrough]];
 		case EventType::BREAK:
 			debugger->signalBreak();
+			break;
+		case EventType::CONTINUE:
+			debugger->signalContinue();
 			break;
 		default:
 			UNREACHABLE;
@@ -478,6 +480,16 @@ void ImGuiManager::preNewFrame()
 	}
 }
 
+static bool hoverMenuBar()
+{
+	const auto* viewport = ImGui::GetMainViewport();
+	gl::vec2 topLeft = viewport->Pos;
+	gl::vec2 bottomRight = topLeft + gl::vec2(viewport->Size.x, ImGui::GetFrameHeight());
+	gl::vec2 mouse = ImGui::GetMousePos();
+	return mouse.x >= topLeft.x && mouse.x <= bottomRight.x &&
+	       mouse.y >= topLeft.y && mouse.y <= bottomRight.y;
+}
+
 void ImGuiManager::paintImGui()
 {
 	// Apply added/removed parts. Avoids iterating over a changing vector.
@@ -515,7 +527,8 @@ void ImGuiManager::paintImGui()
 		});
 	} else {
 		bool active = ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow) ||
-		              ImGui::IsWindowFocused(ImGuiHoveredFlags_AnyWindow);
+		              ImGui::IsWindowFocused(ImGuiHoveredFlags_AnyWindow) ||
+		              hoverMenuBar();
 		if (active != guiActive) {
 			guiActive = active;
 			auto& eventDistributor = reactor.getEventDistributor();
@@ -523,7 +536,7 @@ void ImGuiManager::paintImGui()
 		}
 		menuAlpha = [&] {
 			if (!menuFade) return 1.0f;
-			auto target = active ? 1.0f : 0.0001f;
+			auto target = active ? 1.0f : 0.0f;
 			auto period = active ? 0.5f : 5.0f;
 			return calculateFade(menuAlpha, target, period);
 		}();
@@ -541,7 +554,7 @@ void ImGuiManager::paintImGui()
 	if (statusBarVisible) drawStatusBar(motherBoard);
 
 	// drag and drop  (move this to ImGuiMedia ?)
-	auto insert2 = [&](std::string_view displayName, TclObject cmd) {
+	auto insert2 = [&](std::string_view displayName, const TclObject& cmd) {
 		auto message = strCat("Inserted ", droppedFile, " in ", displayName);
 		executeDelayed(cmd, [this, message, cmd](const TclObject&){
 			insertedInfo = message;
@@ -682,7 +695,7 @@ void ImGuiManager::paintImGui()
 			});
 		}
 
-		ImGui::Checkbox("Reset MSX on inserting ROM", &media->resetOnInsertRom);
+		ImGui::Checkbox("Reset MSX on inserting ROM", &media->resetOnCartChanges);
 
 		if (ImGui::Button("Insert ROM")) {
 			auto cmd = makeTclList(selectedMedia, "insert", droppedFile);
@@ -690,7 +703,7 @@ void ImGuiManager::paintImGui()
 				cmd.addListElement("-romtype", RomInfo::romTypeToName(selectedRomType));
 			}
 			insert2(strCat("cartridge slot ", char(selectedMedia.back() - 'a' + 'A')), cmd);
-			if (media->resetOnInsertRom) {
+			if (media->resetOnCartChanges) {
 				executeDelayed(TclObject("reset"));
 			}
 			ImGui::CloseCurrentPopup();
@@ -721,105 +734,139 @@ void ImGuiManager::drawStatusBar(MSXMotherBoard* motherBoard)
 	if (ImGui::BeginViewportSideBar("##MainStatusBar", nullptr, ImGuiDir_Down, ImGui::GetFrameHeight(),
 			ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_MenuBar)) {
 		im::MenuBar([&]{
+			auto pos = ImGui::GetCursorPos();
+
 			auto frameTime = ImGui::GetIO().DeltaTime;
 
-			// limit updating to at most 10Hz
-			fpsDrawTimeOut -= frameTime;
-			if (fpsDrawTimeOut < 0.0f) {
-				fpsDrawTimeOut = 0.1f;
-				fps = reactor.getDisplay().getFps();
-			}
-			std::stringstream ssFps;
-			ssFps << std::fixed << std::setprecision(1) << fps << " fps";
-			ImGui::RightAlignText(ssFps.str(), "999.9 fps");
-			simpleToolTip("refresh rate");
-			ImGui::Separator();
-
-			auto [modeStr, extendedStr] = [&] { // TODO: remove duplication with VDP debugger code
-				if (!motherBoard) return std::pair{"-", ""};
-				const auto* vdp = dynamic_cast<const VDP*>(motherBoard->findDevice("VDP"));
-				if (!vdp) return std::pair{"-", ""};
-
-				auto mode = vdp->getDisplayMode();
-				auto base = mode.getBase();
-				if (base == DisplayMode::TEXT1)      return std::pair{"0 (40)", "TEXT 1"};
-				if (base == DisplayMode::TEXT2)      return std::pair{"0 (80)", "TEXT 2"};
-				if (base == DisplayMode::GRAPHIC1)   return std::pair{"1", "GRAPHIC 1"};
-				if (base == DisplayMode::GRAPHIC2)   return std::pair{"2", "GRAPHIC 2"};
-				if (base == DisplayMode::GRAPHIC3)   return std::pair{"4", "GRAPHIC 3"};
-				if (base == DisplayMode::MULTICOLOR) return std::pair{"3", "MULTICOLOR"};
-				if (base == DisplayMode::GRAPHIC4)   return std::pair{"5", "GRAPHIC 4"};
-				if (base == DisplayMode::GRAPHIC5)   return std::pair{"6", "GRAPHIC 5"};
-				if (base == DisplayMode::GRAPHIC6)   return std::pair{"7", "GRAPHIC 6"};
-				if (base != DisplayMode::GRAPHIC7)   return std::pair{"?", ""};
-				return (mode.getByte() & DisplayMode::YJK)
-					? (mode.getByte() & DisplayMode::YAE) ? std::pair{"11", "GRAPHIC 7 (YJK/YAE mode)"} : std::pair{"12", "GRAPHIC 7 (YJK mode)"}
-					: std::pair{"8", "GRAPHIC 7"};
-			}();
-			ImGui::RightAlignText(modeStr, "0 (80)");
-			simpleToolTip([&]{
-				std::string result = "screen mode as used in MSX-BASIC";
-				if (extendedStr[0]) {
-					strAppend(result, ", corresponds to VDP mode ", extendedStr);
+			if (statusBarItemVisibilityFps) {
+				// limit updating to at most 10Hz
+				fpsDrawTimeOut -= frameTime;
+				if (fpsDrawTimeOut < 0.0f) {
+					fpsDrawTimeOut = 0.1f;
+					fps = reactor.getDisplay().getFps();
 				}
-				return result;
-			});
-			ImGui::Separator();
-
-			auto timeStr = motherBoard
-				? formatTime((motherBoard->getCurrentTime() - EmuTime::zero()).toDouble())
-				: formatTime(std::nullopt);
-			ImGui::RightAlignText(timeStr, formatTime(0));
-			simpleToolTip("time since MSX power on");
-			ImGui::Separator();
-
-			if (motherBoard) {
-				// limit updating to at most 1Hz
-				speedDrawTimeOut -= frameTime;
-				if (speedDrawTimeOut < 0.0f) {
-					auto realTimePassed = 1.0f - speedDrawTimeOut;
-					speedDrawTimeOut = 1.0f;
-
-					auto boardTime = motherBoard->getCurrentTime();
-					auto boardTimePassed = (boardTime < prevBoardTime)
-						? 0.0 // due to reverse for instance
-						: (boardTime - prevBoardTime).toDouble();
-					prevBoardTime = boardTime;
-
-					speed = 100.0f * boardTimePassed / realTimePassed;
-				}
-			} else {
-				speed = 0.0f;
-				prevBoardTime = EmuTime::zero();
+				std::stringstream ssFps;
+				ssFps << std::fixed << std::setprecision(1) << fps << " fps";
+				ImGui::RightAlignText(ssFps.str(), "999.9 fps");
+				simpleToolTip("refresh rate");
+				ImGui::Separator();
 			}
-			ImGui::RightAlignText(strCat(std::round(speed), '%'), "10000%");
-			simpleToolTip("emulation speed");
-			ImGui::Separator();
 
-			if (motherBoard) {
-				if (const HardwareConfig* machineConfig = motherBoard->getMachineConfig()) {
-					if (const auto* info = machineConfig->getConfig().findChild("info")) {
-						auto manuf = info->getChildData("manufacturer", "?");
-						auto code  = info->getChildData("code", "?");
-						ImGui::StrCat(manuf, ' ', code);
-						simpleToolTip([&]{
-							auto type  = info->getChildData("type", "");
-							auto desc = info->getChildData("description", "");
-							return strCat((type.empty() ? "" : strCat("Machine type: ", type, '\n')), desc);
-						});
+			if (statusBarItemVisibilityScreenModeInfo) {
+				auto [modeStr, extendedStr_] = [&] { // TODO: remove duplication with VDP debugger code
+					if (!motherBoard) return std::pair{"-", ""};
+					const auto* vdp = dynamic_cast<const VDP*>(motherBoard->findDevice("VDP"));
+					if (!vdp) return std::pair{"-", ""};
+
+					auto mode = vdp->getDisplayMode();
+					auto base = mode.getBase();
+					if (base == DisplayMode::TEXT1)      return std::pair{"0 (40)", "TEXT 1"};
+					if (base == DisplayMode::TEXT2)      return std::pair{"0 (80)", "TEXT 2"};
+					if (base == DisplayMode::GRAPHIC1)   return std::pair{"1", "GRAPHIC 1"};
+					if (base == DisplayMode::GRAPHIC2)   return std::pair{"2", "GRAPHIC 2"};
+					if (base == DisplayMode::GRAPHIC3)   return std::pair{"4", "GRAPHIC 3"};
+					if (base == DisplayMode::MULTICOLOR) return std::pair{"3", "MULTICOLOR"};
+					if (base == DisplayMode::GRAPHIC4)   return std::pair{"5", "GRAPHIC 4"};
+					if (base == DisplayMode::GRAPHIC5)   return std::pair{"6", "GRAPHIC 5"};
+					if (base == DisplayMode::GRAPHIC6)   return std::pair{"7", "GRAPHIC 6"};
+					if (base != DisplayMode::GRAPHIC7)   return std::pair{"?", ""};
+					return (mode.getByte() & DisplayMode::YJK)
+						? (mode.getByte() & DisplayMode::YAE) ? std::pair{"11", "GRAPHIC 7 (YJK/YAE mode)"} : std::pair{"12", "GRAPHIC 7 (YJK mode)"}
+						: std::pair{"8", "GRAPHIC 7"};
+				}();
+				const auto* extendedStr = extendedStr_; // pre-clang-16 workaround
+				ImGui::RightAlignText(modeStr, "0 (80)");
+				simpleToolTip([&]{
+					std::string result = "screen mode as used in MSX-BASIC";
+					if (extendedStr[0]) {
+						strAppend(result, ", corresponds to VDP mode ", extendedStr);
+					}
+					return result;
+				});
+				ImGui::Separator();
+			}
+
+			if (statusBarItemVisibilityTime) {
+				auto timeStr = motherBoard
+					? formatTime((motherBoard->getCurrentTime() - EmuTime::zero()).toDouble())
+					: formatTime(std::nullopt);
+				ImGui::RightAlignText(timeStr, formatTime(0));
+				simpleToolTip("time since MSX power on");
+				ImGui::Separator();
+			}
+
+			if (statusBarItemVisibilityActualSpeed) {
+				if (motherBoard) {
+					// limit updating to at most 1Hz
+					speedDrawTimeOut -= frameTime;
+					if (speedDrawTimeOut < 0.0f) {
+						auto realTimePassed = 1.0f - speedDrawTimeOut;
+						speedDrawTimeOut = 1.0f;
+
+						auto boardTime = motherBoard->getCurrentTime();
+						auto boardTimePassed = (boardTime < prevBoardTime)
+							? 0.0 // due to reverse for instance
+							: (boardTime - prevBoardTime).toDouble();
+						prevBoardTime = boardTime;
+
+						speed = 100.0f * float(boardTimePassed) / realTimePassed;
+					}
+				} else {
+					speed = 0.0f;
+					prevBoardTime = EmuTime::zero();
+				}
+				ImGui::RightAlignText(strCat(std::lrint(speed), '%'), "10000%");
+				simpleToolTip("emulation speed");
+				ImGui::Separator();
+			}
+
+			if (statusBarItemVisibilityMachine) {
+				if (motherBoard) {
+					if (const HardwareConfig* machineConfig = motherBoard->getMachineConfig()) {
+						if (const auto* info = machineConfig->getConfig().findChild("info")) {
+							auto manuf = info->getChildData("manufacturer", "?");
+							auto code  = info->getChildData("code", "?");
+							ImGui::StrCat(manuf, ' ', code);
+							simpleToolTip([&]{
+								auto type  = info->getChildData("type", "");
+								auto desc = info->getChildData("description", "");
+								return strCat((type.empty() ? "" : strCat("Machine type: ", type, '\n')), desc);
+							});
+						}
 					}
 				}
-			}
-			ImGui::Separator();
-
-			if (auto result = execute(TclObject("guess_title"))) {
-				ImGui::TextUnformatted(result->getString());
-				simpleToolTip("the (probably) currently running software");
+				ImGui::Separator();
 			}
 
+			if (statusBarItemVisibilityRunningSoftware) {
+				if (auto result = execute(TclObject("guess_title"))) {
+					ImGui::TextUnformatted(result->getString());
+					simpleToolTip("the (probably) currently running software");
+					if (auto mapperResult = execute(TclObject("dict get [openmsx_info romtype [dict get [machine_info device [guess_rom_device]] \"mappertype\"]] description"))) {
+						ImGui::TextUnformatted(strCat(" (", mapperResult->getString(), ")"));
+						simpleToolTip("the mapper type of the running ROM software");
+					};
+				}
+			}
+
+			ImGui::SetCursorPos(pos);
+			ImGui::Dummy(ImGui::GetContentRegionAvail());
+			im::PopupContextItem("status bar context menu", [&]{
+				configStatusBarVisibilityItems();
+			});
 		});
 	}
 	ImGui::End();
+}
+
+void ImGuiManager::configStatusBarVisibilityItems()
+{
+	ImGui::Checkbox("Show FPS indicator", &statusBarItemVisibilityFps);
+	ImGui::Checkbox("Show screen mode info", &statusBarItemVisibilityScreenModeInfo);
+	ImGui::Checkbox("Show machine time", &statusBarItemVisibilityTime);
+	ImGui::Checkbox("Show actual emulation speed", &statusBarItemVisibilityActualSpeed);
+	ImGui::Checkbox("Show machine name info", &statusBarItemVisibilityMachine);
+	ImGui::Checkbox("Show running software", &statusBarItemVisibilityRunningSoftware);
 }
 
 void ImGuiManager::iniReadInit()

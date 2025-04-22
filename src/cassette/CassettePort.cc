@@ -17,6 +17,15 @@ namespace openmsx {
 
 // DummyCassettePort
 
+DummyCassettePort::DummyCassettePort(MSXMotherBoard& motherBoard)
+	: cassettePlayerCommand(
+		nullptr,
+		motherBoard.getCommandController(),
+		motherBoard.getStateChangeDistributor(),
+		motherBoard.getScheduler())
+{
+}
+
 void DummyCassettePort::setMotor(bool /*status*/, EmuTime::param /*time*/)
 {
 	// do nothing
@@ -43,7 +52,7 @@ void DummyCassettePort::setLaserdiscPlayer(LaserdiscPlayer* /* laserdisc */)
 
 // CassettePort
 
-CassettePort::CassettePort(const HardwareConfig& hwConf)
+CassettePort::CassettePort(HardwareConfig& hwConf)
 	: Connector(hwConf.getMotherBoard().getPluggingController(), "cassetteport",
 	            std::make_unique<DummyCassetteDevice>())
 	, motherBoard(hwConf.getMotherBoard())

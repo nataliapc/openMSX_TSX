@@ -12,11 +12,10 @@ register_lazy "_disasm.tcl" {
 	peek peek8 peek_u8 peek_s8 peek16 peek16_LE peek16_BE peek_u16
 	peek_u16_LE peek_u16_BE peek_s16 peek_s16_LE peek_s16_BE
 	poke poke8 poke16 poke16_LE poke16_BE dpoke disasm run_to step_over
-	step_back step_out step_in step skip_instruction}
+	step_back step_out step_in step skip_instruction toggle_breaked}
 register_lazy "_example_tools.tcl" {get_screen copy_screen_to_clipboard listing get_color_count toggle_tron}
 register_lazy "_filepool.tcl" {filepool get_paths_for_type}
 register_lazy "_guess_title.tcl" {guess_title guess_rom_title guess_rom_device}
-register_lazy "_info_panel.tcl" toggle_info_panel
 register_lazy "_metal_gear_overlay.tcl" {toggle_metal_gear_overlay}
 register_lazy "_mog-overlay.tcl" {toggle_mog_overlay toggle_mog_editor}
 register_lazy "_multi_screenshot.tcl" multi_screenshot
@@ -26,11 +25,10 @@ register_lazy "_osd_menu.tcl" {
 	do_menu_open prepare_menu_list menu_close_all select_menu_item}
 register_lazy "_osd_nemesis.tcl" toggle_nemesis_1_shield
 register_lazy "_osd_widgets.tcl" {
-	toggle_fps msx_init msx_update box text_box create_power_bar
+	msx_init msx_update box text_box create_power_bar
 	update_power_bar hide_power_bar volume_control}
 register_lazy "_psg_log.tcl" psg_log
 register_lazy "_psg_profile.tcl" psg_profile
-register_lazy "_raster_view.tcl" toggle_raster_view
 register_lazy "_record_channels.tcl" {
 	record_channels mute_channels unmute_channels solo}
 register_lazy "_record_chunks.tcl" {
@@ -49,6 +47,7 @@ register_lazy "_savestate.tcl" {
 	savestate loadstate delete_savestate list_savestates list_savestates_raw}
 register_lazy "_scc_toys.tcl" {
 	toggle_scc_editor toggle_psg2scc set_scc_wave toggle_scc_viewer}
+register_lazy "_shuffler.tcl" {shuffler}
 register_lazy "_showdebuggable.tcl" {showdebuggable showmem}
 register_lazy "_slot.tcl" {
 	get_selected_slot slotselect get_mapper_size pc_in_slot watch_in_slot
@@ -82,4 +81,3 @@ register_lazy "_vdp_access_test.tcl" toggle_vdp_access_test
 register_lazy "_vdp_busy.tcl" toggle_vdp_busy
 register_lazy "_vdrive.tcl" vdrive
 register_lazy "_vgmrecorder.tcl" {vgm_rec vgm_rec_next vgm_rec_end}
-register_lazy "_vu-meters.tcl" toggle_vu_meters

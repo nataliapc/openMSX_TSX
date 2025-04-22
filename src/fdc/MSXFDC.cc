@@ -2,6 +2,8 @@
 #include "RealDrive.hh"
 #include "XMLElement.hh"
 #include "MSXException.hh"
+#include "ConfigException.hh"
+#include "CacheLine.hh"
 #include "enumerate.hh"
 #include "serialize.hh"
 #include <array>
@@ -9,7 +11,7 @@
 
 namespace openmsx {
 
-MSXFDC::MSXFDC(const DeviceConfig& config, const std::string& romId, bool needROM,
+MSXFDC::MSXFDC(DeviceConfig& config, const std::string& romId, bool needROM,
                DiskDrive::TrackMode trackMode)
 	: MSXDevice(config)
 	, rom(needROM
@@ -59,7 +61,11 @@ byte MSXFDC::peekMem(word address, EmuTime::param /*time*/) const
 
 const byte* MSXFDC::getReadCacheLine(word start) const
 {
-	return &(*rom)[start & 0x3FFF];
+	assert(rom);
+	if (romVisibilityStart <= start && start <= romVisibilityLast) {
+		return &(*rom)[start & 0x3FFF];
+	}
+	return unmappedRead.data();
 }
 
 void MSXFDC::getExtraDeviceInfo(TclObject& result) const
@@ -67,6 +73,24 @@ void MSXFDC::getExtraDeviceInfo(TclObject& result) const
 	if (rom) {
 		rom->getInfo(result);
 	}
+}
+
+void MSXFDC::parseRomVisibility(DeviceConfig& config, unsigned defaultBase, unsigned defaultSize)
+{
+	auto base = defaultBase;
+	auto size = defaultSize;
+	if (const auto* visibility = config.findChild("rom_visibility")) {
+		base = visibility->getAttributeValueAsInt("base", base);
+		size = visibility->getAttributeValueAsInt("size", size);
+	}
+
+	if (base & CacheLine::LOW) throw ConfigException("rom_visibility base must be a multiple of 0x100.");
+	if (size & CacheLine::LOW) throw ConfigException("rom_visibility size must be a multiple of 0x100.");
+	if (base >= 0x10000) throw ConfigException("rom_visibility base must be between 0 and 0xFFFF.");
+	if (size > 0x10000) throw ConfigException("rom_visibility size must be between 0 and 0x10000.");
+
+	romVisibilityStart = base;
+	romVisibilityLast = base + size - 1;
 }
 
 

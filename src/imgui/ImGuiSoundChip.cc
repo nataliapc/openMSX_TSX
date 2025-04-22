@@ -11,6 +11,8 @@
 
 #include <imgui.h>
 
+#include <algorithm>
+
 using namespace std::literals;
 
 
@@ -42,7 +44,7 @@ void ImGuiSoundChip::paint(MSXMotherBoard* motherBoard)
 
 	// Show sound chip channel settings
 	const auto& msxMixer = motherBoard->getMSXMixer();
-	auto& infos = msxMixer.getDeviceInfos();
+	const auto& infos = msxMixer.getDeviceInfos();
 	for (const auto& info : infos) {
 		const auto& name = info.device->getName();
 		auto [it, inserted] = channels.try_emplace(name, false);
@@ -55,7 +57,7 @@ void ImGuiSoundChip::paint(MSXMotherBoard* motherBoard)
 
 [[nodiscard]] static bool anySpecialChannelSettings(const MSXMixer::SoundDeviceInfo& info)
 {
-	return ranges::any_of(info.channelSettings, [&](const auto& channel) {
+	return std::ranges::any_of(info.channelSettings, [&](const auto& channel) {
 		return channel.mute->getBoolean() || !channel.record->getString().empty();
 	});
 }
@@ -73,16 +75,16 @@ void ImGuiSoundChip::showChipSettings(MSXMotherBoard& motherBoard)
 
 	im::Window("Sound chip settings", &showSoundChipSettings, [&]{
 		const auto& msxMixer = motherBoard.getMSXMixer();
-		auto& infos = msxMixer.getDeviceInfos(); // TODO sort on name
+		const auto& infos = msxMixer.getDeviceInfos(); // TODO sort on name
 		im::Table("table", narrow<int>(infos.size()), ImGuiTableFlags_ScrollX, [&]{
-			for (auto& info : infos) {
+			for (const auto& info : infos) {
 				if (ImGui::TableNextColumn()) {
 					const auto& device = *info.device;
 					ImGui::TextUnformatted(device.getName());
 					simpleToolTip(device.getDescription());
 				}
 			}
-			for (auto& info : infos) {
+			for (const auto& info : infos) {
 				if (ImGui::TableNextColumn()) {
 					auto& volumeSetting = *info.volumeSetting;
 					int volume = volumeSetting.getInt();
@@ -96,7 +98,7 @@ void ImGuiSoundChip::showChipSettings(MSXMotherBoard& motherBoard)
 					restoreDefaultPopup("Set default", volumeSetting);
 				}
 			}
-			for (auto& info : infos) {
+			for (const auto& info : infos) {
 				if (ImGui::TableNextColumn()) {
 					auto& balanceSetting = *info.balanceSetting;
 					int balance = balanceSetting.getInt();
@@ -110,7 +112,7 @@ void ImGuiSoundChip::showChipSettings(MSXMotherBoard& motherBoard)
 					restoreDefaultPopup("Set center", balanceSetting);
 				}
 			}
-			for (auto& info : infos) {
+			for (const auto& info : infos) {
 				if (ImGui::TableNextColumn()) {
 					bool special = anySpecialChannelSettings(info);
 					if (special) {
@@ -133,23 +135,34 @@ void ImGuiSoundChip::showChipSettings(MSXMotherBoard& motherBoard)
 void ImGuiSoundChip::showChannelSettings(MSXMotherBoard& motherBoard, const std::string& name, bool* enabled)
 {
 	const auto& msxMixer = motherBoard.getMSXMixer();
-	auto* info = msxMixer.findDeviceInfo(name);
+	const auto* info = msxMixer.findDeviceInfo(name);
 	if (!info) return;
 
-	std::string label = name + " channel setting";
+	std::string label = name + " channel settings";
+	ImGui::SetNextWindowSize(gl::vec2{40, 0} * ImGui::GetFontSize(), ImGuiCond_FirstUseEver);
 	im::Window(label.c_str(), enabled, [&]{
 		const auto& hotKey = manager.getReactor().getHotKey();
-		im::Table("table", 3, [&]{
+		int flags = ImGuiTableFlags_ScrollY |
+			    ImGuiTableFlags_RowBg |
+		            ImGuiTableFlags_SizingStretchProp;
+		im::Table("table", 3, flags, [&]{
+			ImGui::TableSetupScrollFreeze(0, 1); // Make top row always visible
+			ImGui::TableSetupColumn("ch.",  ImGuiTableColumnFlags_WidthFixed);
+			ImGui::TableSetupColumn("mute", ImGuiTableColumnFlags_WidthFixed);
+			ImGui::TableSetupColumn("file to record to", ImGuiTableColumnFlags_WidthStretch);
+			ImGui::TableHeadersRow();
 			im::ID_for_range(info->channelSettings.size(), [&](int i) {
-				auto& channel =  info->channelSettings[i];
+				const auto& channel =  info->channelSettings[i];
 				if (ImGui::TableNextColumn()) {
-					ImGui::StrCat("channel ", i);
+					ImGui::StrCat(i + 1);
 				}
 				if (ImGui::TableNextColumn()) {
-					Checkbox(hotKey, "mute", *channel.mute);
+					Checkbox(hotKey, "##mute", *channel.mute);
 				}
 				if (ImGui::TableNextColumn()) {
-					InputText("record", *channel.record);
+					// TODO: use a file browser (in "create mode")
+					ImGui::SetNextItemWidth(-FLT_MIN);
+					InputText("##rec", *channel.record);
 				}
 			});
 		});

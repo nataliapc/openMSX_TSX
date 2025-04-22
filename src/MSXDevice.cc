@@ -1,4 +1,5 @@
 #include "MSXDevice.hh"
+
 #include "XMLElement.hh"
 #include "MSXMotherBoard.hh"
 #include "HardwareConfig.hh"
@@ -7,12 +8,13 @@
 #include "CacheLine.hh"
 #include "TclObject.hh"
 #include "MSXException.hh"
+
 #include "one_of.hh"
-#include "ranges.hh"
 #include "serialize.hh"
 #include "stl.hh"
 #include "unreachable.hh"
-#include "xrange.hh"
+
+#include <algorithm>
 #include <bit>
 #include <cassert>
 
@@ -64,7 +66,7 @@ void MSXDevice::staticInit()
 	if (alreadyInit) return;
 	alreadyInit = true;
 
-	ranges::fill(unmappedRead, 0xFF);
+	std::ranges::fill(unmappedRead, 0xFF);
 }
 
 MSXMotherBoard& MSXDevice::getMotherBoard() const
@@ -180,7 +182,7 @@ void MSXDevice::registerSlots()
 				getName(), " should be aligned on at least 0x",
 				hex_string<4>(align), '.');
 		}
-		tmpMemRegions.emplace_back(BaseSize{base, size});
+		tmpMemRegions.push_back({.base = base, .size = size});
 	}
 	if (tmpMemRegions.empty()) {
 		return;
@@ -213,7 +215,7 @@ void MSXDevice::registerSlots()
 	// the (possibly shared) <primary> and <secondary> tags. When loading
 	// an old savestate these tags can still occur, so keep this code. Also
 	// remove these attributes to convert to the new format.
-	auto& mutableConfig = const_cast<XMLElement&>(getDeviceConfig());
+	auto& mutableConfig = getDeviceConfig();
 	if (auto** primSlotPtr = mutableConfig.findAttributePointer("primary_slot")) {
 		ps = slotManager.getSlotNum((*primSlotPtr)->getValue());
 		mutableConfig.removeAttribute(primSlotPtr);
@@ -333,6 +335,11 @@ void MSXDevice::registerPorts()
 		}
 	}
 	// .. and only then register the ports. This filters possible overlaps.
+	doRegisterPorts();
+}
+
+void MSXDevice::doRegisterPorts()
+{
 	inPorts.foreachSetBit([&](auto port) {
 		getCPUInterface().register_IO_In(narrow_cast<byte>(port), this);
 	});

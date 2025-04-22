@@ -2,12 +2,16 @@
 #define OGGREADER_HH
 
 #include "File.hh"
+
 #include "circular_buffer.hh"
 #include "narrow.hh"
+
 #include <ogg/ogg.h>
 #include <vorbis/codec.h>
 #include <theora/theoradec.h>
+
 #include <array>
+#include <cstdint>
 #include <list>
 #include <memory>
 #include <vector>
@@ -74,7 +78,7 @@ private:
 	bool nextPacket();
 	void recycleAudio(std::unique_ptr<AudioFragment> audio);
 	void vorbisFoundPosition();
-	size_t frameNo(ogg_packet* packet) const;
+	size_t frameNo(const ogg_packet* packet) const;
 
 	size_t findOffset(size_t frame, size_t sample);
 	size_t bisection(size_t frame, size_t sample,
@@ -84,7 +88,7 @@ private:
 	CliComm& cli;
 	File file;
 
-	enum State {
+	enum State : uint8_t {
 		PLAYING,
 		FIND_LAST,
 		FIND_FIRST,

@@ -15,13 +15,13 @@
 #include "TclObject.hh"
 
 #include "StringOp.hh"
-#include "ranges.hh"
 #include "stl.hh"
 #include "unreachable.hh"
-#include "view.hh"
 
+#include <algorithm>
 #include <iterator>
 #include <memory>
+#include <ranges>
 #include <sstream>
 #include <variant>
 
@@ -233,7 +233,7 @@ void AfterCommand::afterTclTime(
 	int ms, std::span<const TclObject> tokens, TclObject& result)
 {
 	TclObject command;
-	command.addListElements(view::drop(tokens, 2));
+	command.addListElements(std::views::drop(tokens, 2));
 	auto [idx, ptr] = afterCmdPool.emplace(
 		std::in_place_type_t<AfterRealTimeCmd>{},
 		reactor.getRTScheduler(), *this, command, ms * (1.0 / 1000.0));
@@ -309,7 +309,7 @@ void AfterCommand::afterCancel(std::span<const TclObject> tokens, TclObject& /*r
 						 return cmd.getId() == id;
 					}, afterCmdPool[idx]);
 				};
-				if (auto it = ranges::find_if(afterCmds, equalId);
+				if (auto it = std::ranges::find_if(afterCmds, equalId);
 				    it != end(afterCmds)) {
 					auto idx = *it;
 					afterCmds.erase(it);
@@ -320,14 +320,14 @@ void AfterCommand::afterCancel(std::span<const TclObject> tokens, TclObject& /*r
 		}
 	}
 	TclObject command;
-	command.addListElements(view::drop(tokens, 2));
+	command.addListElements(std::views::drop(tokens, 2));
 	std::string_view cmdStr = command.getString();
 	auto equalCmd = [&](Index idx) {
 		return std::visit([&](const AfterCmd& cmd) {
 			return cmd.getCommand() == cmdStr;
 		}, afterCmdPool[idx]);
 	};
-	if (auto it = ranges::find_if(afterCmds, equalCmd);
+	if (auto it = std::ranges::find_if(afterCmds, equalCmd);
 	    it != end(afterCmds)) {
 		auto idx = *it;
 		afterCmds.erase(it);
@@ -350,6 +350,7 @@ std::string AfterCommand::help(std::span<const TclObject> /*tokens*/) const
 	       "after break <command>               execute a command after a breakpoint is reached\n"
 	       "after boot <command>                execute a command after a (re)boot\n"
 	       "after machine_switch <command>      execute a command after a switch to a new machine\n"
+	       "after quit <command>                execute a command after a quit event\n"
 	       "after info                          list all postponed commands\n"
 	       "after cancel <id>                   cancel the postponed command with given id\n";
 }
@@ -360,7 +361,7 @@ void AfterCommand::tabCompletion(std::vector<std::string>& tokens) const
 		using namespace std::literals;
 		static constexpr std::array cmds = {
 			"time"sv, "realtime"sv, "idle"sv, "frame"sv, "break"sv, "boot"sv,
-			"machine_switch"sv, "info"sv, "cancel"sv,
+			"machine_switch"sv, "quit"sv, "info"sv, "cancel"sv,
 		};
 		completeString(tokens, cmds);
 	}

@@ -7,13 +7,16 @@
 // sharing his implementation with us (and pointing us to it).
 
 #include "RomHolyQuran2.hh"
+
 #include "MSXCPU.hh"
 #include "MSXException.hh"
+
 #include "enumerate.hh"
 #include "narrow.hh"
 #include "outer.hh"
-#include "ranges.hh"
 #include "serialize.hh"
+
+#include <algorithm>
 #include <array>
 
 namespace openmsx {
@@ -46,7 +49,7 @@ RomHolyQuran2::RomHolyQuran2(const DeviceConfig& config, Rom&& rom_)
 
 void RomHolyQuran2::reset(EmuTime::param /*time*/)
 {
-	ranges::fill(bank, &rom[0]);
+	std::ranges::fill(bank, &rom[0]);
 	decrypt = false;
 }
 
@@ -130,12 +133,12 @@ RomHolyQuran2::Blocks::Blocks(const RomHolyQuran2& device_)
 {
 }
 
-byte RomHolyQuran2::Blocks::read(unsigned address)
+unsigned RomHolyQuran2::Blocks::readExt(unsigned address)
 {
-	if ((address < 0x4000) || (address >= 0xc000)) return 255;
+	if ((address < 0x4000) || (address >= 0xc000)) return unsigned(-1);
 	unsigned page = (address - 0x4000) / 0x2000;
 	auto& device = OUTER(RomHolyQuran2, romBlocks);
-	return narrow<byte>((device.bank[page] - &device.rom[0]) / 0x2000);
+	return narrow<unsigned>(device.bank[page] - &device.rom[0]) / 0x2000;
 }
 
 } // namespace openmsx

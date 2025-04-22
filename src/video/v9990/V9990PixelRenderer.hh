@@ -2,9 +2,11 @@
 #define V9990PIXELRENDERER_HH
 
 #include "V9990Renderer.hh"
+
 #include "Observer.hh"
 #include "RenderSettings.hh"
-#include "openmsx.hh"
+
+#include <cstdint>
 #include <memory>
 
 namespace openmsx {
@@ -36,7 +38,7 @@ public:
 	void updateDisplayEnabled(bool enabled, EmuTime::param time) override;
 	void setDisplayMode(V9990DisplayMode mode, EmuTime::param time) override;
 	void setColorMode(V9990ColorMode mode, EmuTime::param time) override;
-	void updatePalette(int index, byte r, byte g, byte b, bool ys,
+	void updatePalette(int index, uint8_t r, uint8_t g, uint8_t b, bool ys,
 	                   EmuTime::param time) override;
 	void updateSuperimposing(bool enabled, EmuTime::param time) override;
 	void updateBackgroundColor(int index, EmuTime::param time) override;
@@ -51,7 +53,7 @@ private:
 
 	/** Type of drawing to do.
 	  */
-	enum DrawType {
+	enum DrawType : uint8_t {
 		DRAW_BORDER,
 		DRAW_DISPLAY
 	};

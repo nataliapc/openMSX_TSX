@@ -10,6 +10,7 @@
 #include "ranges.hh"
 #include "stl.hh"
 
+#include <algorithm>
 #include <bit>
 #include <optional>
 
@@ -117,7 +118,7 @@ UnicodeKeymap::KeyInfo UnicodeKeymap::getDeadKey(unsigned n) const
 
 void UnicodeKeymap::parseUnicodeKeyMapFile(string_view data)
 {
-	ranges::fill(relevantMods, 0);
+	std::ranges::fill(relevantMods, 0);
 
 	while (!data.empty()) {
 		if (data.front() == '\n') {
@@ -217,13 +218,13 @@ void UnicodeKeymap::parseUnicodeKeyMapFile(string_view data)
 			}
 			deadKeys[deadKeyIndex] = KeyInfo(pos, 0);
 		} else {
-			mapData.emplace_back(Entry{unicode, KeyInfo(pos, modMask)});
+			mapData.emplace_back(Entry{.unicode = unicode, .keyInfo = KeyInfo(pos, modMask)});
 			// Note: getRowCol() uses 3 bits for column, rowcol uses 4.
 			relevantMods[pos.getRowCol()] |= modMask;
 		}
 	}
 
-	ranges::sort(mapData, {}, &Entry::unicode);
+	std::ranges::sort(mapData, {}, &Entry::unicode);
 }
 
 } // namespace openmsx

@@ -1,11 +1,12 @@
 #include "ConsoleLine.hh"
 
 #include "narrow.hh"
-#include "ranges.hh"
 #include "stl.hh"
 #include "strCat.hh"
 #include "utf8_unchecked.hh"
-#include "view.hh"
+
+#include <algorithm>
+#include <ranges>
 
 namespace openmsx {
 
@@ -17,7 +18,7 @@ ConsoleLine::ConsoleLine(std::string line_, imColor color)
 
 void ConsoleLine::addChunk(std::string_view text, imColor color)
 {
-	chunks.emplace_back(Chunk{color, line.size()});
+	chunks.push_back({.color = color, .pos = line.size()});
 	line.append(text.data(), text.size());
 }
 
@@ -49,14 +50,14 @@ ConsoleLine ConsoleLine::splitAtColumn(unsigned column)
 	}
 	auto pos = narrow<unsigned>(std::distance(line.begin(), it));
 
-	auto it2 = ranges::upper_bound(chunks, pos, {}, &Chunk::pos);
+	auto it2 = std::ranges::upper_bound(chunks, pos, {}, &Chunk::pos);
 	assert(it2 != chunks.begin());
 	auto splitColor = it2[-1].color;
 
 	if (it != et) {
 		result.addChunk(std::string_view{it, et}, splitColor);
 		result.chunks.insert(result.chunks.end(), it2, chunks.end());
-		for (auto& c : view::drop(result.chunks, 1)) {
+		for (auto& c : std::views::drop(result.chunks, 1)) {
 			c.pos -= pos;
 		}
 	}

@@ -1,6 +1,8 @@
 #ifndef SCOPEDASSIGN_HH
 #define SCOPEDASSIGN_HH
 
+#include <utility>
+
 /** Assign new value to some variable and restore the original value
   * when this object goes out of scope.
   */
@@ -12,16 +14,17 @@ public:
 	ScopedAssign& operator=(const ScopedAssign&) = delete;
 	ScopedAssign& operator=(ScopedAssign&&) = delete;
 
-	[[nodiscard]] ScopedAssign(T& var_, T newValue)
-		: var(var_)
+	template<typename T2 = T>
+	[[nodiscard]] ScopedAssign(T& var_, T2&& newValue)
+		: var(var_), oldValue(std::exchange(var, std::forward<T2>(newValue)))
 	{
-		oldValue = var;
-		var = newValue;
 	}
+
 	~ScopedAssign()
 	{
-		var = oldValue;
+		var = std::move(oldValue);
 	}
+
 private:
 	T& var;
 	T oldValue;

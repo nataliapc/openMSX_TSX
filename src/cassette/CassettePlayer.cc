@@ -39,7 +39,6 @@
 #include "Reactor.hh"
 #include "GlobalSettings.hh"
 #include "CommandException.hh"
-#include "EventDistributor.hh"
 #include "FileOperations.hh"
 #include "WavWriter.hh"
 #include "TclObject.hh"
@@ -73,12 +72,13 @@ static std::string_view getCassettePlayerName()
 	return "cassetteplayer";
 }
 
-CassettePlayer::CassettePlayer(const HardwareConfig& hwConf)
+CassettePlayer::CassettePlayer(HardwareConfig& hwConf)
 	: ResampledSoundDevice(hwConf.getMotherBoard(), getCassettePlayerName(), DESCRIPTION, 1, DUMMY_INPUT_RATE, false)
 	, syncEndOfTape(hwConf.getMotherBoard().getScheduler())
 	, syncAudioEmu (hwConf.getMotherBoard().getScheduler())
 	, motherBoard(hwConf.getMotherBoard())
-	, tapeCommand(
+	, cassettePlayerCommand(
+		this,
 		motherBoard.getCommandController(),
 		motherBoard.getStateChangeDistributor(),
 		motherBoard.getScheduler())
@@ -88,7 +88,7 @@ CassettePlayer::CassettePlayer(const HardwareConfig& hwConf)
 		motherBoard.getCommandController(),
 		"autoruncassettes", "automatically try to run cassettes", true)
 {
-	static const XMLElement* xml = [] {
+	static XMLElement* xml = [] {
 		auto& doc = XMLDocument::getStaticDocument();
 		XMLElement* result = doc.allocateElement("cassetteplayer");
 		result->setFirstChild(doc.allocateElement("sound"))
@@ -97,8 +97,6 @@ CassettePlayer::CassettePlayer(const HardwareConfig& hwConf)
 	}();
 	registerSound(DeviceConfig(hwConf, *xml));
 
-	motherBoard.getReactor().getEventDistributor().registerEventListener(
-		EventType::BOOT, *this);
 	motherBoard.registerMediaInfo(getCassettePlayerName(), *this);
 	motherBoard.getMSXCliComm().update(CliComm::UpdateType::HARDWARE, getCassettePlayerName(), "add");
 
@@ -111,8 +109,6 @@ CassettePlayer::~CassettePlayer()
 	if (auto* c = getConnector()) {
 		c->unplug(getCurrentTime());
 	}
-	motherBoard.getReactor().getEventDistributor().unregisterEventListener(
-		EventType::BOOT, *this);
 	motherBoard.unregisterMediaInfo(*this);
 	motherBoard.getMSXCliComm().update(CliComm::UpdateType::HARDWARE, getCassettePlayerName(), "remove");
 }
@@ -207,6 +203,7 @@ void CassettePlayer::autoRun()
 string CassettePlayer::getStateString() const
 {
 	switch (getState()) {
+		using enum State;
 		case PLAY:   return "play";
 		case RECORD: return "record";
 		case STOP:   return "stop";
@@ -221,13 +218,13 @@ bool CassettePlayer::isRolling() const
 	//  not in stop mode (there is a tape inserted and not at end-of-tape)
 	//  AND [ user forced playing (motorControl=off) OR motor enabled by
 	//        software (motor=on) ]
-	return (getState() != STOP) && (motor || !motorControl);
+	return (getState() != State::STOP) && (motor || !motorControl);
 }
 
 double CassettePlayer::getTapePos(EmuTime::param time)
 {
 	sync(time);
-	if (getState() == RECORD) {
+	if (getState() == State::RECORD) {
 		// we record 8-bit mono, so bytes == samples
 		return (double(recordImage->getBytes()) + partialInterval) * RECIP_RECORD_FREQ;
 	} else {
@@ -235,11 +232,20 @@ double CassettePlayer::getTapePos(EmuTime::param time)
 	}
 }
 
+void CassettePlayer::setTapePos(EmuTime::param time, double newPos)
+{
+	assert(getState() != State::RECORD);
+	sync(time);
+	auto pos = std::clamp(newPos, 0.0, getTapeLength(time));
+	tapePos = EmuTime::zero() + EmuDuration(pos);
+	wind(time);
+}
+
 double CassettePlayer::getTapeLength(EmuTime::param time)
 {
 	if (playImage) {
 		return (playImage->getEndTime() - EmuTime::zero()).toDouble();
-	} else if (getState() == RECORD) {
+	} else if (getState() == State::RECORD) {
 		return getTapePos(time);
 	} else {
 		return 0.0;
@@ -249,7 +255,7 @@ double CassettePlayer::getTapeLength(EmuTime::param time)
 void CassettePlayer::checkInvariants() const
 {
 	switch (getState()) {
-	case STOP:
+	case State::STOP:
 		assert(!recordImage);
 		if (playImage) {
 			// we're at end-of tape
@@ -258,12 +264,12 @@ void CassettePlayer::checkInvariants() const
 			// no tape inserted, imageName may or may not be empty
 		}
 		break;
-	case PLAY:
+	case State::PLAY:
 		assert(!getImageName().empty());
 		assert(!recordImage);
 		assert(playImage);
 		break;
-	case RECORD:
+	case State::RECORD:
 		assert(!getImageName().empty());
 		assert(recordImage);
 		assert(!playImage);
@@ -284,12 +290,12 @@ void CassettePlayer::setState(State newState, const Filename& newImage,
 
 	// cannot directly switch from PLAY to RECORD or vice-versa,
 	// (should always go via STOP)
-	assert(!((oldState == PLAY)   && (newState == RECORD)));
-	assert(!((oldState == RECORD) && (newState == PLAY)));
+	assert(!((oldState == State::PLAY)   && (newState == State::RECORD)));
+	assert(!((oldState == State::RECORD) && (newState == State::PLAY)));
 
 	// stuff for leaving the old state
 	//  'recordImage==nullptr' can happen in case of loadstate.
-	if ((oldState == RECORD) && recordImage) {
+	if ((oldState == State::RECORD) && recordImage) {
 		flushOutput();
 		bool empty = recordImage->isEmpty();
 		recordImage.reset();
@@ -305,7 +311,7 @@ void CassettePlayer::setState(State newState, const Filename& newImage,
 	setImageName(newImage);
 
 	// stuff for entering the new state
-	if (newState == RECORD) {
+	if (newState == State::RECORD) {
 		partialOut = 0.0;
 		partialInterval = 0.0;
 		lastX = lastOutput ? OUTPUT_AMP : -OUTPUT_AMP;
@@ -324,10 +330,10 @@ void CassettePlayer::updateLoadingState(EmuTime::param time)
 	assert(prevSyncTime == time); // sync() must be called
 	// TODO also set loadingIndicator for RECORD?
 	// note: we don't use isRolling()
-	loadingIndicator.update(motor && (getState() == PLAY));
+	loadingIndicator.update(motor && (getState() == State::PLAY));
 
 	syncEndOfTape.removeSyncPoint();
-	if (isRolling() && (getState() == PLAY)) {
+	if (isRolling() && (getState() == State::PLAY)) {
 		syncEndOfTape.setSyncPoint(time + (playImage->getEndTime() - tapePos));
 	}
 }
@@ -410,25 +416,29 @@ void CassettePlayer::playTape(const Filename& filename, EmuTime::param time)
 	//         if you switch from RECORD->PLAY on the same image.
 	// PLAY: Go to stop because we temporally violate some invariants
 	//       (tapePos can be beyond end-of-tape).
-	setState(STOP, getImageName(), time); // keep current image
+	setState(State::STOP, getImageName(), time); // keep current image
 	insertTape(filename, time);
 	rewind(time); // sets PLAY mode
-	autoRun();
 }
 
 void CassettePlayer::rewind(EmuTime::param time)
 {
 	sync(time); // before tapePos changes
-	assert(getState() != RECORD);
+	assert(getState() != State::RECORD);
 	tapePos = EmuTime::zero();
 	audioPos = 0;
+	wind(time);
+	autoRun();
+}
 
+void CassettePlayer::wind(EmuTime::param time)
+{
 	if (getImageName().empty()) {
 		// no image inserted, do nothing
-		assert(getState() == STOP);
+		assert(getState() == State::STOP);
 	} else {
 		// keep current image
-		setState(PLAY, getImageName(), time);
+		setState(State::PLAY, getImageName(), time);
 	}
 	updateLoadingState(time);
 }
@@ -438,13 +448,13 @@ void CassettePlayer::recordTape(const Filename& filename, EmuTime::param time)
 	removeTape(time); // flush (possible) previous recording
 	recordImage = std::make_unique<Wav8Writer>(filename, 1, RECORD_FREQ);
 	tapePos = EmuTime::zero();
-	setState(RECORD, filename, time);
+	setState(State::RECORD, filename, time);
 }
 
 void CassettePlayer::removeTape(EmuTime::param time)
 {
 	// first stop with tape still inserted
-	setState(STOP, getImageName(), time);
+	setState(State::STOP, getImageName(), time);
 	// then remove the tape
 	playImage.reset();
 	tapePos = EmuTime::zero();
@@ -471,7 +481,7 @@ void CassettePlayer::setMotorControl(bool status, EmuTime::param time)
 
 int16_t CassettePlayer::readSample(EmuTime::param time)
 {
-	if (getState() == PLAY) {
+	if (getState() == State::PLAY) {
 		// playing
 		sync(time);
 		return isRolling() ? playImage->getSampleAt(tapePos) : int16_t(0);
@@ -499,7 +509,7 @@ void CassettePlayer::sync(EmuTime::param time)
 void CassettePlayer::updateTapePosition(
 	EmuDuration::param duration, EmuTime::param time)
 {
-	if (!isRolling() || (getState() != PLAY)) return;
+	if (!isRolling() || (getState() != State::PLAY)) return;
 
 	tapePos += duration;
 	assert(tapePos <= playImage->getEndTime());
@@ -598,7 +608,7 @@ void CassettePlayer::plugHelper(Connector& conn, EmuTime::param time)
 void CassettePlayer::unplugHelper(EmuTime::param time)
 {
 	// note: may not throw exceptions
-	setState(STOP, getImageName(), time); // keep current image
+	setState(State::STOP, getImageName(), time); // keep current image
 }
 
 
@@ -606,7 +616,7 @@ void CassettePlayer::generateChannels(std::span<float*> buffers, unsigned num)
 {
 	// Single channel device: replace content of buffers[0] (not add to it).
 	assert(buffers.size() == 1);
-	if ((getState() != PLAY) || !isRolling()) {
+	if ((getState() != State::PLAY) || !isRolling()) {
 		buffers[0] = nullptr;
 		return;
 	}
@@ -620,20 +630,6 @@ float CassettePlayer::getAmplificationFactorImpl() const
 	return playImage ? playImage->getAmplificationFactorImpl() : 1.0f;
 }
 
-bool CassettePlayer::signalEvent(const Event& event)
-{
-	if (getType(event) == EventType::BOOT && !getImageName().empty()) {
-		// Reinsert tape to make sure everything is reset.
-		try {
-			playTape(getImageName(), getCurrentTime());
-		} catch (MSXException& e) {
-			motherBoard.getMSXCliComm().printWarning(
-				"Failed to insert tape: ", e.getMessage());
-		}
-	}
-	return false;
-}
-
 void CassettePlayer::execEndOfTape(EmuTime::param time)
 {
 	// tape ended
@@ -644,12 +640,12 @@ void CassettePlayer::execEndOfTape(EmuTime::param time)
 		"You may need to insert another tape image "
 		"that contains side B. (Or you used the wrong "
 		"loading command.)");
-	setState(STOP, getImageName(), time); // keep current image
+	setState(State::STOP, getImageName(), time); // keep current image
 }
 
 void CassettePlayer::execSyncAudioEmu(EmuTime::param time)
 {
-	if (getState() == PLAY) {
+	if (getState() == State::PLAY) {
 		updateStream(time);
 		sync(time);
 		DynamicClock clk(EmuTime::zero());
@@ -659,231 +655,10 @@ void CassettePlayer::execSyncAudioEmu(EmuTime::param time)
 	syncScheduled = false;
 }
 
-
-// class TapeCommand
-
-CassettePlayer::TapeCommand::TapeCommand(
-		CommandController& commandController_,
-		StateChangeDistributor& stateChangeDistributor_,
-		Scheduler& scheduler_)
-	: RecordedCommand(commandController_, stateChangeDistributor_,
-	                  scheduler_, "cassetteplayer")
-{
-}
-
-void CassettePlayer::TapeCommand::execute(
-	std::span<const TclObject> tokens, TclObject& result, EmuTime::param time)
-{
-	auto& cassettePlayer = OUTER(CassettePlayer, tapeCommand);
-	if (tokens.size() == 1) {
-		// Returning Tcl lists here, similar to the disk commands in
-		// DiskChanger
-		TclObject options = makeTclList(cassettePlayer.getStateString());
-		result.addListElement(tmpStrCat(getName(), ':'),
-		                      cassettePlayer.getImageName().getResolved(),
-		                      options);
-
-	} else if (tokens[1] == "new") {
-		std::string_view prefix = "openmsx";
-		string filename = FileOperations::parseCommandFileArgument(
-			(tokens.size() == 3) ? tokens[2].getString() : string{},
-			TAPE_RECORDING_DIR, prefix, TAPE_RECORDING_EXTENSION);
-		cassettePlayer.recordTape(Filename(filename), time);
-		result = tmpStrCat(
-			"Created new cassette image file: ", filename,
-			", inserted it and set recording mode.");
-
-	} else if (tokens[1] == "insert" && tokens.size() == 3) {
-		try {
-			result = "Changing tape";
-			Filename filename(tokens[2].getString(), userFileContext());
-			cassettePlayer.playTape(filename, time);
-		} catch (MSXException& e) {
-			throw CommandException(std::move(e).getMessage());
-		}
-
-	} else if (tokens[1] == "motorcontrol" && tokens.size() == 3) {
-		if (tokens[2] == "on") {
-			cassettePlayer.setMotorControl(true, time);
-			result = "Motor control enabled.";
-		} else if (tokens[2] == "off") {
-			cassettePlayer.setMotorControl(false, time);
-			result = "Motor control disabled.";
-		} else {
-			throw SyntaxError();
-		}
-
-	} else if (tokens.size() != 2) {
-		throw SyntaxError();
-
-	} else if (tokens[1] == "motorcontrol") {
-		result = tmpStrCat("Motor control is ",
-		                (cassettePlayer.motorControl ? "on" : "off"));
-
-	} else if (tokens[1] == "record") {
-			result = "TODO: implement this... (sorry)";
-
-	} else if (tokens[1] == "play") {
-		if (cassettePlayer.getState() == CassettePlayer::RECORD) {
-			try {
-				result = "Play mode set, rewinding tape.";
-				cassettePlayer.playTape(
-					cassettePlayer.getImageName(), time);
-			} catch (MSXException& e) {
-				throw CommandException(std::move(e).getMessage());
-			}
-		} else if (cassettePlayer.getState() == CassettePlayer::STOP) {
-			throw CommandException("No tape inserted or tape at end!");
-		} else {
-			// PLAY mode
-			result = "Already in play mode.";
-		}
-
-	} else if (tokens[1] == "eject") {
-		result = "Tape ejected";
-		cassettePlayer.removeTape(time);
-
-	} else if (tokens[1] == "rewind") {
-		string r;
-		if (cassettePlayer.getState() == CassettePlayer::RECORD) {
-			try {
-				r = "First stopping recording... ";
-				cassettePlayer.playTape(
-					cassettePlayer.getImageName(), time);
-			} catch (MSXException& e) {
-				throw CommandException(std::move(e).getMessage());
-			}
-		}
-		cassettePlayer.rewind(time);
-		r += "Tape rewound";
-		result = r;
-
-	} else if (tokens[1] == "getpos") {
-		result = cassettePlayer.getTapePos(time);
-
-	} else if (tokens[1] == "getlength") {
-		result = cassettePlayer.getTapeLength(time);
-
-	} else {
-		try {
-			result = "Changing tape";
-			Filename filename(tokens[1].getString(), userFileContext());
-			cassettePlayer.playTape(filename, time);
-		} catch (MSXException& e) {
-			throw CommandException(std::move(e).getMessage());
-		}
-	}
-	//if (!cassettePlayer.getConnector()) {
-	//	cassettePlayer.cliComm.printWarning("Cassette player not plugged in.");
-	//}
-}
-
-string CassettePlayer::TapeCommand::help(std::span<const TclObject> tokens) const
-{
-	string helpText;
-	if (tokens.size() >= 2) {
-		if (tokens[1] == "eject") {
-			helpText =
-			    "Well, just eject the cassette from the cassette "
-			    "player/recorder!";
-		} else if (tokens[1] == "rewind") {
-			helpText =
-			    "Indeed, rewind the tape that is currently in the "
-			    "cassette player/recorder...";
-		} else if (tokens[1] == "motorcontrol") {
-			helpText =
-			    "Setting this to 'off' is equivalent to "
-			    "disconnecting the black remote plug from the "
-			    "cassette player: it makes the cassette player "
-			    "run (if in play mode); the motor signal from the "
-			    "MSX will be ignored. Normally this is set to "
-			    "'on': the cassetteplayer obeys the motor control "
-			    "signal from the MSX.";
-		} else if (tokens[1] == "play") {
-			helpText =
-			    "Go to play mode. Only useful if you were in "
-			    "record mode (which is currently the only other "
-			    "mode available).";
-		} else if (tokens[1] == "new") {
-			helpText =
-			    "Create a new cassette image. If the file name is "
-			    "omitted, one will be generated in the default "
-			    "directory for tape recordings. Implies going to "
-			    "record mode (why else do you want a new cassette "
-			    "image?).";
-		} else if (tokens[1] == "insert") {
-			helpText =
-			    "Inserts the specified cassette image into the "
-			    "cassette player, rewinds it and switches to play "
-			    "mode.";
-		} else if (tokens[1] == "record") {
-			helpText =
-			    "Go to record mode. NOT IMPLEMENTED YET. Will be "
-			    "used to be able to resume recording to an "
-			    "existing cassette image, previously inserted with "
-			    "the insert command.";
-		} else if (tokens[1] == "getpos") {
-			helpText =
-			    "Return the position of the tape, in seconds from "
-			    "the beginning of the tape.";
-		} else if (tokens[1] == "getlength") {
-			helpText =
-			    "Return the length of the tape in seconds.";
-		}
-	} else {
-		helpText =
-		    "cassetteplayer eject             "
-		    ": remove tape from virtual player\n"
-		    "cassetteplayer rewind            "
-		    ": rewind tape in virtual player\n"
-		    "cassetteplayer motorcontrol      "
-		    ": enables or disables motor control (remote)\n"
-		    "cassetteplayer play              "
-		    ": change to play mode (default)\n"
-		    "cassetteplayer record            "
-		    ": change to record mode (NOT IMPLEMENTED YET)\n"
-		    "cassetteplayer new [<filename>]  "
-		    ": create and insert new tape image file and go to record mode\n"
-		    "cassetteplayer insert <filename> "
-		    ": insert (a different) tape file\n"
-		    "cassetteplayer getpos            "
-		    ": query the position of the tape\n"
-		    "cassetteplayer getlength         "
-		    ": query the total length of the tape\n"
-		    "cassetteplayer <filename>        "
-		    ": insert (a different) tape file\n";
-	}
-	return helpText;
-}
-
-void CassettePlayer::TapeCommand::tabCompletion(std::vector<string>& tokens) const
-{
-	using namespace std::literals;
-	if (tokens.size() == 2) {
-		static constexpr std::array cmds = {
-			"eject"sv, "rewind"sv, "motorcontrol"sv, "insert"sv, "new"sv,
-			"play"sv, "getpos"sv, "getlength"sv,
-			//"record"sv,
-		};
-		completeFileName(tokens, userFileContext(), cmds);
-	} else if ((tokens.size() == 3) && (tokens[1] == "insert")) {
-		completeFileName(tokens, userFileContext());
-	} else if ((tokens.size() == 3) && (tokens[1] == "motorcontrol")) {
-		static constexpr std::array extra = {"on"sv, "off"sv};
-		completeString(tokens, extra);
-	}
-}
-
-bool CassettePlayer::TapeCommand::needRecord(std::span<const TclObject> tokens) const
-{
-	return tokens.size() > 1;
-}
-
-
 static constexpr std::initializer_list<enum_string<CassettePlayer::State>> stateInfo = {
-	{ "PLAY",   CassettePlayer::PLAY   },
-	{ "RECORD", CassettePlayer::RECORD },
-	{ "STOP",   CassettePlayer::STOP   }
+	{ "PLAY",   CassettePlayer::State::PLAY   },
+	{ "RECORD", CassettePlayer::State::RECORD },
+	{ "STOP",   CassettePlayer::State::STOP   }
 };
 SERIALIZE_ENUM(CassettePlayer::State, stateInfo);
 
@@ -983,18 +758,18 @@ void CassettePlayer::serialize(Archive& ar, unsigned version)
 				"baud rate or when the tape image has been changed "
 				"compared to when the replay was created.");
 		}
-		if (state == RECORD) {
+		if (state == State::RECORD) {
 			// TODO we don't support savestates in RECORD mode yet
 			motherBoard.getMSXCliComm().printWarning(
 				"Restoring a state where the MSX was saving to "
 				"tape is not yet supported. Emulation will "
 				"continue without actually saving.");
-			setState(STOP, getImageName(), time);
+			setState(State::STOP, getImageName(), time);
 		}
-		if (!playImage && (state == PLAY)) {
+		if (!playImage && (state == State::PLAY)) {
 			// This should only happen for manually edited
 			// savestates, though we shouldn't crash on it.
-			setState(STOP, getImageName(), time);
+			setState(State::STOP, getImageName(), time);
 		}
 		sync(time);
 		updateLoadingState(time);

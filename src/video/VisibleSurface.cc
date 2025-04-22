@@ -23,7 +23,7 @@
 
 #include "narrow.hh"
 #include "outer.hh"
-#include "vla.hh"
+#include "small_buffer.hh"
 
 #include "build-info.hh"
 
@@ -34,6 +34,7 @@
 #include <bit>
 #include <cassert>
 #include <memory>
+#include <ranges>
 
 namespace openmsx {
 
@@ -345,16 +346,16 @@ void VisibleSurface::saveScreenshotGL(
 	const OutputSurface& output, const std::string& filename)
 {
 	auto [x, y] = output.getViewOffset();
-	auto [w, h] = output.getViewSize();
+	auto [w_, h_] = output.getViewSize();
+	auto w = w_; // pre-clang-16 workaround
+	auto h = h_;
 
 	// OpenGL ES only supports reading RGBA (not RGB)
 	MemBuffer<uint32_t> buffer(size_t(w) * size_t(h));
 	glReadPixels(x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, buffer.data());
 
-	VLA(const uint32_t*, rowPointers, h);
-	for (auto i : xrange(size_t(h))) {
-		rowPointers[h - 1 - i] = &buffer[size_t(w) * i];
-	}
+	small_buffer<const uint32_t*, 1080> rowPointers(std::views::transform(xrange(size_t(h)),
+		[&](auto i) { return &buffer[size_t(w) * (h - 1 - i)]; }));
 
 	PNG::saveRGBA(w, rowPointers, filename);
 }

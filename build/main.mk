@@ -316,8 +316,9 @@ CXX?=g++
 WINDRES?=windres
 DEPEND_FLAGS:=
 ifneq ($(filter %clang++,$(CXX))$(filter clang++%,$(CXX)),)
-  # Enable C++20 (partially supported since clang-8)
-  COMPILE_FLAGS+=-std=c++20 -fconstexpr-steps=2000000
+  # Enable C++23 (partially supported since clang-17)
+  # apple-clang still needs -std=c++2b
+  COMPILE_FLAGS+=-std=c++2b -fconstexpr-steps=2000000
   #COMPILE_FLAGS+=-Wall -Wextra -Wundef -Wno-invalid-offsetof -Wunused-macros -Wdouble-promotion -Wmissing-declarations -Wshadow -Wold-style-cast -Wzero-as-null-pointer-constant
   COMPILE_FLAGS+=-Wall -Wextra -Wundef -Wno-invalid-offsetof -Wunused-macros -Wdouble-promotion -Wmissing-declarations -Wshadow -Wconversion -Wno-sign-conversion
   # Hardware descriptions can contain constants that are not used in the code
@@ -329,8 +330,8 @@ else
 ifneq ($(filter %g++,$(CXX))$(filter g++%,$(CXX))$(findstring /g++-,$(CXX)),)
   # Generic compilation flags.
   COMPILE_FLAGS+=-pipe
-  # Enable C++20  (good support since gcc-10)
-  COMPILE_FLAGS+=-std=c++20
+  # Enable C++23  (partially supported since gcc-11)
+  COMPILE_FLAGS+=-std=c++23
   # Stricter warning and error reporting.
   #COMPILE_FLAGS+=-Wall -Wextra -Wundef -Wno-invalid-offsetof -Wunused-macros -Wdouble-promotion -Wmissing-declarations -Wshadow -Wold-style-cast -Wzero-as-null-pointer-constant
 
@@ -575,10 +576,6 @@ ifeq ($(OPENMSX_TARGET_OS),darwin)
 # target to create an app folder but no DMG.
 include build/package-darwin/app.mk
 else
-ifeq ($(OPENMSX_TARGET_OS),dingux)
-# ZIP file package for Dingux.
-include build/package-dingux/opk.mk
-else
 # Note: Use OPENMSX_INSTALL only to create binary packages.
 #       To change installation dir for actual installations, edit "custom.mk".
 OPENMSX_INSTALL?=$(INSTALL_BASE)
@@ -587,7 +584,6 @@ INSTALL_BINARY_DIR?=$(OPENMSX_INSTALL)/bin
 INSTALL_SHARE_DIR?=$(OPENMSX_INSTALL)/share
 INSTALL_DOC_DIR?=$(OPENMSX_INSTALL)/doc
 INSTALL_VERBOSE?=true
-endif
 endif
 
 # DESTDIR is a convention shared by at least GNU and FreeBSD to specify a path

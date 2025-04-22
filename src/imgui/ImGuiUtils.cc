@@ -5,26 +5,57 @@
 #include "BooleanSetting.hh"
 #include "EnumSetting.hh"
 #include "HotKey.hh"
+#include "ImGuiManager.hh"
 #include "IntegerSetting.hh"
 #include "FloatSetting.hh"
 #include "VideoSourceSetting.hh"
 #include "KeyMappings.hh"
 
-#include "ranges.hh"
-
 #include <imgui.h>
 #include <imgui_stdlib.h>
 #include <SDL.h>
 
+#include <algorithm>
 #include <variant>
 
 namespace openmsx {
 
-void HelpMarker(std::string_view desc)
+void HelpMarker(std::string_view desc, float spacing)
 {
-	ImGui::SameLine();
+	ImGui::SameLine(0.0f, spacing);
 	ImGui::TextDisabled("(?)");
 	simpleToolTip(desc);
+}
+
+void ConfirmDialog::execute()
+{
+	if (doOpen) {
+		doOpen = false;
+		ImGui::OpenPopup(title.c_str());
+	}
+	im::PopupModal(title.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize, [&]{
+		ImGui::TextUnformatted(text);
+
+		bool close = false;
+		if (ImGui::Button("Ok")) {
+			action();
+			close = true;
+		}
+		ImGui::SameLine();
+		close |= ImGui::Button("Cancel");
+		if (close) {
+			ImGui::CloseCurrentPopup();
+			action = {};
+		}
+	});
+}
+
+void ConfirmDialogTclCommand::open(std::string text_, TclObject cmd_)
+{
+	ConfirmDialog::open(
+		std::move(text_),
+		[manager = this->manager, cmd = std::move(cmd_)] { manager->executeDelayed(cmd); }
+	);
 }
 
 std::string GetSettingDescription::operator()(const Setting& setting) const
@@ -107,9 +138,9 @@ bool SliderFloat(FloatSetting& setting, const char* format, ImGuiSliderFlags fla
 }
 bool SliderFloat(const char* label, FloatSetting& setting, const char* format, ImGuiSliderFlags flags)
 {
-	float value = setting.getFloat();
-	float min = narrow_cast<float>(setting.getMinValue());
-	float max = narrow_cast<float>(setting.getMaxValue());
+	auto value = setting.getFloat();
+	auto min = narrow_cast<float>(setting.getMinValue());
+	auto max = narrow_cast<float>(setting.getMaxValue());
 	bool changed = ImGui::SliderFloat(label, &value, min, max, format, flags);
 	try {
 		if (changed) setting.setFloat(value);
@@ -154,7 +185,7 @@ void ComboBox(const char* label, Setting& setting, function_ref<std::string(cons
 					// ignore
 				}
 			}
-			if (auto it = ranges::find(toolTips, entry.name, &EnumToolTip::value);
+			if (auto it = std::ranges::find(toolTips, entry.name, &EnumToolTip::value);
 			    it != toolTips.end()) {
 				simpleToolTip(it->tip);
 			}
@@ -179,7 +210,6 @@ void ComboBox(VideoSourceSetting& setting) // TODO share code with EnumSetting?
 }
 void ComboBox(const char* label, VideoSourceSetting& setting) // TODO share code with EnumSetting?
 {
-	std::string name(setting.getBaseName());
 	auto current = setting.getValue().getString();
 	im::Combo(label, current.c_str(), [&]{
 		for (const auto& value : setting.getPossibleValues()) {
@@ -297,15 +327,11 @@ std::optional<ImGuiKeyChord> parseKeyChord(std::string_view name)
 	SDL_Keycode keyCode = SDL_GetKeyFromName(std::string(key).c_str());
 	if (keyCode == SDLK_UNKNOWN) return {};
 
-	auto contains = [](std::string_view haystack, std::string_view needle) {
-		// TODO in the future use c++23 std::string_view::contains()
-		return haystack.find(needle) != std::string_view::npos;
-	};
 	ImGuiKeyChord keyMods =
-		(contains(modifiers, "Ctrl+" ) ? ImGuiMod_Ctrl  : 0) |
-		(contains(modifiers, "Shift+") ? ImGuiMod_Shift : 0) |
-		(contains(modifiers, "Alt+"  ) ? ImGuiMod_Alt   : 0) |
-		(contains(modifiers, superName()) ? ImGuiMod_Super : 0);
+		(modifiers.contains("Ctrl+" ) ? ImGuiMod_Ctrl  : 0) |
+		(modifiers.contains("Shift+") ? ImGuiMod_Shift : 0) |
+		(modifiers.contains("Alt+"  ) ? ImGuiMod_Alt   : 0) |
+		(modifiers.contains(superName()) ? ImGuiMod_Super : 0);
 
 	return SDLKey2ImGui(keyCode) | keyMods;
 }
@@ -339,6 +365,46 @@ void setColors(int style)
 
 	imColors[size_t(KEY_ACTIVE    )] = 0xff'10'40'ff;
 	imColors[size_t(KEY_NOT_ACTIVE)] = 0x80'00'00'00;
+}
+
+std::string formatToString(function_ref<uint8_t(unsigned)> fetch, unsigned begin, unsigned end, std::string_view prefix,
+	unsigned columns, std::string_view suffix, std::string_view formatStr, Interpreter& interp)
+{
+	std::string result;
+	unsigned col = 0;
+	for (unsigned addr = begin; addr <= end; ++addr) {
+		if (col == 0) strAppend(result, prefix);
+
+		auto val = fetch(addr);
+		auto cmd = makeTclList("format", formatStr, val);
+		auto formatted = cmd.executeCommand(interp); // may throw
+		strAppend(result, formatted.getString());
+
+		if (++col == columns) {
+			col = 0;
+			strAppend(result, suffix, '\n');
+		} else if (addr != end) {
+			strAppend(result, ", ");
+		}
+	}
+
+	if (col != 0) {
+		strAppend(result, suffix, '\n');
+	}
+	return result;
+}
+
+[[nodiscard]] std::string rawToString(
+	function_ref<uint8_t(unsigned)> fetch,
+	unsigned begin, unsigned end)
+{
+	std::string result;
+	result.reserve(end - begin + 1);
+	for (unsigned addr = begin; addr <= end; ++addr) {
+		auto val = fetch(addr);
+		result += static_cast<char>(val);
+	}
+	return result;
 }
 
 } // namespace openmsx

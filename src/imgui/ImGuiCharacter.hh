@@ -6,14 +6,16 @@
 #include "GLUtil.hh"
 #include "gl_vec.hh"
 
+#include <string>
+
 namespace openmsx {
 
 class ImGuiCharacter final : public ImGuiPart
 {
 public:
-	using ImGuiPart::ImGuiPart;
+	ImGuiCharacter(ImGuiManager& manager_, size_t index);
 
-	[[nodiscard]] zstring_view iniName() const override { return "Tile viewer"; }
+	[[nodiscard]] zstring_view iniName() const override { return title; }
 	void save(ImGuiTextBuffer& buf) override;
 	void loadLine(std::string_view name, zstring_view value) override;
 	void paint(MSXMotherBoard* motherBoard) override;
@@ -21,13 +23,15 @@ public:
 private:
 	static void renderPatterns(int mode, std::span<const uint32_t, 16> palette,
 	                           int fgCol, int bgCol, int fgBlink, int bgBlink,
-	                           VramTable& pat, VramTable& col, int lines, std::span<uint32_t> pixels);
+	                           VramTable& pat, VramTable& col, int lines, std::span<uint32_t> output);
 	void initHexDigits();
 
 public:
-	bool show = false;
+	bool show = true;
 
 private:
+	std::string title;
+
 	int zoom = 0; // 0->1x, 1->2x, ..., 7->8x
 	bool overrideAll     = false;
 	bool overrideMode    = false;
@@ -43,7 +47,9 @@ private:
 	bool overrideColor0  = false;
 	bool grid = true;
 	bool nameTableOverlay = false;
+	bool rasterBeam = false;
 	gl::vec4 gridColor{0.0f, 0.0f, 0.0f, 0.5f}; // RGBA
+	gl::vec4 rasterBeamColor{1.0f, 0.0f, 0.0f, 0.8f}; // RGBA
 
 	enum CharScrnMode : int { TEXT40, TEXT80, SCR1, SCR2, SCR3, SCR4, OTHER };
 	int manualMode = 0;
@@ -57,6 +63,7 @@ private:
 	int manualNamBase = 0;
 	int manualRows = 0;
 	int manualColor0 = 16;
+	gl::vecN<2, int> gridPosition;
 
 	gl::Texture patternTex{gl::Null{}}; // TODO also deallocate when needed
 	gl::Texture gridTex   {gl::Null{}};
@@ -79,6 +86,8 @@ private:
 		PersistentElementMax{"zoom",            &ImGuiCharacter::zoom, 8},
 		PersistentElement   {"showGrid",        &ImGuiCharacter::grid},
 		PersistentElement   {"overlay",         &ImGuiCharacter::nameTableOverlay},
+		PersistentElement   {"showRasterBeam",  &ImGuiCharacter::rasterBeam},
+		PersistentElement   {"rasterBeamColor", &ImGuiCharacter::rasterBeamColor},
 		PersistentElement   {"gridColor",       &ImGuiCharacter::gridColor},
 		PersistentElementMax{"mode",            &ImGuiCharacter::manualMode, OTHER}, // TEXT40..SCR4
 		PersistentElementMax{"fgCol",           &ImGuiCharacter::manualFgCol, 16},

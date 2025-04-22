@@ -5,7 +5,6 @@
 
 #include "SimpleDebuggable.hh"
 #include "Clock.hh"
-#include "openmsx.hh"
 
 #include <array>
 #include <cstdint>
@@ -15,7 +14,7 @@ namespace openmsx {
 class SCC final : public ResampledSoundDevice
 {
 public:
-	enum class Mode {Real, Compatible, Plus};
+	enum class Mode : uint8_t {Real, Compatible, Plus};
 
 	SCC(const std::string& name, const DeviceConfig& config,
 	    EmuTime::param time, Mode mode = Mode::Real);
@@ -30,7 +29,7 @@ public:
 	void setMode(Mode newMode);
 
 	// public getters for classes interested to show SCC data
-	const std::array<std::array<int8_t, 32>, 5>& getWaveData() const { return wave; }
+	[[nodiscard]] const std::array<std::array<int8_t, 32>, 5>& getWaveData() const { return wave; }
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);

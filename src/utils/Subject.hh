@@ -2,11 +2,11 @@
 #define SUBJECT_HH
 
 #include "Observer.hh"
-#include "ranges.hh"
 #include "stl.hh"
 
-#include <vector>
 #include <cassert>
+#include <cstdint>
+#include <vector>
 
 namespace openmsx {
 
@@ -32,7 +32,7 @@ protected:
 	void notify() const;
 
 private:
-	enum NotifyState {
+	enum NotifyState : uint8_t {
 		IDLE,        // no notify in progress
 		IN_PROGRESS, // notify in progress, no detach
 		DETACH,      // notify in progress, some observer(s) have been detached
@@ -82,7 +82,7 @@ template<typename T> void Subject<T>::notify() const
 	}
 
 	if (notifyState == DETACH) {
-		observers.erase(ranges::remove(observers, nullptr), observers.end());
+		std::erase(observers, nullptr);
 	}
 	notifyState = IDLE;
 }

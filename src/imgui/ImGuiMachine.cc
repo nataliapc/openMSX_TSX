@@ -24,12 +24,27 @@
 #include <imgui_stdlib.h>
 #include <imgui.h>
 
+#include <algorithm>
 #include <memory>
 
 using namespace std::literals;
 
 
 namespace openmsx {
+
+void ImGuiMachine::save(ImGuiTextBuffer& buf)
+{
+	for (const auto& item : recentMachines) {
+		buf.appendf("machine.recent=%s\n", item.c_str());
+	}
+}
+
+void ImGuiMachine::loadLine(std::string_view name, zstring_view value)
+{
+	if (name == "machine.recent") {
+		recentMachines.push_back(value);
+	}
+}
 
 void ImGuiMachine::showMenu(MSXMotherBoard* motherBoard)
 {
@@ -138,9 +153,55 @@ void ImGuiMachine::paintSelectMachine(const MSXMotherBoard* motherBoard)
 					defaultMachine.setValue(TclObject(configName));
 				}
 				simpleToolTip("Use this as the default MSX machine when openMSX starts.");
+			} else {
+				im::Indent([] {
+					ImGui::TextUnformatted("(This is the default machine)"sv);
+					HelpMarker("If you select another machine than the default machine, a button will appear here to make that machine the default, i.e. the machine that is used when openMSX starts.");
+				});
 			}
+
 			ImGui::Separator();
 		}
+
+		auto showMachine = [&](MachineInfo& info, bool doubleClickToSelect) {
+			bool ok = getTestResult(info).empty();
+			im::StyleColor(!ok, ImGuiCol_Text, getColor(imColor::ERROR), [&]{
+				bool selected = info.configName == newMachineConfig;
+				if (ImGui::Selectable(info.displayName.c_str(), selected,
+						doubleClickToSelect ? ImGuiSelectableFlags_AllowDoubleClick: ImGuiSelectableFlags_None)) {
+					newMachineConfig = info.configName;
+					if (ok && (doubleClickToSelect ? ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) : true)) {
+						showSelectMachine = false; // close window
+						manager.executeDelayed(makeTclList("machine", newMachineConfig));
+						addRecentItem(recentMachines, newMachineConfig);
+					}
+				}
+				if (selected) {
+					if (ImGui::IsWindowAppearing()) ImGui::SetScrollHereY();
+				}
+				if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_NoSharedDelay | ImGuiHoveredFlags_Stationary)) {
+					im::ItemTooltip([&]{
+						printConfigInfo(info);
+					});
+				}
+			});
+		};
+
+		im::TreeNode("Recently used", recentMachines.empty() ? ImGuiTreeNodeFlags_None : ImGuiTreeNodeFlags_DefaultOpen, [&]{
+			if (recentMachines.empty()) {
+				ImGui::TextUnformatted("(none)"sv);
+			} else {
+				im::Combo("##recent", "Switch to recently used machine...", [&]{
+					for (const auto& item : recentMachines) {
+						if (auto* info = findMachineInfo(item)) {
+							showMachine(*info, false);
+						}
+					}
+				});
+				simpleToolTip("Replace the current with the selected machine.");
+			}
+		});
+		ImGui::Separator();
 
 		ImGui::TextUnformatted("Available machines:"sv);
 		auto& allMachines = getAllMachines();
@@ -166,7 +227,7 @@ void ImGuiMachine::paintSelectMachine(const MSXMotherBoard* motherBoard)
 		applyComboFilter("Region", filterRegion, allMachines, filteredMachines);
 		applyDisplayNameFilter(filterString, allMachines, filteredMachines);
 
-		auto it = ranges::find(filteredMachines, newMachineConfig,
+		auto it = std::ranges::find(filteredMachines, newMachineConfig,
 			[&](auto idx) { return allMachines[idx].configName; });
 		bool inFilteredList = it != filteredMachines.end();
 		int selectedIdx = inFilteredList ? narrow<int>(*it) : -1;
@@ -175,25 +236,7 @@ void ImGuiMachine::paintSelectMachine(const MSXMotherBoard* motherBoard)
 			im::ListClipper(filteredMachines.size(), selectedIdx, [&](int i) {
 				auto idx = filteredMachines[i];
 				auto& info = allMachines[idx];
-				bool ok = getTestResult(info).empty();
-				im::StyleColor(!ok, ImGuiCol_Text, getColor(imColor::ERROR), [&]{
-					bool selected = info.configName == newMachineConfig;
-					if (ImGui::Selectable(info.displayName.c_str(), selected, ImGuiSelectableFlags_AllowDoubleClick)) {
-						newMachineConfig = info.configName;
-						if (ok && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-							showSelectMachine = false; // close window
-							manager.executeDelayed(makeTclList("machine", newMachineConfig));
-						}
-					}
-					if (selected) {
-						if (ImGui::IsWindowAppearing()) ImGui::SetScrollHereY();
-					}
-					if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_NoSharedDelay | ImGuiHoveredFlags_Stationary)) {
-						im::ItemTooltip([&]{
-							printConfigInfo(info);
-						});
-					}
-				});
+				showMachine(info, true);
 			});
 		});
 
@@ -440,7 +483,7 @@ bool ImGuiMachine::printConfigInfo(MachineInfo& info)
 ImGuiMachine::MachineInfo* ImGuiMachine::findMachineInfo(std::string_view config)
 {
 	auto& allMachines = getAllMachines();
-	auto it = ranges::find(allMachines, config, &MachineInfo::configName);
+	auto it = std::ranges::find(allMachines, config, &MachineInfo::configName);
 	return (it != allMachines.end()) ? std::to_address(it) : nullptr;
 }
 

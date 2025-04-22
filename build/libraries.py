@@ -17,6 +17,18 @@ from os import listdir
 from os.path import isdir, isfile
 from os import environ
 
+def _get_pkg_config(distroRoot):
+	if distroRoot is None:
+		return 'pkg-config'
+	elif distroRoot.startswith('derived/'):
+		toolsDir = '%s/../tools/bin' % distroRoot
+		for name in listdir(toolsDir):
+			if name.endswith('-pkg-config'):
+				return toolsDir + '/' + name
+		raise RuntimeError('No cross-pkg-config found in 3rdparty build')
+	else:
+		return '%s/bin/pkg-config' % distroRoot
+
 class Library(object):
 	libName = None
 	makeName = None
@@ -52,12 +64,6 @@ class Library(object):
 		scriptName = cls.configScriptName
 		if scriptName is None:
 			return None
-		elif platform == 'dingux' and cls.isSystemLibrary(platform):
-			# TODO: A generic mechanism for locating config scripts in SDKs.
-			#       Note that distroRoot is for non-system libs only.
-			#       Trying a path relative to the compiler location would
-			#       probably work well.
-			return '/opt/gcw0-toolchain/usr/mipsel-gcw0-linux-uclibc/sysroot/usr/bin/%s' % scriptName
 		elif distroRoot is None:
 			return scriptName
 		else:
@@ -127,6 +133,8 @@ class Library(object):
 		configScript = cls.getConfigScript(platform, linkStatic, distroRoot)
 		if configScript is None:
 			return 'unknown'
+		elif 'pkg-config' in configScript:
+			return '`%s --modversion`' % configScript
 		else:
 			return '`%s --version`' % configScript
 
@@ -164,10 +172,6 @@ class FreeType(Library):
 	function = 'FT_Open_Face'
 
 	@classmethod
-	def isSystemLibrary(cls, platform):
-		return platform in ('dingux',)
-
-	@classmethod
 	def getConfigScript(cls, platform, linkStatic, distroRoot):
 		if platform in ('netbsd', 'openbsd'):
 			if distroRoot == '/usr/local':
@@ -176,20 +180,11 @@ class FreeType(Library):
 		script = super().getConfigScript(
 			platform, linkStatic, distroRoot
 			)
-		# FreeType 2.9.1 no longer installs the freetype-config script
-		# by default and expects pkg-config to be used instead.
 		if isfile(script):
 			return script
-		elif distroRoot is None:
-			return 'pkg-config freetype2'
-		elif distroRoot.startswith('derived/'):
-			toolsDir = '%s/../tools/bin' % distroRoot
-			for name in listdir(toolsDir):
-				if name.endswith('-pkg-config'):
-					return toolsDir + '/' + name + ' freetype2'
-			raise RuntimeError('No cross-pkg-config found in 3rdparty build')
-		else:
-			return '%s/bin/pkg-config freetype2' % distroRoot
+		# FreeType 2.9.1 no longer installs the freetype-config script
+		# by default and expects pkg-config to be used instead.
+		return '%s freetype2' % _get_pkg_config(distroRoot)
 
 	@classmethod
 	def getVersion(cls, platform, linkStatic, distroRoot):
@@ -286,19 +281,11 @@ class LibPNG(Library):
 	function = 'png_write_image'
 	dependsOn = ('ZLIB', )
 
-	@classmethod
-	def isSystemLibrary(cls, platform):
-		return platform in ('dingux',)
-
 class OGG(Library):
 	libName = 'ogg'
 	makeName = 'OGG'
 	header = '<ogg/ogg.h>'
 	function = 'ogg_stream_init'
-
-	@classmethod
-	def isSystemLibrary(cls, platform):
-		return platform in ('dingux',)
 
 class SDL2(Library):
 	libName = 'SDL2'
@@ -307,10 +294,6 @@ class SDL2(Library):
 	configScriptName = 'sdl2-config'
 	staticLibsOption = '--static-libs'
 	function = 'SDL_Init'
-
-	@classmethod
-	def isSystemLibrary(cls, platform):
-		return platform in ('dingux',)
 
 	@classmethod
 	def getLinkFlags(cls, platform, linkStatic, distroRoot):
@@ -325,10 +308,6 @@ class SDL2_ttf(Library):
 	header = '<SDL_ttf.h>'
 	function = 'TTF_OpenFont'
 	dependsOn = ('SDL2', 'FREETYPE')
-
-	@classmethod
-	def isSystemLibrary(cls, platform):
-		return platform in ('dingux',)
 
 	@classmethod
 	def getLinkFlags(cls, platform, linkStatic, distroRoot):
@@ -535,10 +514,6 @@ class Theora(Library):
 	function = 'th_decode_ycbcr_out'
 	dependsOn = ('OGG', )
 
-	@classmethod
-	def isSystemLibrary(cls, platform):
-		return platform in ('dingux',)
-
 class Vorbis(Library):
 	libName = 'vorbis'
 	makeName = 'VORBIS'
@@ -546,19 +521,11 @@ class Vorbis(Library):
 	function = 'vorbis_synthesis_pcmout'
 	dependsOn = ('OGG', )
 
-	@classmethod
-	def isSystemLibrary(cls, platform):
-		return platform in ('dingux',)
-
 class ZLib(Library):
 	libName = 'z'
 	makeName = 'ZLIB'
 	header = '<zlib.h>'
 	function = 'inflate'
-
-	@classmethod
-	def isSystemLibrary(cls, platform):
-		return platform in ('dingux',)
 
 	@classmethod
 	def getVersion(cls, platform, linkStatic, distroRoot):

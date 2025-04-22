@@ -19,7 +19,6 @@ def iterBuildInfoHeader(targetPlatform, cpuName, flavour, installShareDir, insta
 	targetCPU = getCPU(cpuName)
 
 	# TODO: Add support for device-specific configuration.
-	platformDingux = targetPlatform == 'dingux'
 	platformPandora = targetPlatform == 'pandora'
 	platformAndroid = targetPlatform == 'android'
 
@@ -28,9 +27,7 @@ def iterBuildInfoHeader(targetPlatform, cpuName, flavour, installShareDir, insta
 	maxScaleFactor = 4
 
 	# Platform overrides.
-	if platformDingux:
-		maxScaleFactor = 1
-	elif platformAndroid:
+	if platformAndroid:
 		# At the moment, libSDL android crashes when trying to dynamically change the scale factor
 		# TODO: debug why it crashes and then change the maxScaleFactor parameter here
 		# so that people with a powerful enough android device can use a higher scale factor
@@ -44,23 +41,8 @@ def iterBuildInfoHeader(targetPlatform, cpuName, flavour, installShareDir, insta
 	yield '#ifndef BUILD_INFO_HH'
 	yield '#define BUILD_INFO_HH'
 	yield ''
-	# Use a macro i.s.o. a boolean to prevent compilation errors on inline asm.
-	# Assembly doesn't appear to work with MINGW64... TODO: find out why
-	yield '#ifdef __MINGW64__'
-	yield '#define ASM_X86 0'
-	yield '#define ASM_X86 0'
-	yield '#define ASM_X86_32 0'
-	yield '#define ASM_X86_64 0'
-	yield '#else'
-	# A compiler will typically only understand the instruction set that it
-	# generates code for.
-	yield '#define ASM_X86 %d' % (targetCPU is X86 or targetCPU is X86_64)
-	yield '#define ASM_X86_32 %d' % (targetCPU is X86)
-	yield '#define ASM_X86_64 %d' % (targetCPU is X86_64)
-	yield '#endif'
 	# Use a macro iso integer because we really need to exclude code sections
 	# based on this.
-	yield '#define PLATFORM_DINGUX %d' % platformDingux
 	yield '#define PLATFORM_ANDROID %d' % platformAndroid
 	yield '#define MIN_SCALE_FACTOR %d' % minScaleFactor
 	yield '#define MAX_SCALE_FACTOR %d' % maxScaleFactor

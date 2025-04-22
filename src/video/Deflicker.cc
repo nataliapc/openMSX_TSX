@@ -3,7 +3,7 @@
 #include "PixelOperations.hh"
 #include "RawFrame.hh"
 
-#include "vla.hh"
+#include "inplace_buffer.hh"
 #include "xrange.hh"
 
 #include <bit>
@@ -19,8 +19,6 @@ Deflicker::Deflicker(std::span<std::unique_ptr<RawFrame>, 4> lastFrames_)
 	: lastFrames(lastFrames_)
 {
 }
-
-Deflicker::~Deflicker() = default;
 
 void Deflicker::init()
 {
@@ -51,7 +49,7 @@ static void ustore(Pixel* ptr, ptrdiff_t byteOffst, __m128i val)
 {
 	auto* p8   = std::bit_cast<  char *>(ptr);
 	auto* p128 = std::bit_cast<__m128i*>(p8 + byteOffst);
-	return _mm_storeu_si128(p128, val);
+	_mm_storeu_si128(p128, val);
 }
 
 static __m128i compare(__m128i x, __m128i y)
@@ -79,7 +77,7 @@ std::span<const Pixel> Deflicker::getUnscaledLine(
 
 	// Prefer to write directly to the output buffer, if that's not
 	// possible store the intermediate result in a temp buffer.
-	VLA_SSE_ALIGNED(Pixel, buf2, width0);
+	inplace_buffer<Pixel, 1280> buf2(uninitialized_tag{}, width0);
 	auto* buf = helpBuf.data();
 	Pixel* out = (width0 <= helpBuf.size()) ? buf : buf2.data();
 

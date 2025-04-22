@@ -201,7 +201,7 @@ static constexpr auto regFunctions = std::array{
 	R{{S{1, 0x40}}, "screen display enable/disable",
 	  [](uint32_t v) { return TemporaryString(v ? "enabled" : "disabled"); }},
 	R{{S{0, 0}}, "", [](uint32_t) { return TemporaryString(", "); }},
-	R{{S{1, 0x18}, {0, 0x0E}}, "display mode",
+	R{{S{1, 0x18}, S{0, 0x0E}}, "display mode",
 	  [](uint32_t v) { return TemporaryString(modeName(v)); }},
 	R{{S{9, 0}}, "", [](uint32_t) { return TemporaryString(", "); }},
 	R{{S{9, 0x02}}, "select PAL or NTSC",
@@ -615,11 +615,16 @@ void ImGuiVdpRegs::paint(MSXMotherBoard* motherBoard)
 					static constexpr auto displayRegs = std::to_array<uint8_t>({18, 19, 23});
 					drawSection(displayRegs, registerValues, *vdp, time);
 				});
-				im::TreeNode("Access registers", &openAccess, [&]{
+			}
+			im::TreeNode("Access registers", &openAccess, [&]{
+				if (tms99x8) {
+					ImGui::StrCat("VRAM access address: 0x",
+					              hex_string<4>(vdp->getVramPointer()), '\n');
+				} else {
 					static constexpr auto accessRegs = std::to_array<uint8_t>({14, 15, 16, 17});
 					drawSection(accessRegs, registerValues, *vdp, time);
-				});
-			}
+				}
+			});
 			if (v9958) {
 				im::TreeNode("V9958 registers", &openV9958, [&]{
 					static constexpr auto v9958Regs = std::to_array<uint8_t>({25, 26, 27});

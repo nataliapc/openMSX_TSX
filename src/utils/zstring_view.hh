@@ -32,7 +32,7 @@ public:
 		: dat(s), siz(std::char_traits<char>::length(s)) {}
 	constexpr zstring_view(const char* s, size_t n)
 		: dat(s), siz(n) { assert(s[n] == '\0'); }
-	/*constexpr*/ zstring_view(const std::string& s)
+	constexpr zstring_view(const std::string& s)
 		: dat(s.c_str()), siz(s.size()) {}
 
 	[[nodiscard]] constexpr auto begin() const { return dat; }
@@ -53,6 +53,9 @@ public:
 	[[nodiscard]] constexpr auto find(char c, size_type pos = 0) const {
 		return view().find(c, pos);
 	}
+	[[nodiscard]] constexpr auto find(const char* s, size_type pos = 0) const {
+		return view().find(s, pos);
+	}
 
 	[[nodiscard]] constexpr zstring_view substr(size_type pos) const {
 		assert(pos <= siz);
@@ -61,6 +64,12 @@ public:
 	[[nodiscard]] constexpr std::string_view substr(size_type pos, size_type count) const {
 		assert(pos <= siz);
 		return view().substr(pos, count);
+	}
+
+	constexpr void remove_prefix(size_type n) {
+		assert(n <= siz);
+		siz -= n;
+		dat += n;
 	}
 
 	[[nodiscard]] constexpr bool starts_with(std::string_view sv) const {
@@ -81,6 +90,15 @@ public:
 	[[nodiscard]] constexpr bool ends_with(const char* s) const {
 		return view().ends_with(s);
 	}
+	[[nodiscard]] constexpr bool contains(std::string_view sv) const {
+		return view().contains(sv);
+	}
+	[[nodiscard]] constexpr bool contains(char c) const {
+		return view().contains(c);
+	}
+	[[nodiscard]] constexpr bool contains(const char* s) const {
+		return view().contains(s);
+	}
 
 	[[nodiscard]] explicit operator std::string() const {
 		return {dat, siz};
@@ -88,8 +106,27 @@ public:
 	[[nodiscard]] constexpr std::string_view view() const {
 		return {dat, siz};
 	}
-	[[nodiscard]] constexpr /*implicit*/ operator std::string_view() const {
+	[[nodiscard]] explicit(false) constexpr operator std::string_view() const {
 		return view();
+	}
+
+	[[nodiscard]] constexpr friend bool operator==(const zstring_view& x, const zstring_view& y) {
+		return std::string_view(x) == std::string_view(y);
+	}
+	[[nodiscard]] friend bool operator==(const zstring_view& x, const std::string& y) {
+		return std::string_view(x) == std::string_view(y);
+	}
+	[[nodiscard]] constexpr friend bool operator==(const zstring_view& x, const std::string_view& y) {
+		return std::string_view(x) == y;
+	}
+	[[nodiscard]] constexpr friend bool operator==(const zstring_view& x, const char* y) {
+		return std::string_view(x) == std::string_view(y);
+	}
+
+	friend std::ostream& operator<<(std::ostream& os, const zstring_view& str)
+	{
+		os << std::string_view(str);
+		return os;
 	}
 
 private:
@@ -107,19 +144,6 @@ static_assert(std::is_trivially_move_assignable_v<zstring_view>);
 
 [[nodiscard]] constexpr auto begin(const zstring_view& x) { return x.begin(); }
 [[nodiscard]] constexpr auto end  (const zstring_view& x) { return x.end();   }
-
-[[nodiscard]] constexpr bool operator==(const zstring_view& x, const zstring_view& y) {
-	return std::string_view(x) == std::string_view(y);
-}
-[[nodiscard]] inline bool operator==(const zstring_view& x, const std::string& y) {
-	return std::string_view(x) == std::string_view(y);
-}
-[[nodiscard]] constexpr bool operator==(const zstring_view& x, const std::string_view& y) {
-	return std::string_view(x) == y;
-}
-[[nodiscard]] constexpr bool operator==(const zstring_view& x, const char* y) {
-	return std::string_view(x) == std::string_view(y);
-}
 
 // !!! Workaround clang-15, libc++ bug !!! (fixed in clang-16)
 // These should be 4x operator<=> instead of 4x operator<, <=, >=, >
@@ -172,9 +196,4 @@ static_assert(std::is_trivially_move_assignable_v<zstring_view>);
 	return std::string_view(x) >= std::string_view(y);
 }
 
-inline std::ostream& operator<<(std::ostream& os, const zstring_view& str)
-{
-	os << std::string_view(str);
-	return os;
-}
 #endif

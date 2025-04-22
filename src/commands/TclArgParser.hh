@@ -72,10 +72,27 @@ struct ArgsInfo
 [[nodiscard]] inline ArgsInfo flagArg(std::string_view name, bool& flag)
 {
 	return {
-		name,
-		[&flag](Interpreter& /*interp*/, std::span<const TclObject> /*args*/) {
+		.name = name,
+		.func = [&flag](Interpreter& /*interp*/, std::span<const TclObject> /*args*/) {
 			flag = true;
 			return 0;
+		}
+	};
+}
+
+// Option with a single value, handled by a callback
+[[nodiscard]] inline ArgsInfo funcArg(
+	std::string_view name,
+	std::function<void(Interpreter&, const TclObject&)> func)
+{
+	return {
+		.name = name,
+		.func = [name, func = std::move(func)](Interpreter& interp, std::span<const TclObject> args) {
+			if (args.empty()) {
+				throw CommandException("missing argument for ", name);
+			}
+			func(interp, args.front());
+			return 1;
 		}
 	};
 }
@@ -84,16 +101,9 @@ struct ArgsInfo
 template<typename T>
 [[nodiscard]] ArgsInfo valueArg(std::string_view name, T& value)
 {
-	return {
-		name,
-		[name, &value](Interpreter& interp, std::span<const TclObject> args) {
-			if (args.empty()) {
-				throw CommandException("missing argument for ", name);
-			}
-			detail::GetArg<T>{}(interp, args.front(), value);
-			return 1;
-		}
-	};
+	return funcArg(name, [&value](Interpreter& interp, const TclObject& arg) {
+		detail::GetArg<T>{}(interp, arg, value);
+	});
 }
 
 // Parse the given 'inArgs' arguments.

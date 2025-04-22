@@ -2,10 +2,13 @@
 #define VDPACCESSSLOTS_HH
 
 #include "VDP.hh"
+
 #include "narrow.hh"
+
 #include <cassert>
 #include <cstdint>
 #include <span>
+#include <utility>
 
 namespace openmsx::VDPAccessSlots {
 
@@ -57,21 +60,21 @@ public:
 	}
 
 	/** Has 'time' advanced to or past 'limit'? */
-	[[nodiscard]] inline bool limitReached() const {
+	[[nodiscard]] bool limitReached() const {
 		return ticks >= limit;
 	}
 
 	/** Get the current time. Initially this will return the 'time'
 	  * constructor parameter. Each call to next() will increase this
 	  * value. */
-	[[nodiscard]] inline EmuTime getTime() const {
+	[[nodiscard]] EmuTime getTime() const {
 		return ref.getFastAdd(ticks);
 	}
 
 	/** Advance time to the earliest access slot that is at least 'delta'
 	  * ticks later than the current time. */
-	inline void next(Delta delta) {
-		ticks += tab[to_underlying(delta) + ticks];
+	void next(Delta delta) {
+		ticks += tab[std::to_underlying(delta) + ticks];
 		if (ticks >= TICKS) [[unlikely]] {
 			ticks -= TICKS;
 			limit -= TICKS;

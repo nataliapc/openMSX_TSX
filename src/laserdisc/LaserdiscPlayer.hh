@@ -13,7 +13,10 @@
 #include "VideoSystemChangeListener.hh"
 #include "EventListener.hh"
 #include "ThrottleManager.hh"
+
 #include "outer.hh"
+
+#include <cstdint>
 #include <memory>
 #include <optional>
 
@@ -30,8 +33,7 @@ class LaserdiscPlayer final : public ResampledSoundDevice
                             , public MediaInfoProvider
 {
 public:
-	LaserdiscPlayer(const HardwareConfig& hwConf,
-			PioneerLDControl& ldControl);
+	LaserdiscPlayer(HardwareConfig& hwConf, PioneerLDControl& ldControl);
 	~LaserdiscPlayer();
 
 	// Called from CassettePort
@@ -52,7 +54,7 @@ public:
 	// MediaInfoProvider
 	void getMediaInfo(TclObject& result) override;
 
-	enum class RemoteState {
+	enum class RemoteState : uint8_t {
 		IDLE,
 		HEADER_PULSE,
 		NEC_HEADER_SPACE,
@@ -60,7 +62,7 @@ public:
 		NEC_BITS_SPACE,
 	};
 
-	enum class PlayerState {
+	enum class PlayerState : uint8_t {
 		STOPPED,
 		PLAYING,
 		MULTI_SPEED,
@@ -68,20 +70,20 @@ public:
 		STILL
 	};
 
-	enum class SeekState {
+	enum class SeekState : uint8_t {
 		NONE,
 		CHAPTER,
 		FRAME,
 		WAIT,
 	};
 
-	enum class StereoMode {
+	enum class StereoMode : uint8_t {
 		LEFT,
 		RIGHT,
 		STEREO
 	};
 
-	enum class RemoteProtocol {
+	enum class RemoteProtocol : uint8_t {
 		NONE,
 		NEC,
 	};
@@ -218,7 +220,7 @@ private:
 
 	PlayerState playerState = PlayerState::STOPPED;
 
-	enum PlayingSpeed {
+	enum PlayingSpeed : int8_t {
 		SPEED_STEP3 = -5,	// Each frame is repeated 90 times
 		SPEED_STEP1 = -4,	// Each frame is repeated 30 times
 		SPEED_1IN16 = -3,	// Each frame is repeated 16 times

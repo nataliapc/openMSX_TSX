@@ -2,11 +2,13 @@
 #define STRCAT_HH
 
 #include "TemporaryString.hh"
-#include "ranges.hh"
 #include "xrange.hh"
 #include "zstring_view.hh"
+
+#include <algorithm>
 #include <array>
 #include <climits>
+#include <cstdint>
 #include <limits>
 #include <span>
 #include <sstream>
@@ -96,7 +98,7 @@ void strAppend(std::string& result, Ts&& ...ts);
 struct Digits {
 	size_t n;
 };
-enum class HexCase {
+enum class HexCase : uint8_t {
 	lower, upper
 };
 
@@ -131,16 +133,13 @@ struct ConcatViaString
 
 	[[nodiscard]] char* copy(char* dst) const
 	{
-		ranges::copy(s, dst);
+		std::ranges::copy(s, dst);
 		return dst + s.size();
 	}
 
 private:
 	std::string s;
 };
-
-#if 0
-// Dingux doesn't have std::to_string() ???
 
 // Helper for types which are printed via std::to_string(),
 // e.g. floating point types.
@@ -152,7 +151,6 @@ struct ConcatToString : ConcatViaString
 	{
 	}
 };
-#endif
 
 // The default (slow) implementation uses 'operator<<(ostream&, T)'
 template<typename T>
@@ -185,7 +183,7 @@ template<> struct ConcatUnit<std::string_view>
 
 	[[nodiscard]] char* copy(char* dst) const
 	{
-		ranges::copy(v, dst);
+		std::ranges::copy(v, dst);
 		return dst + v.size();
 	}
 
@@ -305,14 +303,14 @@ template<std::integral T> struct ConcatIntegral
 
 	[[nodiscard]] char* copy(char* dst) const
 	{
-		ranges::copy(std::span{data(), sz}, dst);
+		std::ranges::copy(std::span{data(), sz}, dst);
 		return dst + sz;
 	}
 
 	[[nodiscard]] char* copyTail(char* dst, size_t n) const
 	{
 		assert(n <= sz);
-		ranges::copy(std::span{buf.data() + BUF_SIZE - n, n}, dst);
+		std::ranges::copy(std::span{buf.data() + BUF_SIZE - n, n}, dst);
 		return dst + n;
 	}
 
@@ -450,7 +448,7 @@ struct ConcatSpaces
 
 	[[nodiscard]] char* copy(char* dst) const
 	{
-		ranges::fill(std::span{dst, n}, ' ');
+		std::ranges::fill(std::span{dst, n}, ' ');
 		return dst + n;
 	}
 
@@ -577,12 +575,8 @@ template<typename T>
 	return ConcatIntegral<unsigned long long>(l);
 }
 
-#if 0
 // Converting float->string via std::to_string() might be faster than via
-// std::stringstream. Though the former doesn't seem to work on Dingux??
-//
-// But for openMSX this isn't critical, so we can live with the default
-// (slower?) version.
+// std::stringstream.
 
 [[nodiscard]] inline auto makeConcatUnit(float f)
 {
@@ -598,7 +592,6 @@ template<typename T>
 {
 	return ConcatToString<long double>(d);
 }
-#endif
 
 template<HexCase Case, std::integral T>
 [[nodiscard]] inline auto makeConcatUnit(const ConcatVariableWidthHexIntegral<Case, T>& t)

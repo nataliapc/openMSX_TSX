@@ -32,17 +32,19 @@ struct Symbol
 
 struct SymbolFile
 {
-	enum class Type {
-		AUTO_DETECT = 0,
+	enum class Type : uint8_t {
+		FIRST = 0,
+
+		AUTO_DETECT = FIRST,
 		ASMSX,
 		GENERIC, // includes PASMO, SJASM, TNIASM0, TNIASM1
 		HTC,
 		LINKMAP,
 		NOICE,
 		VASM,
+		WLALINK_NOGMB,
 
-		FIRST = AUTO_DETECT,
-		LAST = VASM + 1,
+		LAST,
 	};
 	[[nodiscard]] static zstring_view toString(Type type);
 	[[nodiscard]] static std::optional<Type> parseType(std::string_view str);
@@ -75,7 +77,7 @@ public:
 	// * When the file contains no symbols and when 'allowEmpty=false' the
 	//   existing file is not replaced and this method returns 'false'.
 	//   Otherwise it return 'true'.
-	enum class LoadEmpty { ALLOWED, NOT_ALLOWED };
+	enum class LoadEmpty : uint8_t { ALLOWED, NOT_ALLOWED };
 	bool reloadFile(const std::string& filename, LoadEmpty loadEmpty, SymbolFile::Type type, std::optional<uint8_t> slot = {});
 
 	void removeFile(std::string_view filename);
@@ -84,6 +86,7 @@ public:
 	[[nodiscard]] const auto& getFiles() const { return files; }
 	[[nodiscard]] SymbolFile* findFile(std::string_view filename);
 	[[nodiscard]] std::span<Symbol const * const> lookupValue(uint16_t value);
+	[[nodiscard]] std::optional<uint16_t> lookupSymbol(std::string_view s) const;
 	[[nodiscard]] std::optional<uint16_t> parseSymbolOrValue(std::string_view s) const;
 
 	[[nodiscard]] static std::string getFileFilters();
@@ -106,6 +109,7 @@ public:
 	[[nodiscard]] static SymbolFile loadNoICE(std::string_view filename, std::string_view buffer);
 	[[nodiscard]] static SymbolFile loadHTC(std::string_view filename, std::string_view buffer);
 	[[nodiscard]] static SymbolFile loadVASM(std::string_view filename, std::string_view buffer);
+	[[nodiscard]] static SymbolFile loadNoGmb(std::string_view filename, std::string_view buffer);
 	[[nodiscard]] static SymbolFile loadASMSX(std::string_view filename, std::string_view buffer);
 	[[nodiscard]] static SymbolFile loadLinkMap(std::string_view filename, std::string_view buffer);
 	[[nodiscard]] static SymbolFile loadSymbolFile(const std::string& filename, SymbolFile::Type type, std::optional<uint8_t> slot = {});

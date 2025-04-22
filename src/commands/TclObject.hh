@@ -2,7 +2,7 @@
 #define TCLOBJECT_HH
 
 #include "narrow.hh"
-#include "vla.hh"
+#include "small_buffer.hh"
 #include "xxhash.hh"
 #include "zstring_view.hh"
 
@@ -14,6 +14,7 @@
 #include <initializer_list>
 #include <iterator>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string_view>
 
@@ -71,11 +72,11 @@ class TclObject
 	static_assert(std::bidirectional_iterator<iterator>);
 
 public:
-	TclObject()                                  { init(Tcl_NewObj()); }
-	explicit TclObject(Tcl_Obj* o)               { init(o); }
-	template<typename T> explicit TclObject(T t) { init(newObj(t)); }
-	TclObject(const TclObject&  o)               { init(newObj(o)); }
-	TclObject(      TclObject&& o) noexcept      { init(newObj(o)); }
+	TclObject()                                    { init(Tcl_NewObj()); }
+	explicit TclObject(Tcl_Obj* o)                 { init(o); }
+	template<typename T> explicit TclObject(T&& t) { init(newObj(std::forward<T>(t))); }
+	TclObject(const TclObject&  o)                 { init(newObj(o)); }
+	TclObject(      TclObject&& o) noexcept        { init(newObj(o)); }
 
 	struct MakeListTag {};
 	template<typename... Args>
@@ -129,12 +130,13 @@ public:
 
 	// add elements to a Tcl list
 	template<typename T> void addListElement(const T& t) { addListElement(newObj(t)); }
-	template<typename ITER> void addListElements(ITER first, ITER last) {
-		addListElementsImpl(first, last,
-		                typename std::iterator_traits<ITER>::iterator_category());
+
+	template<std::input_iterator Iterator, std::sentinel_for<Iterator> Sentinel>
+	void addListElements(Iterator first, Sentinel last) {
+		addListElementsImpl(first, last);
 	}
-	template<typename Range> void addListElements(Range&& range) {
-		addListElements(std::begin(range), std::end(range));
+	template<std::ranges::input_range Range> void addListElements(Range&& range) {
+		addListElements(std::ranges::begin(range), std::ranges::end(range));
 	}
 	template<typename... Args> void addListElement(Args&&... args) {
 		addListElementsImpl({newObj(std::forward<Args>(args))...});
@@ -261,19 +263,17 @@ private:
 		Tcl_SetByteArrayObj(obj, b.data(), int(b.size()));
 	}
 
-	template<typename ITER>
-	void addListElementsImpl(ITER first, ITER last, std::input_iterator_tag) {
-		for (ITER it = first; it != last; ++it) {
+	template<std::input_iterator Iterator, std::sentinel_for<Iterator> Sentinel>
+	void addListElementsImpl(Iterator first, Sentinel last) {
+		for (auto it = first; it != last; ++it) {
 			addListElement(*it);
 		}
 	}
-	template<typename ITER>
-	void addListElementsImpl(ITER first, ITER last, std::random_access_iterator_tag) {
-		auto objc = last - first;
-		if (objc == 0) return; // because 0-length VLAs are not allowed (but gcc/clang allow it as an extension)
-		VLA(Tcl_Obj*, objv, objc);
-		std::transform(first, last, objv.data(), [](const auto& t) { return newObj(t); });
-		addListElementsImpl(narrow<int>(objc), objv.data());
+	template<std::random_access_iterator Iterator, std::sentinel_for<Iterator> Sentinel>
+	void addListElementsImpl(Iterator first, Sentinel last) {
+		small_buffer<Tcl_Obj*, 128> objv(std::views::transform(std::ranges::subrange(first, last),
+			[](const auto& t) { return newObj(t); }));
+		addListElementsImpl(narrow<int>(objv.size()), objv.data());
 	}
 
 	void addListElement(Tcl_Obj* element);

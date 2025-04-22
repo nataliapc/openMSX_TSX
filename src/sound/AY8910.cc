@@ -9,10 +9,12 @@
  */
 
 #include "AY8910.hh"
+
 #include "AY8910Periphery.hh"
 #include "DeviceConfig.hh"
 #include "GlobalSettings.hh"
 #include "MSXException.hh"
+
 #include "Math.hh"
 #include "StringOp.hh"
 #include "serialize.hh"
@@ -22,6 +24,8 @@
 #include "outer.hh"
 #include "random.hh"
 #include "xrange.hh"
+
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <iostream>
@@ -500,7 +504,7 @@ AY8910::AY8910(const std::string& name_, AY8910Periphery& periphery_,
 	update(vibratoPercent);
 
 	// make valgrind happy
-	ranges::fill(regs, 0);
+	std::ranges::fill(regs, 0);
 
 	reset(time);
 	registerSound(config);
@@ -791,7 +795,7 @@ void AY8910::generateChannels(std::span<float*> bufs, unsigned num)
 				unsigned nextT = t.getNextEventTime();
 				unsigned nextN = noise.getNextEventTime();
 				unsigned nextE = envelope.getNextEventTime();
-				unsigned next = std::min(std::min(nextT, nextN), nextE);
+				unsigned next = std::min({nextT, nextN, nextE});
 				while (next <= remaining) {
 					addFill(buf, val, next);
 					remaining -= next;
@@ -816,7 +820,7 @@ void AY8910::generateChannels(std::span<float*> bufs, unsigned num)
 						envelope.doNextEvent();
 						nextE = envelope.getNextEventTime();
 					}
-					next = std::min(std::min(nextT, nextN), nextE);
+					next = std::min({nextT, nextN, nextE});
 					val = calc(noise.getOutput(), t.getOutput(), envelope.getVolume());
 				}
 				if (remaining) {
@@ -1002,7 +1006,7 @@ uint8_t AY8910::Debuggable::read(unsigned address, EmuTime::param time)
 void AY8910::Debuggable::write(unsigned address, uint8_t value, EmuTime::param time)
 {
 	auto& ay8910 = OUTER(AY8910, debuggable);
-	return ay8910.writeRegister(address, value, time);
+	ay8910.writeRegister(address, value, time);
 }
 
 

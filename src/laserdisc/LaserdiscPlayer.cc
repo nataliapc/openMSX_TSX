@@ -7,6 +7,7 @@
 #include "HardwareConfig.hh"
 #include "XMLElement.hh"
 #include "CassettePort.hh"
+#include "CassettePlayer.hh"
 #include "MSXCliComm.hh"
 #include "Display.hh"
 #include "GlobalSettings.hh"
@@ -102,7 +103,7 @@ void LaserdiscPlayer::Command::tabCompletion(std::vector<string>& tokens) const
 static constexpr unsigned DUMMY_INPUT_RATE = 44100; // actual rate depends on .ogg file
 
 LaserdiscPlayer::LaserdiscPlayer(
-		const HardwareConfig& hwConf, PioneerLDControl& ldControl_)
+		HardwareConfig& hwConf, PioneerLDControl& ldControl_)
 	: ResampledSoundDevice(hwConf.getMotherBoard(), getLaserDiscPlayerName(),
 	                       "Laserdisc Player", 1, DUMMY_INPUT_RATE, true)
 	, syncAck (hwConf.getMotherBoard().getScheduler())
@@ -128,7 +129,7 @@ LaserdiscPlayer::LaserdiscPlayer(
 	reactor.getEventDistributor().registerEventListener(EventType::BOOT, *this);
 	scheduleDisplayStart(getCurrentTime());
 
-	static const XMLElement* xml = [] {
+	static XMLElement* xml = [] {
 		auto& doc = XMLDocument::getStaticDocument();
 		auto* result = doc.allocateElement(string(getLaserDiscPlayerName()).c_str());
 		result->setFirstChild(doc.allocateElement("sound"))
@@ -532,6 +533,7 @@ void LaserdiscPlayer::execSyncFrame(EmuTime::param time, bool odd)
 			renderer->frameStart(time);
 
 			if (isVideoOutputAvailable(time)) {
+				assert(video);
 				auto frame = currentFrame;
 				if (video->getFrameRate() == 60) {
 					frame *= 2;
@@ -638,11 +640,13 @@ void LaserdiscPlayer::nextFrame(EmuTime::param time)
 	}
 
 	// freeze if stop frame
-	if ((playerState == one_of(PLAYING, MULTI_SPEED))
-	     && video->stopFrame(currentFrame)) {
-		// stop frame reached
-		playingFromSample = getCurrentSample(time);
-		playerState = STILL;
+	if (playerState == one_of(PLAYING, MULTI_SPEED)) {
+		assert(video);
+		if (video->stopFrame(currentFrame)) {
+			// stop frame reached
+			playingFromSample = getCurrentSample(time);
+			playerState = STILL;
+		}
 	}
 }
 
@@ -676,6 +680,16 @@ void LaserdiscPlayer::autoRun()
 		return;
 	}
 
+	auto *player = motherBoard.getCassettePort().getCassettePlayer();
+
+	if (player && player->getTapeLength(EmuTime::dummy()) > 0) {
+		// Murder Mystery laserdisc has no program encoded on the
+		// right audio channel, but provides a seperate cassette.
+		// So if a cassette and laserdisc is present, do not autoload
+		// the laserdisc but autoload the laserdisc instead.
+		return;
+	}
+
 	string var = "::auto_run_ld_counter";
 	string command = strCat(
 		"if ![info exists ", var, "] { set ", var, " 0 }\n"
@@ -699,6 +713,7 @@ void LaserdiscPlayer::generateChannels(std::span<float*> buffers, unsigned num)
 		buffers[0] = nullptr;
 		return;
 	}
+	assert(video);
 
 	unsigned pos = 0;
 	size_t currentSample;
@@ -876,11 +891,13 @@ void LaserdiscPlayer::eject(EmuTime::param time)
 // we won't be playing afterwards
 void LaserdiscPlayer::stepFrame(bool forwards)
 {
+	// TODO can video be nullopt?
 	bool needSeek = false;
 
 	// Note that on real hardware, the screen goes dark momentarily
 	// if you try to step before the first frame or after the last one
 	if (playerState == PlayerState::STILL) {
+		assert(video);
 		if (forwards) {
 			if (currentFrame < video->getFrames()) {
 				currentFrame++;
@@ -912,8 +929,7 @@ void LaserdiscPlayer::seekFrame(size_t toFrame, EmuTime::param time)
 
 	updateStream(time);
 
-	if (toFrame <= 0) toFrame = 1;
-	if (toFrame > video->getFrames()) toFrame = video->getFrames();
+	toFrame = std::clamp(toFrame, size_t(1), video->getFrames());
 
 	// Seek time needs to be emulated correctly since
 	// e.g. Astron Belt does not wait for the seek
@@ -962,6 +978,7 @@ int16_t LaserdiscPlayer::readSample(EmuTime::param time)
 	// but honouring the stereo mode as this is done in the
 	// Laserdisc player
 	if (playerState == PlayerState::PLAYING && !seeking) {
+		assert(video);
 		auto sample = getCurrentSample(time);
 		if (const AudioFragment* audio = video->getAudio(sample)) {
 			++sampleReads;

@@ -21,13 +21,13 @@
 #include "one_of.hh"
 #include "stl.hh"
 #include "unreachable.hh"
-#include "view.hh"
 #include "xxhash.hh"
 
 #include <imgui_stdlib.h>
 
 #include <algorithm>
 #include <cassert>
+#include <ranges>
 
 namespace openmsx {
 
@@ -52,7 +52,7 @@ std::optional<ImGuiDiskManipulator::DrivePartitionTar> ImGuiDiskManipulator::get
 	auto& [drive, disk] = *dd;
 	try {
 		auto tar = std::make_unique<MSXtar>(*disk, manager.getReactor().getMsxChar2Unicode());
-		return DrivePartitionTar{drive, std::move(disk), std::move(tar)};
+		return DrivePartitionTar{.drive = drive, .disk = std::move(disk), .tar = std::move(tar)};
 	} catch (MSXException&) {
 		// e.g. triggers when trying to parse a partition table as a FAT-disk
 		return {};
@@ -448,7 +448,7 @@ void ImGuiDiskManipulator::paint(MSXMotherBoard* /*motherBoard*/)
 		auto byPos = (availableSize.y - b2Height) * 0.5f;
 		im::Group([&]{
 			ImGui::Dummy({0.0f, byPos});
-			im::Disabled(!writable || ranges::none_of(hostFileCache, &FileInfo::isSelected), [&]{
+			im::Disabled(!writable || std::ranges::none_of(hostFileCache, &FileInfo::isSelected), [&]{
 				if (ImGui::Button("<<")) {
 					if (setupTransferHostToMsx(*stuff)) {
 						openCheckTransfer = true;
@@ -456,7 +456,7 @@ void ImGuiDiskManipulator::paint(MSXMotherBoard* /*motherBoard*/)
 				}
 				simpleToolTip("Transfer files or directories from host to MSX");
 			});
-			im::Disabled(!stuff || ranges::none_of(msxFileCache, &FileInfo::isSelected), [&]{
+			im::Disabled(!stuff || std::ranges::none_of(msxFileCache, &FileInfo::isSelected), [&]{
 				if (ImGui::Button(">>")) transferMsxToHost(*stuff);
 				simpleToolTip("Transfer files or directories from MSX to host");
 			});
@@ -668,8 +668,8 @@ void ImGuiDiskManipulator::paint(MSXMotherBoard* /*motherBoard*/)
 
 			newDiskType = UNPARTITIONED;
 			bootType = static_cast<int>(MSXBootSectorType::DOS2);
-			unpartitionedSize = {720, PartitionSize::KB};
-			partitionSizes.assign(3, {32, PartitionSize::MB});
+			unpartitionedSize = {.count = 720, .unit = PartitionSize::KB};
+			partitionSizes.assign(3, {.count = 32, .unit = PartitionSize::MB});
 			ImGui::OpenPopup(newDiskImageTitle);
 		}
 		ImGui::SetNextWindowSize(gl::vec2{30, 22} * ImGui::GetFontSize(), ImGuiCond_FirstUseEver);
@@ -747,7 +747,7 @@ void ImGuiDiskManipulator::paint(MSXMotherBoard* /*motherBoard*/)
 						if (newDiskType == UNPARTITIONED) {
 							return std::vector<unsigned>(1, unpartitionedSize.asSectorCount());
 						} else {
-							return to_vector(view::transform(partitionSizes, &PartitionSize::asSectorCount));
+							return to_vector(std::views::transform(partitionSizes, &PartitionSize::asSectorCount));
 						}
 					}();
 					try {
@@ -858,7 +858,7 @@ bool ImGuiDiskManipulator::setupTransferHostToMsx(DrivePartitionTar& stuff)
 		if (!item.isSelected) continue;
 		auto msxName = stuff.tar->convertToMsxName(item.filename);
 		duplicateEntries[msxName].push_back(item);
-		auto it = ranges::find(msxFileCache, msxName, &FileInfo::filename);
+		auto it = std::ranges::find(msxFileCache, msxName, &FileInfo::filename);
 		if (it == msxFileCache.end()) continue;
 		(it->isDirectory ? existingDirs : existingFiles).push_back(*it);
 	}

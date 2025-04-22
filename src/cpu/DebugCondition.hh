@@ -8,19 +8,10 @@ namespace openmsx {
 /** General debugger condition
  *  Like breakpoints, but not tied to a specific address.
  */
-class DebugCondition final : public BreakPointBase
+class DebugCondition final : public BreakPointBase<DebugCondition>
 {
 public:
-	DebugCondition(TclObject command_, TclObject condition_, bool once_)
-		: BreakPointBase(std::move(command_), std::move(condition_), once_)
-		, id(++lastId) {}
-
-	[[nodiscard]] unsigned getId() const { return id; }
-
-private:
-	unsigned id;
-
-	static inline unsigned lastId = 0;
+	static constexpr std::string_view prefix = "cond#";
 };
 
 } // namespace openmsx

@@ -1,7 +1,9 @@
 #include "DebuggableEditor.hh"
 
 #include "ImGuiCpp.hh"
+#include "ImGuiDebugger.hh"
 #include "ImGuiManager.hh"
+#include "ImGuiOpenFile.hh"
 #include "ImGuiSettings.hh"
 #include "ImGuiUtils.hh"
 #include "Shortcuts.hh"
@@ -9,15 +11,19 @@
 #include "CommandException.hh"
 #include "Debuggable.hh"
 #include "Debugger.hh"
+#include "Display.hh"
+#include "File.hh"
 #include "Interpreter.hh"
 #include "MSXMotherBoard.hh"
 #include "SymbolManager.hh"
 #include "TclObject.hh"
+#include "VideoSystem.hh"
 
 #include "enumerate.hh"
 #include "narrow.hh"
 #include "unreachable.hh"
 
+#include "CustomFont.h"
 #include "imgui_stdlib.h"
 
 #include <algorithm>
@@ -26,6 +32,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
+#include <expected>
 #include <span>
 
 namespace openmsx {
@@ -34,6 +41,7 @@ using namespace std::literals;
 
 static constexpr int MidColsCount = 8; // extra spacing between every mid-cols.
 static constexpr auto HighlightColor = IM_COL32(255, 255, 255, 50); // background color of highlighted bytes.
+static constexpr auto HighlightSymbolColor = IM_COL32(148, 95, 35, 255); // background color of known symbol bytes.
 
 DebuggableEditor::DebuggableEditor(ImGuiManager& manager_, std::string debuggableName_, size_t index)
 	: ImGuiPart(manager_)
@@ -88,6 +96,19 @@ DebuggableEditor::Sizes DebuggableEditor::calcSizes(unsigned memSize) const
 	return s;
 }
 
+void DebuggableEditor::makeSnapshot(MSXMotherBoard& motherBoard)
+{
+	auto& debugger = motherBoard.getDebugger();
+	if (auto* debuggable = debugger.findDebuggable(getDebuggableName())) {
+		makeSnapshot(*debuggable);
+	}
+}
+void DebuggableEditor::makeSnapshot(Debuggable& debuggable)
+{
+	snapshot.resize(debuggable.getSize());
+	debuggable.readBlock(0, snapshot);
+}
+
 void DebuggableEditor::paint(MSXMotherBoard* motherBoard)
 {
 	if (!open || !motherBoard) return;
@@ -95,11 +116,16 @@ void DebuggableEditor::paint(MSXMotherBoard* motherBoard)
 	auto* debuggable = debugger.findDebuggable(getDebuggableName());
 	if (!debuggable) return;
 
-	im::ScopedFont sf(manager.fontMono);
-
 	unsigned memSize = debuggable->getSize();
 	columns = std::min(columns, narrow<int>(memSize));
 	auto s = calcSizes(memSize);
+
+	if (showExportWindow) {
+		drawExport(s, *debuggable);
+	}
+
+	im::ScopedFont sf(manager.fontMono);
+
 	ImGui::SetNextWindowSize(ImVec2(s.windowWidth, s.windowWidth * 0.60f), ImGuiCond_FirstUseEver);
 
 	im::Window(title.c_str(), &open, ImGuiWindowFlags_NoScrollbar, [&]{
@@ -111,10 +137,200 @@ void DebuggableEditor::paint(MSXMotherBoard* motherBoard)
 	});
 }
 
+void DebuggableEditor::drawExport(const Sizes& s, Debuggable& debuggable)
+{
+	auto& interp = manager.getInterpreter();
+	const auto& style = ImGui::GetStyle();
+
+	im::Window(tmpStrCat("Export ", title).c_str(), &showExportWindow, [&]{
+		if (ImGui::IsWindowAppearing()) {
+			exportBegin = strCat("0x", formatAddr(s, 0));
+			exportEnd   = strCat("0x", formatAddr(s, debuggable.getSize() - 1));
+		}
+
+		std::optional<unsigned> begin, end;
+		std::string formatError;
+
+		ImGui::SeparatorText("Input");
+
+		ImGui::RadioButton("All", &exportRange, RANGE_ALL);
+		if (exportRange == RANGE_ALL) {
+			begin = 0;
+			end = debuggable.getSize() - 1;
+		}
+
+		ImGui::RadioButton("Range   ", &exportRange, RANGE_RANGE);
+		auto handleAddress = [&](std::string_view label, std::string& text, int lowerBound) {
+			std::optional<unsigned> addr;
+			std::string error;
+			try {
+				auto i = TclObject(text).eval(interp).getInt(interp);
+				if ((i < 0) || (i >= narrow<int>(debuggable.getSize()))) {
+					error = "out of range";
+				} else if (i < lowerBound) {
+					error = "'end' smaller than 'begin'";
+				} else {
+					addr = narrow<unsigned>(i);
+				}
+			} catch (MSXException& e) {
+				error = e.getMessage();
+			}
+			ImGui::SameLine();
+			ImGui::TextUnformatted(label);
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 5.0f);
+			im::StyleColor(!addr, ImGuiCol_Text, getColor(imColor::ERROR), [&]{
+				ImGui::InputText(tmpStrCat("##", label).c_str(), &text);
+				if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+					text = strCat("0x", formatAddr(s, currentAddr));
+				}
+				simpleToolTip([&]{
+					return addr ? strCat("0x", formatAddr(s, *addr))
+					            : error;
+				});
+			});
+			return addr;
+		};
+		im::Disabled(exportRange != RANGE_RANGE, [&]{
+			begin = handleAddress("begin:", exportBegin, 0);
+			end =   handleAddress("end:", exportEnd, begin.value_or(0));
+		});
+		HelpMarker("Both 'begin' and 'end' are inclusive.\n"
+		           "You can enter an expression line '0x100 + 7' or '[reg HL]'.\n"
+		           "Right-click to enter the current cursor position.");
+
+		ImGui::SeparatorText("Format");
+
+		ImGui::RadioButton("Raw", &exportFormatted, EXPORT_RAW);
+		HelpMarker("Produce binary (unformatted) output");
+
+		ImGui::RadioButton("Formatted", &exportFormatted, EXPORT_FORMATTED);
+		HelpMarker("Produce formatted ASCII output");
+		im::DisabledIndent(exportFormatted != EXPORT_FORMATTED, [&]{
+			ImGui::TextUnformatted("Line");
+			HelpMarker("Formatting options per line");
+			im::Indent([&]{
+				ImGui::TextUnformatted("Prefix:");
+				ImGui::SameLine();
+				ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.0f);
+				ImGui::InputText("##prefix", &exportPrefix);
+				HelpMarker("Output a prefix at the start of each line.\n"
+					"For example 'db ', note the space after 'db'.");
+
+				ImGui::TextUnformatted("Columns:");
+				ImGui::SameLine();
+				ImGui::SetNextItemWidth(9.0f * s.glyphWidth + 2.0f * style.FramePadding.x);
+				if (ImGui::InputInt("##columns", &exportColumns, 1, 0)) {
+					exportColumns = std::clamp(exportColumns, 1, MAX_COLUMNS);
+				}
+				HelpMarker("Output N columns of comma-separated values.");
+
+				ImGui::TextUnformatted("Suffix:");
+				ImGui::SameLine();
+				ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.0f);
+				ImGui::InputText("##suffix", &exportSuffix);
+				HelpMarker("Output a suffix at the end of each line.\n"
+					"This might be useful if you want a trailing comma.");
+			});
+			ImGui::TextUnformatted("Value");
+			HelpMarker("Formatting options per value (multiple per line)");
+			im::Indent([&]{
+				ImGui::RadioButton("Bin", &exportFormat, FORMAT_BIN);
+				HelpMarker("8 digit binary with prefix '0b'\n"
+					"corresponding to custom format '0b%08b'");
+				ImGui::SameLine();
+				ImGui::RadioButton("Dec", &exportFormat, FORMAT_DEC);
+				HelpMarker("3 digit decimal right padded with spaces\n"
+					"corresponding to custom format '%3d'");
+				ImGui::SameLine();
+				ImGui::RadioButton("Hex", &exportFormat, FORMAT_HEX);
+				HelpMarker("2 digit hexadecimal\n"
+					"corresponding to custom format '0x%02X'");
+
+				try {
+					if (exportFormatted == EXPORT_FORMATTED) {
+						makeTclList("format", exportCustomFormat, 0).executeCommand(interp);
+					}
+				} catch (MSXException& e) {
+					formatError = e.getMessage();
+				}
+				ImGui::RadioButton("Custom", &exportFormat, FORMAT_CUSTOM);
+				ImGui::SameLine();
+				im::Disabled(exportFormat != FORMAT_CUSTOM, [&]{
+					im::StyleColor(!formatError.empty(), ImGuiCol_Text, getColor(imColor::ERROR), [&]{
+						ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.0f);
+						ImGui::InputText("##custom", &exportCustomFormat);
+						if (!formatError.empty()) {
+							simpleToolTip(formatError);
+						}
+					});
+				});
+				HelpMarker("format string passed to the Tcl 'format' command");
+			});
+		});
+		std::string formatStr = (exportFormat == FORMAT_BIN) ? "0b%08b"
+		                      : (exportFormat == FORMAT_DEC) ? "%3d"
+		                      : (exportFormat == FORMAT_HEX) ? "0x%02X"
+		                      : exportCustomFormat;
+
+		ImGui::SeparatorText("Output");
+
+		ImGui::RadioButton("Clipboard", &exportDestination, OUTPUT_CLIPBOARD);
+
+		ImGui::RadioButton("File", &exportDestination, OUTPUT_FILE);
+		ImGui::SameLine();
+		im::Disabled(exportDestination != OUTPUT_FILE, [&]{
+			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 18.0f);
+			ImGui::InputText("##filename", &exportFilename);
+			ImGui::SameLine();
+			if (ImGui::Button(ICON_IGFD_FOLDER_OPEN)) {
+				manager.openFile->selectNewFile(
+					strCat("Select output file for ", title), "",
+					[&](const auto& fn) { exportFilename = fn; });
+			}
+		});
+
+		bool ok = begin && end &&
+		          (exportFormat != FORMAT_CUSTOM || formatError.empty()) &&
+			  (exportDestination != OUTPUT_FILE || !exportFilename.empty());
+		im::Disabled(!ok, [&]{
+			if (ImGui::Button("Export")) {
+				auto fetch = [&](unsigned address) { return debuggable.read(address); };
+				try {
+					auto output = (exportFormatted == EXPORT_FORMATTED)
+						? formatToString(fetch, *begin, *end, exportPrefix, exportColumns, exportSuffix,
+								formatStr, interp)
+						: rawToString(fetch, *begin, *end);
+					if (exportDestination == OUTPUT_CLIPBOARD) {
+						manager.getReactor().getDisplay().getVideoSystem().setClipboardText(output);
+					} else {
+						File file(exportFilename, File::OpenMode::TRUNCATE);
+						file.write(std::span(std::bit_cast<const uint8_t*>(output.data()), output.size()));
+					}
+					exportStatus = "Export successful";
+					exportStatusTimeout = 3.0f;
+				} catch (MSXException& e) {
+					exportStatus = e.getMessage();
+					exportStatusTimeout = 5.0f;
+					manager.printError(e.getMessage());
+				}
+			}
+		});
+		if (exportStatusTimeout > 0.0f) {
+			const auto& io = ImGui::GetIO();
+			exportStatusTimeout -= io.DeltaTime;
+
+			ImGui::SameLine();
+			ImGui::TextUnformatted(exportStatus);
+		}
+
+	});
+}
+
 [[nodiscard]] static unsigned DataTypeGetSize(ImGuiDataType dataType)
 {
-	std::array<unsigned, ImGuiDataType_COUNT - 2> sizes = { 1, 1, 2, 2, 4, 4, 8, 8 };
-	assert(dataType >= 0 && dataType < (ImGuiDataType_COUNT - 2));
+	std::array<unsigned, 8> sizes = { 1, 1, 2, 2, 4, 4, 8, 8 };
+	assert(dataType >= 0 && dataType < 8);
 	return sizes[dataType];
 }
 
@@ -140,29 +356,22 @@ void DebuggableEditor::paint(MSXMotherBoard* motherBoard)
 	return std::nullopt;
 }
 
-struct ParseAddrResult { // TODO c++23 std::expected might be a good fit here
-	std::string error;
-	unsigned addr = 0;
-};
-[[nodiscard]] static ParseAddrResult parseAddressExpr(
+[[nodiscard]] static std::expected<unsigned, std::string> parseAddressExpr(
 	std::string_view str, const SymbolManager& symbolManager, Interpreter& interp)
 {
-	ParseAddrResult r;
-	if (str.empty()) return r;
+	if (str.empty()) return 0;
 
 	// TODO linear search, probably OK for now, but can be improved if it turns out to be a problem
 	// Note: limited to 16-bit, but larger values trigger an errors and are then handled below, so that's fine
 	if (auto addr = symbolManager.parseSymbolOrValue(str)) {
-		r.addr = *addr;
-		return r;
+		return *addr;
 	}
 
 	try {
-		r.addr = TclObject(str).eval(interp).getInt(interp);
+		return TclObject(str).eval(interp).getInt(interp);
 	} catch (CommandException& e) {
-		r.error = e.getMessage();
+		return std::unexpected(e.getMessage());
 	}
-	return r;
 }
 
 [[nodiscard]] static std::string formatData(uint8_t val)
@@ -225,6 +434,9 @@ void DebuggableEditor::drawContents(const Sizes& s, Debuggable& debuggable, unsi
 	if (showDataPreview) {
 		footerHeight += style.ItemSpacing.y + ImGui::GetFrameHeightWithSpacing() + 3 * ImGui::GetTextLineHeightWithSpacing();
 	}
+	if (showSymbolInfo) {
+		footerHeight += style.ItemSpacing.y + ImGui::GetFrameHeightWithSpacing();
+	}
 	// We begin into our scrolling region with the 'ImGuiWindowFlags_NoMove' in order to prevent click from moving the window.
 	// This is used as a facility since our main click detection code doesn't assign an ActiveId so the click would normally be caught as a window-move.
 	int cFlags = ImGuiWindowFlags_NoMove;
@@ -238,26 +450,6 @@ void DebuggableEditor::drawContents(const Sizes& s, Debuggable& debuggable, unsi
 	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
 
 	std::optional<unsigned> nextAddr;
-	// Move cursor but only apply on next frame so scrolling with be synchronized (because currently we can't change the scrolling while the window is being rendered)
-	if (addrMode == CURSOR) {
-		const auto& shortcuts = manager.getShortcuts();
-		if ((int(currentAddr) >= columns) &&
-		    shortcuts.checkShortcut({.keyChord = ImGuiKey_UpArrow, .repeat = true})) {
-			nextAddr = currentAddr - columns;
-		}
-		if ((int(currentAddr) < int(memSize - columns)) &&
-		    shortcuts.checkShortcut({.keyChord = ImGuiKey_DownArrow, .repeat = true})) {
-			nextAddr = currentAddr + columns;
-		}
-		if ((int(currentAddr) > 0) &&
-		    shortcuts.checkShortcut({.keyChord = ImGuiKey_LeftArrow, .repeat = true})) {
-			nextAddr = currentAddr - 1;
-		}
-		if ((int(currentAddr) < int(memSize - 1)) &&
-		    shortcuts.checkShortcut({.keyChord = ImGuiKey_RightArrow, .repeat = true})) {
-			nextAddr = currentAddr + 1;
-		}
-	}
 
 	// Draw vertical separator
 	auto* drawList = ImGui::GetWindowDrawList();
@@ -278,6 +470,9 @@ void DebuggableEditor::drawContents(const Sizes& s, Debuggable& debuggable, unsi
 			// TODO: We should have a way to retrieve the text edit cursor position more easily in the API, this is rather tedious. This is such a ugly mess we may be better off not using InputText() at all here.
 			static int Callback(ImGuiInputTextCallbackData* data) {
 				auto* userData = static_cast<UserData*>(data->UserData);
+				if (userData->cursorPos != -1) { // reset cursor
+					data->CursorPos = userData->cursorPos;
+				}
 				if (!data->HasSelection()) {
 					userData->cursorPos = data->CursorPos;
 				}
@@ -298,6 +493,10 @@ void DebuggableEditor::drawContents(const Sizes& s, Debuggable& debuggable, unsi
 		};
 		UserData userData;
 		userData.format = formatData;
+		if (resetCursor) {
+			resetCursor = false;
+			userData.cursorPos = 0;
+		}
 		ImGuiInputTextFlags flags = ImGuiInputTextFlags_EnterReturnsTrue
 					  | ImGuiInputTextFlags_AutoSelectAll
 					  | ImGuiInputTextFlags_NoHorizontalScroll
@@ -313,9 +512,57 @@ void DebuggableEditor::drawContents(const Sizes& s, Debuggable& debuggable, unsi
 				setStrings(s, debuggable);
 			}
 		});
+		// Move cursor but only apply on next frame so scrolling will be synchronized (because currently we can't change the scrolling while the window is being rendered)
+		if (addrMode == CURSOR && ImGui::IsItemActive()) {
+			if (ImGui::IsKeyChordPressed(ImGuiKey_Home | ImGuiMod_Ctrl)) {
+				nextAddr = 0;
+				updateAddr = true; // force scroll
+			} else if (ImGui::IsKeyPressed(ImGuiKey_Home)) {
+				nextAddr = currentAddr - (currentAddr % unsigned(columns));
+			}
+			if (ImGui::IsKeyChordPressed(ImGuiKey_End | ImGuiMod_Ctrl)) {
+				nextAddr = memSize - 1;
+				updateAddr = true; // force scroll
+				// ImGui::InputText() already reacted to 'End' by placing the edit cursor at the end.
+				// And normally that's a signal to write the value to memory. We don't want that.
+				resetCursor = true;
+			} else if (ImGui::IsKeyPressed(ImGuiKey_End)) {
+				auto tmp = currentAddr - (currentAddr % unsigned(columns)) + columns - 1;
+				nextAddr = std::min(tmp, memSize - 1);
+				resetCursor = true;
+			}
+			if ((int(currentAddr) >= columns) &&
+			    ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
+				nextAddr = currentAddr - columns;
+			}
+			if ((int(currentAddr) < int(memSize - columns)) &&
+			    ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
+				nextAddr = currentAddr + columns;
+			}
+			if ((int(currentAddr) > 0) &&
+			    ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) {
+				nextAddr = currentAddr - 1;
+			}
+			if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) {
+				// always set nextAddr, also when already on the very last address
+				// this prevents doing a 'dataWrite'
+				nextAddr = std::min(currentAddr + 1, memSize - 1);
+				resetCursor = true; // see comment on 'End'
+			}
+			if (!switchedTab && ImGui::IsKeyPressed(ImGuiKey_Tab)) {
+				dataEditingActive = (dataEditingActive == HEX) ? ASCII : HEX;
+				nextAddr = currentAddr;
+				switchedTab = true; // to prevent switching back already in the next frame
+			} else {
+				switchedTab = false;
+			}
+		}
 		dataEditingTakeFocus = false;
 		dataWrite |= userData.cursorPos >= width;
-		if (nextAddr) dataWrite = false;
+		if (nextAddr) {
+			dataWrite = false;
+			dataEditingTakeFocus = true;
+		}
 		if (dataWrite) {
 			if (auto value = parseData(dataInput)) {
 				debuggable.write(addr, *value);
@@ -324,6 +571,14 @@ void DebuggableEditor::drawContents(const Sizes& s, Debuggable& debuggable, unsi
 			}
 		}
 	};
+
+	auto& debugger = manager.debugger;
+	if ((snapshot.size() != memSize) && debugger->needSnapshot()) {
+		makeSnapshot(debuggable);
+	}
+	bool drawChanges = (snapshot.size() == memSize) && debugger->needDrawChanges();
+	auto changedColor = debugger->getChangesColor();
+	auto greyColor = getColor(imColor::TEXT_DISABLED);
 
 	const auto totalLineCount = int((memSize + columns - 1) / columns);
 	im::ListClipper(totalLineCount, -1, s.lineHeight, [&](int line) {
@@ -376,6 +631,16 @@ void DebuggableEditor::drawContents(const Sizes& s, Debuggable& debuggable, unsi
 				drawList->AddRectFilled(pos, ImVec2(pos.x + highlightWidth, pos.y + s.lineHeight), HighlightColor);
 			}
 
+			// Draw symbol highlight
+			if (showSymbolInfo) {
+				auto symbol = symbolManager.lookupValue(narrow_cast<uint16_t>(addr));
+				if (!symbol.empty()) {
+					float highlightWidth = s.glyphWidth * 2;
+					ImVec2 pos = ImGui::GetCursorScreenPos();
+					drawList->AddRectFilled(pos, ImVec2(pos.x + highlightWidth, pos.y + s.lineHeight), HighlightSymbolColor);
+				}
+			}
+
 			if (currentAddr == addr && (dataEditingActive == HEX)) {
 				handleInput(addr, 2,
 					[&](ImGuiInputTextCallbackData* data) { // format
@@ -389,7 +654,9 @@ void DebuggableEditor::drawContents(const Sizes& s, Debuggable& debuggable, unsi
 					ImGuiInputTextFlags_CharsHexadecimal);
 			} else {
 				uint8_t b = debuggable.read(addr);
-				im::StyleColor(b == 0 && greyOutZeroes, ImGuiCol_Text, getColor(imColor::TEXT_DISABLED), [&]{
+				bool changed = drawChanges && (b != snapshot[addr]);
+				bool grey = (b == 0) && greyOutZeroes;
+				im::StyleColor(changed || grey, ImGuiCol_Text, changed ? changedColor : greyColor, [&]{
 					ImGui::StrCat(formatData(b), ' ');
 				});
 				if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(0)) {
@@ -439,8 +706,10 @@ void DebuggableEditor::drawContents(const Sizes& s, Debuggable& debuggable, unsi
 						});
 				} else {
 					uint8_t c = debuggable.read(addr);
+					bool changed = drawChanges && (c != snapshot[addr]);
 					char display = formatAsciiData(c);
-					im::StyleColor(display != char(c), ImGuiCol_Text, getColor(imColor::TEXT_DISABLED), [&]{
+					bool grey = display != char(c);
+					im::StyleColor(changed || grey, ImGuiCol_Text, changed ? changedColor : greyColor, [&]{
 						ImGui::TextUnformatted(&display, &display + 1);
 					});
 				}
@@ -479,25 +748,24 @@ void DebuggableEditor::drawContents(const Sizes& s, Debuggable& debuggable, unsi
 		ImGui::SameLine();
 
 		std::string* as = addrMode == CURSOR ? &addrStr : &addrExpr;
-		auto r = parseAddressExpr(*as, symbolManager, manager.getInterpreter());
-		im::StyleColor(!r.error.empty(), ImGuiCol_Text, getColor(imColor::ERROR), [&] {
-			if (addrMode == EXPRESSION && r.error.empty()) {
-				scrollAddr(s, debuggable, memSize, r.addr, forceScroll);
+		auto addr = parseAddressExpr(*as, symbolManager, manager.getInterpreter());
+		im::StyleColor(!addr, ImGuiCol_Text, getColor(imColor::ERROR), [&] {
+			if (addrMode == EXPRESSION && addr) {
+				scrollAddr(s, debuggable, memSize, *addr, forceScroll);
 			}
 			if (manager.getShortcuts().checkShortcut(Shortcuts::ID::HEX_GOTO_ADDR)) {
 				ImGui::SetKeyboardFocusHere();
 			}
 			ImGui::SetNextItemWidth(15.0f * ImGui::GetFontSize());
 			if (ImGui::InputText("##addr", as, ImGuiInputTextFlags_EnterReturnsTrue)) {
-				auto r2 = parseAddressExpr(addrStr, symbolManager, manager.getInterpreter());
-				if (r2.error.empty()) {
-					scrollAddr(s, debuggable, memSize, r2.addr, forceScroll);
+				if (auto addr2 = parseAddressExpr(addrStr, symbolManager, manager.getInterpreter())) {
+					scrollAddr(s, debuggable, memSize, *addr2, forceScroll);
 					dataEditingTakeFocus = true;
 				}
 			}
 			simpleToolTip([&]{
-				return r.error.empty() ? strCat("0x", formatAddr(s, r.addr))
-						: r.error;
+				return addr ? strCat("0x", formatAddr(s, *addr))
+				            : addr.error();
 			});
 		});
 		im::Font(manager.fontProp, [&]{
@@ -522,9 +790,20 @@ void DebuggableEditor::drawContents(const Sizes& s, Debuggable& debuggable, unsi
 		ImGui::Separator();
 		drawPreviewLine(s, debuggable, memSize);
 	}
+	if (showSymbolInfo) {
+		ImGui::Separator();
+		ImGui::AlignTextToFramePadding();
+		auto symbol = symbolManager.lookupValue(narrow_cast<uint16_t>(currentAddr));
+		if (!symbol.empty()) {
+			ImGui::Text("Current symbol: %s", symbol[0]->name.c_str());
+		} else {
+			ImGui::TextUnformatted("No symbol for this address defined"sv);
+		}
+	}
 
 	im::Popup("context", [&]{
-		ImGui::SetNextItemWidth(7.5f * s.glyphWidth + 2.0f * style.FramePadding.x);
+		im::ScopedFont sf(manager.fontProp);
+		ImGui::SetNextItemWidth(8.5f * s.glyphWidth + 2.0f * style.FramePadding.x);
 		if (ImGui::InputInt("Columns", &columns, 1, 0)) {
 			columns = std::clamp(columns, 1, MAX_COLUMNS);
 		}
@@ -532,7 +811,15 @@ void DebuggableEditor::drawContents(const Sizes& s, Debuggable& debuggable, unsi
 		ImGui::Checkbox("Show Search pane", &showSearch);
 		ImGui::Checkbox("Show Data Preview", &showDataPreview);
 		ImGui::Checkbox("Show Ascii", &showAscii);
+		ImGui::Checkbox("Show Symbol info", &showSymbolInfo);
 		ImGui::Checkbox("Grey out zeroes", &greyOutZeroes);
+		im::Menu("Highlight changes", [&]{
+			debugger->configureChangesMenu();
+		});
+		ImGui::Separator();
+		if (ImGui::MenuItem("Export ...")) {
+			showExportWindow = true;
+		}
 	});
 	im::Popup("NotFound", [&]{
 		ImGui::TextUnformatted("Not found");
@@ -541,10 +828,10 @@ void DebuggableEditor::drawContents(const Sizes& s, Debuggable& debuggable, unsi
 
 [[nodiscard]] static const char* DataTypeGetDesc(ImGuiDataType dataType)
 {
-	std::array<const char*, ImGuiDataType_COUNT - 2> desc = {
+	std::array<const char*, 8> desc = {
 		"Int8", "Uint8", "Int16", "Uint16", "Int32", "Uint32", "Int64", "Uint64"
 	};
-	assert(dataType >= 0 && dataType < (ImGuiDataType_COUNT - 2));
+	assert(dataType >= 0 && dataType < 8);
 	return desc[dataType];
 }
 
@@ -764,7 +1051,7 @@ void DebuggableEditor::drawPreviewLine(const Sizes& s, Debuggable& debuggable, u
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth((s.glyphWidth * 10.0f) + style.FramePadding.x * 2.0f + style.ItemInnerSpacing.x);
 	if (ImGui::BeginCombo("##combo_type", DataTypeGetDesc(previewDataType), ImGuiComboFlags_HeightLargest)) {
-		for (ImGuiDataType n = 0; n < (ImGuiDataType_COUNT - 2); ++n) {
+		for (ImGuiDataType n = 0; n < 8; ++n) {
 			if (ImGui::Selectable(DataTypeGetDesc(n), previewDataType == n)) {
 				previewDataType = n;
 			}

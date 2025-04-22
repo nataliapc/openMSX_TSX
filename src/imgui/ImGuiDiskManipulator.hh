@@ -61,7 +61,7 @@ private:
 	void refreshMsx(DrivePartitionTar& stuff);
 	void refreshHost();
 	void checkSort(std::vector<FileInfo>& files, bool& forceSort) const;
-	[[nodiscard]] Action drawTable(std::vector<FileInfo>& files, int& lastClickIdx, bool& forceSort, bool drawAttrib) const;
+	[[nodiscard]] Action drawTable(std::vector<FileInfo>& files, int& lastClickIdx, bool& forceSort, bool msxSide) const;
 	void insertMsxDisk();
 	void exportDiskImage();
 	void msxParentDirectory();
@@ -95,7 +95,7 @@ private:
 	bool hostNeedRefresh = true;
 	bool hostForceSort = false;
 
-	enum TransferHostToMsxPhase {
+	enum TransferHostToMsxPhase : uint8_t {
 		IDLE,
 		CHECK,
 		EXECUTE_PRESERVE,
@@ -108,7 +108,7 @@ private:
 	enum NewDiskType : int { UNPARTITIONED = 0, PARTITIONED = 1 };
 	int newDiskType = UNPARTITIONED;
 	int bootType = static_cast<int>(MSXBootSectorType::DOS2);
-	PartitionSize unpartitionedSize = {720, PartitionSize::KB};
+	PartitionSize unpartitionedSize = {.count = 720, .unit = PartitionSize::KB};
 	std::vector<PartitionSize> partitionSizes;
 };
 

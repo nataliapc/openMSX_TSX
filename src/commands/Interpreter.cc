@@ -54,7 +54,7 @@ static int dummyGetHandle(ClientData /*instanceData*/, int /*direction*/,
 	return TCL_ERROR;
 }
 Tcl_ChannelType Interpreter::channelType = {
-	const_cast<char*>("openMSX console"),// Type name
+	"openMSX console",	 // Type name
 	nullptr,		 // Always non-blocking
 	dummyClose,		 // Close proc
 	dummyInput,		 // Input proc
@@ -325,7 +325,7 @@ void Interpreter::registerSetting(BaseSetting& variable)
 	// problems. TODO investigate this further.
 
 	uintptr_t traceID = traceCount++;
-	traces.emplace_back(Trace{traceID, &variable}); // still in sorted order
+	traces.emplace_back(Trace{.id = traceID, .setting = &variable}); // still in sorted order
 	Tcl_TraceVar(interp, name.getString().data(), // 0-terminated
 	             TCL_TRACE_READS | TCL_TRACE_WRITES | TCL_TRACE_UNSETS,
 	             traceProc, std::bit_cast<ClientData>(traceID));
@@ -405,7 +405,7 @@ char* Interpreter::traceProc(ClientData clientData, Tcl_Interp* interp,
 				setVar(interp, part1Obj, variable->getValue());
 			} catch (MSXException& e) {
 				static_string = std::move(e).getMessage();
-				return const_cast<char*>(static_string.c_str());
+				return static_string.data();
 			}
 		}
 		if (flags & TCL_TRACE_WRITES) {
@@ -420,7 +420,7 @@ char* Interpreter::traceProc(ClientData clientData, Tcl_Interp* interp,
 			} catch (MSXException& e) {
 				setVar(interp, part1Obj, getSafeValue(*variable));
 				static_string = std::move(e).getMessage();
-				return const_cast<char*>(static_string.c_str());
+				return static_string.data();
 			}
 		}
 		if (flags & TCL_TRACE_UNSETS) {
@@ -469,20 +469,28 @@ TclParser Interpreter::parse(std::string_view command)
 	return {interp, command};
 }
 
-bool Interpreter::validCommand(std::string_view command)
-{
-	Tcl_Parse parseInfo;
-	int result = Tcl_ParseCommand(interp, command.data(), narrow<int>(command.size()), 0, &parseInfo);
-	Tcl_FreeParse(&parseInfo);
-	return result == TCL_OK;
-}
-
 bool Interpreter::validExpression(std::string_view expression)
 {
 	Tcl_Parse parseInfo;
 	int result = Tcl_ParseExpr(interp, expression.data(), narrow<int>(expression.size()), &parseInfo);
 	Tcl_FreeParse(&parseInfo);
 	return result == TCL_OK;
+}
+
+std::string Interpreter::parseCommandError(std::string_view command)
+{
+	Tcl_Parse parseInfo;
+	int result = Tcl_ParseCommand(interp, command.data(), narrow<int>(command.size()), 0, &parseInfo);
+	Tcl_FreeParse(&parseInfo);
+	return (result == TCL_OK) ? std::string{} : std::string(Tcl_GetStringResult(interp));
+}
+
+std::string Interpreter::parseExpressionError(std::string_view expression)
+{
+	Tcl_Parse parseInfo;
+	int result = Tcl_ParseExpr(interp, expression.data(), narrow<int>(expression.size()), &parseInfo);
+	Tcl_FreeParse(&parseInfo);
+	return (result == TCL_OK) ? std::string{} : std::string(Tcl_GetStringResult(interp));
 }
 
 void Interpreter::wrongNumArgs(unsigned argc, std::span<const TclObject> tokens, const char* message)

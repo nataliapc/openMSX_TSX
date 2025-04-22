@@ -4,7 +4,7 @@
 #include "Renderer.hh"
 #include "Observer.hh"
 #include "RenderSettings.hh"
-#include "openmsx.hh"
+
 #include <cstdint>
 #include <memory>
 
@@ -37,16 +37,16 @@ public:
 	void reInit() override;
 	void frameStart(EmuTime::param time) override;
 	void frameEnd(EmuTime::param time) override;
-	void updateHorizontalScrollLow(byte scroll, EmuTime::param time) override;
-	void updateHorizontalScrollHigh(byte scroll, EmuTime::param time) override;
+	void updateHorizontalScrollLow(uint8_t scroll, EmuTime::param time) override;
+	void updateHorizontalScrollHigh(uint8_t scroll, EmuTime::param time) override;
 	void updateBorderMask(bool masked, EmuTime::param time) override;
 	void updateMultiPage(bool multiPage, EmuTime::param time) override;
 	void updateTransparency(bool enabled, EmuTime::param time) override;
 	void updateSuperimposing(const RawFrame* videoSource, EmuTime::param time) override;
-	void updateForegroundColor(byte color, EmuTime::param time) override;
-	void updateBackgroundColor(byte color, EmuTime::param time) override;
-	void updateBlinkForegroundColor(byte color, EmuTime::param time) override;
-	void updateBlinkBackgroundColor(byte color, EmuTime::param time) override;
+	void updateForegroundColor(uint8_t color, EmuTime::param time) override;
+	void updateBackgroundColor(uint8_t color, EmuTime::param time) override;
+	void updateBlinkForegroundColor(uint8_t color, EmuTime::param time) override;
+	void updateBlinkBackgroundColor(uint8_t color, EmuTime::param time) override;
 	void updateBlinkState(bool enabled, EmuTime::param time) override;
 	void updatePalette(unsigned index, int grb, EmuTime::param time) override;
 	void updateVerticalScroll(int scroll, EmuTime::param time) override;
@@ -62,7 +62,7 @@ public:
 
 private:
 	/** Indicates whether the area to be drawn is border or display. */
-	enum DrawType { DRAW_BORDER, DRAW_DISPLAY };
+	enum DrawType : uint8_t { DRAW_BORDER, DRAW_DISPLAY };
 
 	// Observer<Setting> interface:
 	void update(const Setting& setting) noexcept override;

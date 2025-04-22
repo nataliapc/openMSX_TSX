@@ -1,11 +1,12 @@
 #ifndef IMGUI_REVERSE_BAR_HH
 #define IMGUI_REVERSE_BAR_HH
 
+#include "FileListWidget.hh"
 #include "ImGuiAdjust.hh"
 #include "ImGuiPart.hh"
+#include "ImGuiUtils.hh"
 
 #include "GLUtil.hh"
-#include "TclObject.hh"
 
 #include <string>
 
@@ -14,7 +15,7 @@ namespace openmsx {
 class ImGuiReverseBar final : public ImGuiPart
 {
 public:
-	using ImGuiPart::ImGuiPart;
+	explicit ImGuiReverseBar(ImGuiManager& manager);
 
 	[[nodiscard]] zstring_view iniName() const override { return "reverse bar"; }
 	void save(ImGuiTextBuffer& buf) override;
@@ -28,10 +29,13 @@ public:
 private:
 	std::string saveStateName;
 	std::string saveReplayName;
+	FileListWidget saveStateFileList;
+	FileListWidget replayFileList;
+
 	bool saveStateOpen = false;
 	bool saveReplayOpen = false;
-	TclObject confirmCmd;
-	std::string confirmText;
+
+	ConfirmDialogTclCommand confirmDialog;
 
 	bool reverseHideTitle = true;
 	bool reverseFadeOut = true;

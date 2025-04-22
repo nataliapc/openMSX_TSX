@@ -2,30 +2,56 @@
 #define BREAKPOINT_HH
 
 #include "BreakPointBase.hh"
-#include "openmsx.hh"
+#include "CommandException.hh"
+
+#include "strCat.hh"
+
+#include <cstdint>
+#include <optional>
 
 namespace openmsx {
 
-/** Base class for CPU breakpoints.
- *  For performance reasons every bp is associated with exactly one
- *  (immutable) address.
- */
-class BreakPoint final : public BreakPointBase
+class BreakPoint final : public BreakPointBase<BreakPoint>
 {
 public:
-	BreakPoint(word address_, TclObject command_, TclObject condition_, bool once_)
-		: BreakPointBase(std::move(command_), std::move(condition_), once_)
-		, id(++lastId)
-		, address(address_) {}
+	static constexpr std::string_view prefix = "bp#";
 
-	[[nodiscard]] word getAddress() const { return address; }
-	[[nodiscard]] unsigned getId() const { return id; }
+public:
+	[[nodiscard]] std::optional<uint16_t> getAddress() const { return address; }
+	[[nodiscard]] TclObject getAddressString() const { return addrStr; }
+	void setAddress(Interpreter& interp, const TclObject& addr) {
+		addrStr = addr;
+		evaluateAddress(interp);
+	}
+
+	void evaluateAddress(Interpreter& interp) {
+		try {
+			address = parseAddress(interp);
+		} catch (MSXException&) {
+			address = {};
+		}
+	}
+
+	[[nodiscard]] std::string parseAddressError(Interpreter& interp) const {
+		try {
+			parseAddress(interp);
+			return {};
+		} catch (MSXException& e) {
+			return e.getMessage();
+		}
+	}
 
 private:
-	unsigned id;
-	word address;
+	uint16_t parseAddress(Interpreter& interp) const {
+		auto tmp = addrStr.eval(interp).getInt(interp); // may throw
+		if ((tmp < 0) || (tmp > 0xffff)) {
+			throw CommandException("address outside of range 0...0xffff");
+		}
+		return uint16_t(tmp);
+	}
 
-	static inline unsigned lastId = 0;
+	TclObject addrStr;
+	std::optional<uint16_t> address; // redundant: calculated from 'addrStr'
 };
 
 } // namespace openmsx

@@ -1,9 +1,12 @@
 #include "VDPVRAM.hh"
+
 #include "SpriteChecker.hh"
 #include "Renderer.hh"
+
 #include "outer.hh"
 #include "ranges.hh"
 #include "serialize.hh"
+
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -49,14 +52,14 @@ unsigned VDPVRAM::LogicalVRAMDebuggable::transform(unsigned address)
 	     : address;
 }
 
-byte VDPVRAM::LogicalVRAMDebuggable::read(unsigned address, EmuTime::param time)
+uint8_t VDPVRAM::LogicalVRAMDebuggable::read(unsigned address, EmuTime::param time)
 {
 	auto& vram = OUTER(VDPVRAM, logicalVRAMDebug);
 	return vram.cpuRead(transform(address), time);
 }
 
 void VDPVRAM::LogicalVRAMDebuggable::write(
-	unsigned address, byte value, EmuTime::param time)
+	unsigned address, uint8_t value, EmuTime::param time)
 {
 	auto& vram = OUTER(VDPVRAM, logicalVRAMDebug);
 	vram.cpuWrite(transform(address), value, time);
@@ -74,14 +77,14 @@ VDPVRAM::PhysicalVRAMDebuggable::PhysicalVRAMDebuggable(
 {
 }
 
-byte VDPVRAM::PhysicalVRAMDebuggable::read(unsigned address, EmuTime::param time)
+uint8_t VDPVRAM::PhysicalVRAMDebuggable::read(unsigned address, EmuTime::param time)
 {
 	auto& vram = OUTER(VDPVRAM, physicalVRAMDebug);
 	return vram.cpuRead(address, time);
 }
 
 void VDPVRAM::PhysicalVRAMDebuggable::write(
-	unsigned address, byte value, EmuTime::param time)
+	unsigned address, uint8_t value, EmuTime::param time)
 {
 	auto& vram = OUTER(VDPVRAM, physicalVRAMDebug);
 	vram.cpuWrite(address, value, time);
@@ -134,7 +137,7 @@ void VDPVRAM::clear()
 		// Read from unconnected VRAM returns random data.
 		// TODO reading same location multiple times does not always
 		// give the same value.
-		ranges::fill(subspan(data, actualSize), 0xFF);
+		std::ranges::fill(subspan(data, actualSize), 0xFF);
 	}
 }
 
@@ -272,15 +275,15 @@ void VDPVRAM::change4k8kMapping(bool mapping8k)
 	 * even in 4K mode, all 16K of VRAM can be accessed. The only
 	 * difference is in what addresses are used to store data.
 	 */
-	std::array<byte, 0x4000> tmp;
+	std::array<uint8_t, 0x4000> tmp;
 	if (mapping8k) {
 		// from 8k/16k to 4k mapping
 		for (unsigned addr8 = 0; addr8 < 0x4000; addr8 += 64) {
 			unsigned addr4 =  (addr8 & 0x203F) |
 			                 ((addr8 & 0x1000) >> 6) |
 			                 ((addr8 & 0x0FC0) << 1);
-			ranges::copy(subspan<64>(data, addr8),
-			             subspan<64>(tmp, addr4));
+			copy_to_range(subspan<64>(data, addr8),
+			              subspan<64>(tmp, addr4));
 		}
 	} else {
 		// from 4k to 8k/16k mapping
@@ -288,12 +291,12 @@ void VDPVRAM::change4k8kMapping(bool mapping8k)
 			unsigned addr8 =  (addr4 & 0x203F) |
 			                 ((addr4 & 0x0040) << 6) |
 			                 ((addr4 & 0x1F80) >> 1);
-			ranges::copy(subspan<64>(data, addr4),
-			             subspan<64>(tmp, addr8));
+			copy_to_range(subspan<64>(data, addr4),
+			              subspan<64>(tmp, addr8));
 		}
 	}
-	//ranges::copy(tmp, std::span{data}); // TODO error with clang-15/libc++
-	ranges::copy(tmp, std::span{data.begin(), data.end()});
+	//copy_to_range(tmp, std::span{data}); // TODO error with clang-15/libc++
+	copy_to_range(tmp, std::span{data.begin(), data.end()});
 }
 
 

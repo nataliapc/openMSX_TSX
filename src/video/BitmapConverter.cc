@@ -37,7 +37,7 @@ void BitmapConverter::calcDPalette()
 	}
 }
 
-void BitmapConverter::convertLine(std::span<Pixel> buf, std::span<const byte, 128> vramPtr)
+void BitmapConverter::convertLine(std::span<Pixel> buf, std::span<const uint8_t, 128> vramPtr)
 {
 	switch (mode.getByte()) {
 	case DisplayMode::GRAPHIC4: // screen 5
@@ -57,7 +57,7 @@ void BitmapConverter::convertLine(std::span<Pixel> buf, std::span<const byte, 12
 	case DisplayMode::GRAPHIC7 | DisplayMode::YJK:
 	case DisplayMode::GRAPHIC6 | DisplayMode::YJK | DisplayMode::YAE:
 	case DisplayMode::GRAPHIC7 | DisplayMode::YJK | DisplayMode::YAE:
-		UNREACHABLE;
+		UNREACHABLE; break;
 	// TODO: Support YJK on modes other than Graphic 6/7.
 	case DisplayMode::GRAPHIC4 | DisplayMode::YJK:
 	case DisplayMode::GRAPHIC5 | DisplayMode::YJK:
@@ -70,7 +70,7 @@ void BitmapConverter::convertLine(std::span<Pixel> buf, std::span<const byte, 12
 }
 
 void BitmapConverter::convertLinePlanar(
-	std::span<Pixel> buf, std::span<const byte, 128> vramPtr0, std::span<const byte, 128> vramPtr1)
+	std::span<Pixel> buf, std::span<const uint8_t, 128> vramPtr0, std::span<const uint8_t, 128> vramPtr1)
 {
 	switch (mode.getByte()) {
 	case DisplayMode::GRAPHIC6: // screen 7
@@ -98,7 +98,7 @@ void BitmapConverter::convertLinePlanar(
 	case DisplayMode::GRAPHIC5 | DisplayMode::YJK:
 	case DisplayMode::GRAPHIC4 | DisplayMode::YJK | DisplayMode::YAE:
 	case DisplayMode::GRAPHIC5 | DisplayMode::YJK | DisplayMode::YAE:
-		UNREACHABLE;
+		UNREACHABLE; break;
 	default:
 		renderBogus(subspan<256>(buf));
 		break;
@@ -107,7 +107,7 @@ void BitmapConverter::convertLinePlanar(
 
 void BitmapConverter::renderGraphic4(
 	std::span<Pixel, 256> buf,
-	std::span<const byte, 128> vramPtr0)
+	std::span<const uint8_t, 128> vramPtr0)
 {
 	/*for (unsigned i = 0; i < 128; i += 2) {
 		unsigned data0 = vramPtr0[i + 0];
@@ -144,7 +144,7 @@ void BitmapConverter::renderGraphic4(
 
 void BitmapConverter::renderGraphic5(
 	std::span<Pixel, 512> buf,
-	std::span<const byte, 128> vramPtr0) const
+	std::span<const uint8_t, 128> vramPtr0) const
 {
 	Pixel* __restrict pixelPtr = buf.data();
 	for (auto i : xrange(128)) {
@@ -158,8 +158,8 @@ void BitmapConverter::renderGraphic5(
 
 void BitmapConverter::renderGraphic6(
 	std::span<Pixel, 512> buf,
-	std::span<const byte, 128> vramPtr0,
-	std::span<const byte, 128> vramPtr1)
+	std::span<const uint8_t, 128> vramPtr0,
+	std::span<const uint8_t, 128> vramPtr1)
 {
 	Pixel* __restrict pixelPtr = buf.data();
 	/*for (auto i : xrange(128)) {
@@ -204,8 +204,8 @@ void BitmapConverter::renderGraphic6(
 
 void BitmapConverter::renderGraphic7(
 	std::span<Pixel, 256> buf,
-	std::span<const byte, 128> vramPtr0,
-	std::span<const byte, 128> vramPtr1) const
+	std::span<const uint8_t, 128> vramPtr0,
+	std::span<const uint8_t, 128> vramPtr1) const
 {
 	Pixel* __restrict pixelPtr = buf.data();
 	for (auto i : xrange(128)) {
@@ -229,8 +229,8 @@ static constexpr std::tuple<int, int, int> yjk2rgb(int y, int j, int k)
 
 void BitmapConverter::renderYJK(
 	std::span<Pixel, 256> buf,
-	std::span<const byte, 128> vramPtr0,
-	std::span<const byte, 128> vramPtr1) const
+	std::span<const uint8_t, 128> vramPtr0,
+	std::span<const uint8_t, 128> vramPtr1) const
 {
 	Pixel* __restrict pixelPtr = buf.data();
 	for (auto i : xrange(64)) {
@@ -254,8 +254,8 @@ void BitmapConverter::renderYJK(
 
 void BitmapConverter::renderYAE(
 	std::span<Pixel, 256> buf,
-	std::span<const byte, 128> vramPtr0,
-	std::span<const byte, 128> vramPtr1) const
+	std::span<const uint8_t, 128> vramPtr0,
+	std::span<const uint8_t, 128> vramPtr1) const
 {
 	Pixel* __restrict pixelPtr = buf.data();
 	for (auto i : xrange(64)) {
@@ -290,7 +290,7 @@ void BitmapConverter::renderBogus(std::span<Pixel, 256> buf) const
 	// show palette color 15.
 	// When this is in effect, the VRAM is not refreshed anymore, but that
 	// is not emulated.
-	ranges::fill(buf, palette16[15]);
+	std::ranges::fill(buf, palette16[15]);
 }
 
 } // namespace openmsx

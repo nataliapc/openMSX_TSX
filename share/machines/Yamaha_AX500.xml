@@ -134,7 +134,7 @@
     <primary slot="3">
 
       <secondary slot="0">
-        <ROM id="Painter & Graphic BIOS">
+        <ROM id="Painter &amp; Graphic BIOS">
           <mem base="0x0000" size="0x10000"/>
           <rom>
             <sha1>80872d997d18e1a633e70b9da35a0d28113073e5</sha1>
@@ -144,7 +144,7 @@
       </secondary>
 
       <secondary slot="1">
-        <ROM id="MSX2 subROM">
+        <ROM id="MSX Sub ROM">
           <mem base="0x0000" size="0x4000"/>
           <rom>
             <sha1>7f86af13e81259a0db8f70d8a7e026fb918ee652</sha1>
@@ -154,6 +154,7 @@
         <WD2793 id="Memory Mapped FDC">
           <connectionstyle>National</connectionstyle>
           <mem base="0x4000" size="0x8000"/> <!-- Registers appear also on BF80-BFBF -->
+          <rom_visibility base="0x4000" size="0x4000"/> <!-- ROM only visible in page 1 -->
           <rom>
             <sha1>a953bef071b603d6280bdf7ab6249c2e6f1a4cd8</sha1>
             <filename>ax500_disk.rom</filename>

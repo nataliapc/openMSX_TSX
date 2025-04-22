@@ -37,10 +37,6 @@ void ImGuiHelp::showMenu(MSXMotherBoard* /*motherBoard*/)
 		ImGui::MenuItem("About openMSX", nullptr, &showAboutOpenMSX);
 		ImGui::MenuItem("About Dear ImGui", nullptr, &showAboutImGui);
 	});
-
-	if (showDemoWindow) {
-		ImGui::ShowDemoWindow(&showDemoWindow);
-	}
 }
 
 void ImGuiHelp::paint(MSXMotherBoard* /*motherBoard*/)
@@ -52,6 +48,9 @@ void ImGuiHelp::paint(MSXMotherBoard* /*motherBoard*/)
 			ImGui::ShowUserGuide();
 		});
 	}
+	if (showDemoWindow) {
+		ImGui::ShowDemoWindow(&showDemoWindow);
+	}
 }
 
 void ImGuiHelp::paintAbout()
@@ -60,8 +59,7 @@ void ImGuiHelp::paintAbout()
 		if (!logo) {
 			logo.emplace(); // initialize with null-image
 			try {
-				FileContext context = systemFileContext();
-				auto r = context.resolve("icons/openMSX-logo-256.png");
+				auto r = systemFileContext().resolve("icons/openMSX-logo-256.png");
 				gl::ivec2 isize;
 				logo->texture = loadTexture(r, isize);
 				logo->size = gl::vec2(isize);

@@ -4,17 +4,18 @@
 #include "AlignedBuffer.hh"
 #include "endian.hh"
 #include "ranges.hh"
-#include "stl.hh"
 
 #include <array>
+#include <cstdint>
 #include <span>
 #include <string>
+#include <utility>
 
 namespace openmsx {
 
 class SectorAccessibleDisk;
 
-enum class MSXBootSectorType : int {
+enum class MSXBootSectorType : int { // int for ImGui
 	DOS1 = 0,
 	DOS2 = 1,
 	NEXTOR = 2,
@@ -73,7 +74,7 @@ struct MSXDirEntry {
 		uint8_t value;
 
 		constexpr AttribValue() = default;
-		constexpr /*implicit*/ AttribValue(Attrib v) : value(to_underlying(v)) {}
+		constexpr explicit(false) AttribValue(Attrib v) : value(std::to_underlying(v)) {}
 		constexpr explicit AttribValue(uint8_t v) : value(v) {}
 		constexpr explicit operator bool() const { return value != 0; }
 		constexpr auto operator<=>(const AttribValue&) const = default;
@@ -158,15 +159,15 @@ namespace DiskImageUtils {
 	 * @param buf Sector buffer for partition table.
 	 * @return Reference to partition information struct in sector buffer.
 	 */
-	Partition& getPartition(const SectorAccessibleDisk& disk, unsigned partition, SectorBuffer& buf);
+	Partition& getPartition(SectorAccessibleDisk& disk, unsigned partition, SectorBuffer& buf);
 
 	/** Check whether partition is of type FAT12 or FAT16.
 	 */
-	void checkSupportedPartition(const SectorAccessibleDisk& disk, unsigned partition);
+	void checkSupportedPartition(SectorAccessibleDisk& disk, unsigned partition);
 
 	/** Check whether the given disk is partitioned.
 	 */
-	[[nodiscard]] bool hasPartitionTable(const SectorAccessibleDisk& disk);
+	[[nodiscard]] bool hasPartitionTable(SectorAccessibleDisk& disk);
 
 	/** Format the given disk (= a single partition).
 	 * The formatting depends on the size of the image.

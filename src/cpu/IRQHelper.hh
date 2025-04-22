@@ -4,6 +4,8 @@
 #include "Probe.hh"
 #include "MSXMotherBoard.hh"
 #include "serialize.hh"
+
+#include <cstdint>
 #include <string>
 
 namespace openmsx {
@@ -38,7 +40,7 @@ protected:
 	void lower();
 private:
 	MSXCPU& cpu;
-	enum Type { NotConnected, Maskable, NonMaskable };
+	enum Type : uint8_t { NotConnected, Maskable, NonMaskable };
 	const Type type;
 };
 
@@ -73,7 +75,7 @@ public:
 
 	/** Set the interrupt request on the bus.
 	  */
-	inline void set() {
+	void set() {
 		if (!request) {
 			request = true;
 			SOURCE::raise();
@@ -82,7 +84,7 @@ public:
 
 	/** Reset the interrupt request on the bus.
 	  */
-	inline void reset() {
+	void reset() {
 		if (request) {
 			request = false;
 			SOURCE::lower();
@@ -91,7 +93,7 @@ public:
 
 	/** Convenience function: calls set() or reset().
 	  */
-	inline void set(bool s) {
+	void set(bool s) {
 		if (s) {
 			set();
 		} else {
@@ -102,7 +104,7 @@ public:
 	/** Get the interrupt state.
 	  * @return true iff interrupt request is active.
 	  */
-	[[nodiscard]] inline bool getState() const {
+	[[nodiscard]] bool getState() const {
 		return request;
 	}
 

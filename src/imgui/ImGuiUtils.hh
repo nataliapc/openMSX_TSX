@@ -6,14 +6,16 @@
 #include "Reactor.hh"
 
 #include "function_ref.hh"
-#include "ranges.hh"
 #include "strCat.hh"
 #include "StringOp.hh"
+#include "circular_buffer.hh"
 
 #include <imgui.h>
+#include <imgui_internal.h> // ImTextCharToUtf8
 
 #include <algorithm>
 #include <concepts>
+#include <functional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -64,6 +66,7 @@ namespace openmsx {
 class BooleanSetting;
 class FloatSetting;
 class HotKey;
+class ImGuiManager;
 class IntegerSetting;
 class Setting;
 class VideoSourceSetting;
@@ -96,7 +99,45 @@ void simpleToolTip(std::invocable<> auto descFunc)
 	});
 }
 
-void HelpMarker(std::string_view desc);
+void HelpMarker(std::string_view desc, float spacing = -1.0f);
+
+inline bool ButtonWithCustomRendering(
+	const char* label, gl::vec2 size, bool pressed,
+	std::invocable<gl::vec2 /*center*/, ImDrawList*> auto render)
+{
+	bool result = false;
+	im::StyleColor(pressed, ImGuiCol_Button, ImGui::GetColorU32(ImGuiCol_ButtonActive), [&]{
+		gl::vec2 topLeft = ImGui::GetCursorScreenPos();
+		gl::vec2 center = topLeft + size * 0.5f;
+		result = ImGui::Button(label, size);
+		render(center, ImGui::GetWindowDrawList());
+	});
+	return result;
+}
+
+inline bool ButtonWithCustomRendering(
+	const char* label, gl::vec2 size,
+	std::invocable<gl::vec2 /*center*/, ImDrawList*> auto render)
+{
+	return ButtonWithCustomRendering(label, size, false, render);
+}
+
+inline bool ButtonWithCenteredGlyph(ImWchar glyph, gl::vec2 maxGlyphSize)
+{
+	std::array<char, 2 + 5> label = {'#', '#'};
+	ImTextCharToUtf8(&label[2], glyph);
+
+	const auto& style = ImGui::GetStyle();
+	auto buttonSize = maxGlyphSize + 2.0f* gl::vec2(style.FramePadding);
+
+	return ButtonWithCustomRendering(label.data(), buttonSize, [&](gl::vec2 center, ImDrawList* drawList) {
+		auto* font = ImGui::GetFont();
+		auto texId = font->ContainerAtlas->TexID;
+		const auto* g = font->FindGlyph(glyph);
+		auto halfSize = gl::vec2{g->X1 - g->X0, g->Y1 - g->Y0} * 0.5f;
+		drawList->AddImage(texId, center - halfSize, center + halfSize, {g->U0, g->V0}, {g->U1, g->V1});
+	});
+};
 
 inline void centerNextWindowOverCurrent()
 {
@@ -106,6 +147,36 @@ inline void centerNextWindowOverCurrent()
 	auto windowCenter = windowPos + center * windowSize;
 	ImGui::SetNextWindowPos(windowCenter, ImGuiCond_Appearing, center);
 }
+
+class ConfirmDialog {
+public:
+	explicit ConfirmDialog(std::string title_) : title(std::move(title_)) {}
+
+	void open(std::string text_, std::function<void()> action_) {
+		text = std::move(text_);
+		action = std::move(action_);
+		doOpen = true;
+	}
+
+	void execute();
+
+private:
+	std::string title;
+	std::string text;
+	std::function<void()> action;
+	bool doOpen = false;
+};
+
+class ConfirmDialogTclCommand : public ConfirmDialog {
+public:
+	ConfirmDialogTclCommand(ImGuiManager& manager_, std::string title_)
+		: ConfirmDialog(std::move(title_)), manager(&manager_) {}
+
+	void open(std::string text_, TclObject cmd_);
+
+private:
+	ImGuiManager* manager;
+};
 
 struct GetSettingDescription {
 	std::string operator()(const Setting& setting) const;
@@ -152,17 +223,17 @@ void comboHexSequence(const char* label, int* value, int mult, int max, int offs
 template<typename Range, typename Projection>
 void sortUpDown_T(Range& range, const ImGuiTableSortSpecs* sortSpecs, Projection proj) {
 	if (sortSpecs->Specs->SortDirection == ImGuiSortDirection_Descending) {
-		ranges::stable_sort(range, std::greater<>{}, proj);
+		std::ranges::stable_sort(range, std::greater<>{}, proj);
 	} else {
-		ranges::stable_sort(range, std::less<>{}, proj);
+		std::ranges::stable_sort(range, std::less<>{}, proj);
 	}
 };
 template<typename Range, typename Projection>
 void sortUpDown_String(Range& range, const ImGuiTableSortSpecs* sortSpecs, Projection proj) {
 	if (sortSpecs->Specs->SortDirection == ImGuiSortDirection_Descending) {
-		ranges::stable_sort(range, StringOp::inv_caseless{}, proj);
+		std::ranges::stable_sort(range, StringOp::inv_caseless{}, proj);
 	} else {
-		ranges::stable_sort(range, StringOp::caseless{}, proj);
+		std::ranges::stable_sort(range, StringOp::caseless{}, proj);
 	}
 };
 
@@ -171,7 +242,7 @@ void sortUpDown_String(Range& range, const ImGuiTableSortSpecs* sortSpecs, Proje
 	const std::vector<std::pair<std::string, std::string>>& info,
 	std::string_view key)
 {
-	auto it = ranges::find_if(info, [&](const auto& p) { return p.first == key; });
+	auto it = std::ranges::find_if(info, [&](const auto& p) { return p.first == key; });
 	if (it == info.end()) return {};
 	return &it->second;
 }
@@ -187,7 +258,7 @@ template<typename T> // 'MachineInfo' or 'ExtensionInfo', both have a 'configInf
 			}
 		}
 	}
-	ranges::sort(result, StringOp::caseless{});
+	std::ranges::sort(result, StringOp::caseless{});
 	return result;
 }
 
@@ -224,7 +295,7 @@ void filterIndices(std::string_view filterString, GetName getName, std::vector<s
 	if (filterString.empty()) return;
 	std::erase_if(indices, [&](auto idx) {
 		const auto& name = getName(idx);
-		return !ranges::all_of(StringOp::split_view<StringOp::EmptyParts::REMOVE>(filterString, ' '),
+		return !std::ranges::all_of(StringOp::split_view<StringOp::EmptyParts::REMOVE>(filterString, ' '),
 			[&](auto part) { return StringOp::containsCaseInsensitive(name, part); });
 	});
 }
@@ -233,6 +304,19 @@ template<typename T>
 void applyDisplayNameFilter(std::string_view filterString, const std::vector<T>& items, std::vector<size_t>& indices)
 {
 	filterIndices(filterString, [&](size_t idx) { return items[idx].displayName; }, indices);
+}
+
+template<typename T>
+void addRecentItem(circular_buffer<T>& recentItems, const T& item)
+{
+	if (auto it = std::ranges::find(recentItems, item); it != recentItems.end()) {
+		// was already present, move to front
+		std::rotate(recentItems.begin(), it, it + 1);
+	} else {
+		// new entry, add it, but possibly remove oldest entry
+		if (recentItems.full()) recentItems.pop_back();
+		recentItems.push_front(item);
+	}
 }
 
 // Similar to c++23 chunk_by(). Main difference is internal vs external iteration.
@@ -256,6 +340,11 @@ std::string getShortCutForCommand(const HotKey& hotkey, std::string_view command
 std::string getKeyChordName(ImGuiKeyChord keyChord);
 std::optional<ImGuiKeyChord> parseKeyChord(std::string_view name);
 
+[[nodiscard]] std::string formatToString(function_ref<uint8_t(unsigned)> fetch, unsigned begin, unsigned end, std::string_view prefix,
+	unsigned columns, std::string_view suffix, std::string_view formatStr, Interpreter& interp);
+
+[[nodiscard]] std::string rawToString(function_ref<uint8_t(unsigned)> fetch, unsigned begin, unsigned end);
+
 // Read from VRAM-table, including mirroring behavior
 //  shared between ImGuiCharacter, ImGuiSpriteViewer
 class VramTable {
@@ -270,8 +359,11 @@ public:
 		indexMask = ~0u << bits;
 	}
 
+	[[nodiscard]] auto getAddress(unsigned index) const {
+		return registerMask & (indexMask | index);
+	}
 	[[nodiscard]] uint8_t operator[](unsigned index) const {
-		auto addr = registerMask & (indexMask | index);
+		auto addr = getAddress(index);
 		if (planar) {
 			addr = ((addr << 16) | (addr >> 1)) & 0x1'FFFF;
 		}
@@ -284,7 +376,7 @@ private:
 	bool planar = false;
 };
 
-enum class imColor : unsigned {
+enum class imColor : uint8_t {
 	TRANSPARENT,
 	BLACK,
 	WHITE,

@@ -26,6 +26,7 @@
 #include <imgui_stdlib.h>
 
 #include <fstream>
+#include <ranges>
 
 namespace openmsx {
 
@@ -148,6 +149,7 @@ void ImGuiConsole::paint(MSXMotherBoard* /*motherBoard*/)
 					drawLine(lines[i]);
 				});
 			});
+			ImGui::Spacing();
 
 			// Keep up at the bottom of the scroll region if we were already
 			// at the bottom at the beginning of the frame.
@@ -189,6 +191,10 @@ void ImGuiConsole::paint(MSXMotherBoard* /*motherBoard*/)
 		bool enter = false;
 		im::StyleColor(ImGuiCol_Text, 0x00000000, [&]{ // transparent, see HACK below
 			enter = ImGui::InputTextWithHint("##Input", "enter command", &inputBuf, flags, &textEditCallbackStub, this);
+			if (ImGui::IsItemFocused() && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+				commandBuffer.clear();
+				prompt = PROMPT_NEW;
+			}
 		});
 		if (enter && (prompt != PROMPT_BUSY)) {
 			// print command in output buffer, with prompt prepended
@@ -249,7 +255,7 @@ void ImGuiConsole::paint(MSXMotherBoard* /*motherBoard*/)
 		/**/ // but it's fragile because it depends on some internal implementation
 		/**/ // details. More specifically: the scroll-position. And obtaining this
 		/**/ // information required stuff from <imgui_internal.h>.
-		/**/ const auto* font = ImGui::GetFont();
+		/**/ auto* font = ImGui::GetFont();
 		/**/ auto fontSize = ImGui::GetFontSize();
 		/**/ gl::vec2 frameSize(itemWidth, fontSize + style.FramePadding.y * 2.0f);
 		/**/ gl::vec2 topLeft = cursorScrnPos;
@@ -262,7 +268,7 @@ void ImGuiConsole::paint(MSXMotherBoard* /*motherBoard*/)
 		/**/	auto id = ImGui::GetID("##Input");
 		/**/	if (const auto* state = ImGui::GetInputTextState(id)) { // Internal API !!!
 		/**/		// adjust for scroll
-		/**/		drawPos.x -= state->ScrollX;
+		/**/		drawPos.x -= state->Scroll.x;
 		/**/		// redraw cursor (it was drawn transparent before)
 		/**/		bool cursorIsVisible = (state->CursorAnim <= 0.0f) || ImFmod(state->CursorAnim, 1.20f) <= 0.80f;
 		/**/		if (cursorIsVisible) {
@@ -304,11 +310,13 @@ int ImGuiConsole::textEditCallback(ImGuiInputTextCallbackData* data)
 
 		auto& commandController = manager.getReactor().getGlobalCommandController();
 		std::string newFront = commandController.tabCompletion(front);
+		auto newPos = narrow<int>(newFront.size());
 		historyBackupLine = strCat(std::move(newFront), back);
 		historyPos = -1;
 
 		data->DeleteChars(0, data->BufTextLen);
 		data->InsertChars(0, historyBackupLine.c_str());
+		data->CursorPos = newPos;
 
 		colorize(historyBackupLine);
 		break;
@@ -393,7 +401,7 @@ void ImGuiConsole::saveHistory()
 		if (!outputFile) {
 			throw FileException("Error while saving the console history.");
 		}
-		for (const auto& s : view::reverse(history)) {
+		for (const auto& s : std::views::reverse(history)) {
 			outputFile << s << '\n';
 		}
 	} catch (FileException& e) {
@@ -445,7 +453,7 @@ void ImGuiConsole::update(const Setting& /*setting*/) noexcept
 		// * You press F10 again to close the console
 		// * At this point the focus should go back to the main openMSX
 		//   window (so that MSX input works).
-		SDL_SetWindowInputFocus(SDL_GetWindowFromID(WindowEvent::getMainWindowId()));
+		SDL_RaiseWindow(SDL_GetWindowFromID(WindowEvent::getMainWindowId()));
 		ImGui::SetWindowFocus(nullptr);
 	}
 }

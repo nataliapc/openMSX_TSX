@@ -12,10 +12,11 @@
 #include "TclObject.hh"
 
 #include "checked_cast.hh"
-#include "ranges.hh"
 
+#include <algorithm>
 #include <cassert>
 #include <memory>
+#include <ranges>
 
 namespace openmsx {
 
@@ -40,7 +41,7 @@ void UserSettings::deleteSetting(Setting& setting)
 
 Setting* UserSettings::findSetting(std::string_view name) const
 {
-	auto it = ranges::find(settings, name, [](auto& info) {
+	auto it = std::ranges::find(settings, name, [](auto& info) {
 		return info.setting->getFullName(); });
 	return (it != end(settings)) ? it->setting.get() : nullptr;
 }
@@ -105,9 +106,8 @@ UserSettings::Info UserSettings::Cmd::createString(std::span<const TclObject> to
 	const auto& initVal = tokens[5].getString();
 
 	auto [storage, view] = make_string_storage(desc);
-	return {std::make_unique<StringSetting>(getCommandController(), sName,
-	                                        view, initVal),
-	        std::move(storage)};
+	return {.setting = std::make_unique<StringSetting>(getCommandController(), sName, view, initVal),
+	        .description = std::move(storage)};
 }
 
 UserSettings::Info UserSettings::Cmd::createBoolean(std::span<const TclObject> tokens) const
@@ -118,9 +118,8 @@ UserSettings::Info UserSettings::Cmd::createBoolean(std::span<const TclObject> t
 	const auto& initVal = tokens[5].getBoolean(getInterpreter());
 
 	auto [storage, view] = make_string_storage(desc);
-	return {std::make_unique<BooleanSetting>(getCommandController(), sName,
-	                                         view, initVal),
-	        std::move(storage)};
+	return {.setting = std::make_unique<BooleanSetting>(getCommandController(), sName, view, initVal),
+	        .description = std::move(storage)};
 }
 
 UserSettings::Info UserSettings::Cmd::createInteger(std::span<const TclObject> tokens) const
@@ -134,9 +133,8 @@ UserSettings::Info UserSettings::Cmd::createInteger(std::span<const TclObject> t
 	const auto& maxVal  = tokens[7].getInt(interp);
 
 	auto [storage, view] = make_string_storage(desc);
-	return {std::make_unique<IntegerSetting>(getCommandController(), sName,
-	                                         view, initVal, minVal, maxVal),
-	        std::move(storage)};
+	return {.setting = std::make_unique<IntegerSetting>(getCommandController(), sName, view, initVal, minVal, maxVal),
+	        .description = std::move(storage)};
 }
 
 UserSettings::Info UserSettings::Cmd::createFloat(std::span<const TclObject> tokens) const
@@ -150,9 +148,8 @@ UserSettings::Info UserSettings::Cmd::createFloat(std::span<const TclObject> tok
 	const auto& maxVal  = tokens[7].getDouble(interp);
 
 	auto [storage, view] = make_string_storage(desc);
-	return {std::make_unique<FloatSetting>(getCommandController(), sName,
-	                                       view, initVal, minVal, maxVal),
-	        std::move(storage)};
+	return {.setting = std::make_unique<FloatSetting>(getCommandController(), sName, view, initVal, minVal, maxVal),
+	        .description = std::move(storage)};
 }
 
 UserSettings::Info UserSettings::Cmd::createEnum(std::span<const TclObject> tokens) const
@@ -165,7 +162,7 @@ UserSettings::Info UserSettings::Cmd::createEnum(std::span<const TclObject> toke
 
 	int initVal = -1;
 	int i = 0;
-	auto map = to_vector(view::transform(list, [&](const auto& s) {
+	auto map = to_vector(std::views::transform(list, [&](const auto& s) {
 		if (s == initStr) initVal = i;
 		return EnumSettingBase::MapEntry{std::string(s), i++};
 	}));
@@ -177,9 +174,8 @@ UserSettings::Info UserSettings::Cmd::createEnum(std::span<const TclObject> toke
 	}
 
 	auto [storage, view] = make_string_storage(desc);
-	return {std::make_unique<EnumSetting<int>>(
-			getCommandController(), sName, view, initVal, std::move(map)),
-	        std::move(storage)};
+	return {.setting = std::make_unique<EnumSetting<int>>( getCommandController(), sName, view, initVal, std::move(map)),
+	        .description = std::move(storage)};
 }
 
 void UserSettings::Cmd::destroy(std::span<const TclObject> tokens, TclObject& /*result*/)

@@ -6,7 +6,9 @@
 #include "AmdFlash.hh"
 #include "SCC.hh"
 #include "AY8910.hh"
+
 #include <array>
+#include <cstdint>
 #include <memory>
 
 namespace openmsx {
@@ -17,7 +19,7 @@ class SdCard;
 class MegaFlashRomSCCPlusSD final : public MSXDevice
 {
 public:
-	explicit MegaFlashRomSCCPlusSD(const DeviceConfig& config);
+	explicit MegaFlashRomSCCPlusSD(DeviceConfig& config);
 	~MegaFlashRomSCCPlusSD() override;
 
 	void powerUp(EmuTime::param time) override;
@@ -34,7 +36,7 @@ public:
 	void serialize(Archive& ar, unsigned version);
 
 private:
-	enum SCCEnable { EN_NONE, EN_SCC, EN_SCCPLUS };
+	enum SCCEnable : uint8_t { EN_NONE, EN_SCC, EN_SCCPLUS };
 	[[nodiscard]] SCCEnable getSCCEnable() const;
 	void updateConfigReg(byte value);
 
@@ -84,7 +86,8 @@ private:
 	[[nodiscard]] bool isFlashRomBlockProtectEnabled() const { return  (configReg & 0x02) != 0; }
 	[[nodiscard]] bool isFlashRomWriteEnabled()        const { return  (configReg & 0x01) != 0; }
 
-	std::array<byte, 4> bankRegsSubSlot1;
+	// Note: the bankRegsSubSlot1 registers are actually only 9 bit.
+	std::array<uint16_t, 4> bankRegsSubSlot1;
 	byte psgLatch;
 	byte sccMode;
 	std::array<byte, 4> sccBanks;

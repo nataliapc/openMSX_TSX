@@ -17,6 +17,7 @@
 #include "strCat.hh"
 #include "StringReplacer.hh"
 
+#include <algorithm>
 #include <functional>
 #include <optional>
 #include <string_view>
@@ -28,9 +29,7 @@ struct ImGuiTextBuffer;
 namespace openmsx {
 
 class CliComm;
-class ImGuiBitmapViewer;
 class ImGuiBreakPoints;
-class ImGuiCharacter;
 class ImGuiCheatFinder;
 class ImGuiConnector;
 class ImGuiConsole;
@@ -48,7 +47,6 @@ class ImGuiReverseBar;
 class ImGuiSCCViewer;
 class ImGuiSettings;
 class ImGuiSoundChip;
-class ImGuiSpriteViewer;
 class ImGuiSymbols;
 class ImGuiTools;
 class ImGuiTrainer;
@@ -93,6 +91,8 @@ public:
 
 	void storeWindowPosition(gl::ivec2 pos) { windowPos = pos; }
 	[[nodiscard]] gl::ivec2 retrieveWindowPosition() const { return windowPos; }
+
+	void configStatusBarVisibilityItems();
 
 private:
 	void initializeImGui();
@@ -141,9 +141,6 @@ public:
 	std::unique_ptr<ImGuiBreakPoints> breakPoints;
 	std::unique_ptr<ImGuiSymbols> symbols;
 	std::unique_ptr<ImGuiWatchExpr> watchExpr;
-	std::unique_ptr<ImGuiBitmapViewer> bitmap;
-	std::unique_ptr<ImGuiCharacter> character;
-	std::unique_ptr<ImGuiSpriteViewer> sprite;
 	std::unique_ptr<ImGuiVdpRegs> vdpRegs;
 	std::unique_ptr<ImGuiPalette> palette;
 	std::unique_ptr<ImGuiReverseBar> reverseBar;
@@ -167,6 +164,13 @@ public:
 	bool menuFade = true;
 	bool needReloadFont = false;
 	bool statusBarVisible = false;
+	bool statusBarItemVisibilityFps = true;
+	bool statusBarItemVisibilityScreenModeInfo = true;
+	bool statusBarItemVisibilityTime = true;
+	bool statusBarItemVisibilityActualSpeed = true;
+	bool statusBarItemVisibilityMachine = true;
+	bool statusBarItemVisibilityRunningSoftware = true;
+
 	std::string loadIniFile;
 
 private:
@@ -196,7 +200,13 @@ private:
 		PersistentElement{"mainMenuBarUndocked", &ImGuiManager::mainMenuBarUndocked},
 		PersistentElement{"mainMenuBarFade",     &ImGuiManager::menuFade},
 		PersistentElement{"windowPos",           &ImGuiManager::windowPos},
-		PersistentElement{"statusBarVisible",    &ImGuiManager::statusBarVisible}
+		PersistentElement{"statusBarVisible",    &ImGuiManager::statusBarVisible},
+		PersistentElement{"statusBarItemvisibility.fps",                 &ImGuiManager::statusBarItemVisibilityFps},
+		PersistentElement{"statusBarItemVisibility.screenModeInfo",      &ImGuiManager::statusBarItemVisibilityScreenModeInfo},
+		PersistentElement{"statusBarItemVisibility.time",                &ImGuiManager::statusBarItemVisibilityTime},
+		PersistentElement{"statusBarItemVisibility.actualSpeed",         &ImGuiManager::statusBarItemVisibilityActualSpeed},
+		PersistentElement{"statusBarItemVisibility.machine",             &ImGuiManager::statusBarItemVisibilityMachine},
+		PersistentElement{"statusBarItemVisibility.runningSoftware",     &ImGuiManager::statusBarItemVisibilityRunningSoftware},
 	};
 };
 
@@ -254,7 +264,7 @@ std::vector<InfoType> parseAllConfigFiles(ImGuiManager& manager, std::string_vie
 		if (display.empty()) display = config;
 	}
 
-	ranges::sort(result, StringOp::caseless{}, &InfoType::displayName);
+	std::ranges::sort(result, StringOp::caseless{}, &InfoType::displayName);
 
 	// make 'displayName' unique again
 	auto sameDisplayName = [](InfoType& x, InfoType& y) {
@@ -266,7 +276,7 @@ std::vector<InfoType> parseAllConfigFiles(ImGuiManager& manager, std::string_vie
 		for (auto it = first; it != last; ++it) {
 			strAppend(it->displayName, " (", it->configName, ')');
 		}
-		ranges::sort(first, last, StringOp::caseless{}, &InfoType::displayName);
+		std::ranges::sort(first, last, StringOp::caseless{}, &InfoType::displayName);
 	});
 
 	return result;

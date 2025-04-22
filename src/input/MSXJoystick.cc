@@ -9,12 +9,13 @@
 #include "StateChangeDistributor.hh"
 #include "serialize.hh"
 #include "serialize_meta.hh"
-#include "build-info.hh"
 
 #include "join.hh"
 #include "ranges.hh"
 #include "unreachable.hh"
 #include "xrange.hh"
+
+#include <algorithm>
 
 namespace openmsx {
 
@@ -104,7 +105,7 @@ void MSXJoystick::checkJoystickConfig(const TclObject& newValue)
 			"UP", "DOWN", "LEFT", "RIGHT", "A", "B"
 		};
 		std::string_view key  = newValue.getListIndex(interp, i + 0).getString();
-		auto it = ranges::find(keys, key);
+		auto it = std::ranges::find(keys, key);
 		if (it == keys.end()) {
 			throw CommandException(
 				"Invalid key: must be one of ", join(keys, ", "));
@@ -123,7 +124,7 @@ void MSXJoystick::checkJoystickConfig(const TclObject& newValue)
 	}
 
 	// only change current bindings when parsing was fully successful
-	ranges::copy(newBindings, bindings);
+	copy_to_range(newBindings, bindings);
 }
 
 // Pluggable

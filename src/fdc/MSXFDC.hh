@@ -25,12 +25,17 @@ public:
 	void serialize(Archive& ar, unsigned version);
 
 protected:
-	explicit MSXFDC(const DeviceConfig& config, const std::string& romId = {},
+	explicit MSXFDC(DeviceConfig& config, const std::string& romId = {},
 	                bool needROM = true,
 	                DiskDrive::TrackMode trackMode = DiskDrive::TrackMode::NORMAL);
 
+	void parseRomVisibility(DeviceConfig& config, unsigned defaultBase, unsigned defaultSize);
+
 protected:
 	std::optional<Rom> rom;
+	uint16_t romVisibilityStart = 0;
+	uint16_t romVisibilityLast = 0xFFFF; // so, inclusive
+
 	std::array<std::unique_ptr<DiskDrive>, 4> drives;
 };
 

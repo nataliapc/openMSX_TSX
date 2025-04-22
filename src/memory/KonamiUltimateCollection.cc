@@ -1,7 +1,11 @@
 #include "KonamiUltimateCollection.hh"
-#include "narrow.hh"
-#include "ranges.hh"
+
 #include "serialize.hh"
+
+#include "narrow.hh"
+#include "outer.hh"
+#include "ranges.hh"
+
 #include <array>
 
 /******************************************************************************
@@ -35,9 +39,9 @@ all Konami and Konami SCC ROMs should work with "Konami" mapper in KUC.
 
 namespace openmsx {
 
-KonamiUltimateCollection::KonamiUltimateCollection(
-		const DeviceConfig& config, Rom&& rom_)
+KonamiUltimateCollection::KonamiUltimateCollection(DeviceConfig& config, Rom&& rom_)
 	: MSXRom(config, std::move(rom_))
+	, romBlockDebug(*this)
 	, flash(rom, AmdFlashChip::M29W640GB, {}, config)
 	, scc("KUC SCC", config, getCurrentTime(), SCC::Mode::Compatible)
 	, dac("KUC DAC", "Konami Ultimate Collection DAC", config)
@@ -228,5 +232,12 @@ void KonamiUltimateCollection::serialize(Archive& ar, unsigned /*version*/)
 }
 INSTANTIATE_SERIALIZE_METHODS(KonamiUltimateCollection);
 REGISTER_MSXDEVICE(KonamiUltimateCollection, "KonamiUltimateCollection");
+
+
+unsigned KonamiUltimateCollection::Blocks::readExt(unsigned address)
+{
+	const auto& dev = OUTER(KonamiUltimateCollection, romBlockDebug);
+	return dev.getFlashAddr(address) >> 13;
+}
 
 } // namespace openmsx

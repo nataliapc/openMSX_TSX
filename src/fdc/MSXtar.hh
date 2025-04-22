@@ -13,6 +13,7 @@
 #include "MemBuffer.hh"
 #include "zstring_view.hh"
 
+#include <cstdint>
 #include <string_view>
 #include <variant>
 
@@ -44,7 +45,7 @@ namespace FAT {
 class MSXtar
 {
 public:
-	enum class Add {
+	enum class Add : uint8_t {
 		PRESERVE,
 		OVERWRITE,
 	};
@@ -64,13 +65,13 @@ public:
 	void getDir(std::string_view rootDirName);
 	std::string deleteItem(std::string_view itemName); // delete file or directory (recursive)
 	std::string renameItem(std::string_view currentName, std::string_view newName); // rename file or directory
-	std::string convertToMsxName(std::string_view name) const; // truncate to 8.3 filename
+	[[nodiscard]] std::string convertToMsxName(std::string_view name) const; // truncate to 8.3 filename
 
 	struct FreeSpaceResult {
 		unsigned numFreeClusters;
 		unsigned clusterSize; // in bytes
 	};
-	FreeSpaceResult getFreeSpace() const;
+	[[nodiscard]] FreeSpaceResult getFreeSpace() const;
 
 private:
 	struct DirEntry {
@@ -84,8 +85,8 @@ private:
 	[[nodiscard]] unsigned clusterToSector(FAT::Cluster cluster) const;
 	[[nodiscard]] FAT::Cluster sectorToCluster(unsigned sector) const;
 	void parseBootSector(const MSXBootSector& boot);
-	[[nodiscard]] FAT::FatCluster readFAT(FAT::Cluster index) const;
-	void writeFAT(FAT::Cluster index, FAT::FatCluster value);
+	[[nodiscard]] FAT::FatCluster readFAT(FAT::Cluster cluster) const;
+	void writeFAT(FAT::Cluster cluster, FAT::FatCluster value);
 	[[nodiscard]] FAT::Cluster findFirstFreeCluster();
 	[[nodiscard]] unsigned countFreeClusters() const;
 	[[nodiscard]] unsigned findUsableIndexInSector(unsigned sector);

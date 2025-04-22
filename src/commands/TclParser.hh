@@ -1,10 +1,12 @@
 #ifndef TCLPARSER_HH
 #define TCLPARSER_HH
 
+#include <cstdint>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
+
 #include <tcl.h>
 
 #define DEBUG_TCLPARSER 0
@@ -37,19 +39,17 @@ public:
 	[[nodiscard]] static bool isProc(Tcl_Interp* interp, std::string_view str);
 
 private:
-	enum ParseType { COMMAND, EXPRESSION, OTHER };
+	enum ParseType : uint8_t { COMMAND, EXPRESSION, OTHER };
 
-	void parse(const char* p, int size, ParseType type);
-	void printTokens(std::span<const Tcl_Token> tokens);
+	void parse(std::string parseStr, int offset, ParseType type);
+	void printTokens(std::string_view parseStr, int offset, std::span<const Tcl_Token> tokens);
 	[[nodiscard]] static ParseType guessSubType(std::span<const Tcl_Token> tokens, size_t i);
-	void setColors(const char* p, int size, char c);
+	void setColors(std::string_view parseStr, int offset, const char* p, int size, char c);
 
 private:
 	Tcl_Interp* interp;
 	std::string colors;
-	std::string parseStr;
 	std::vector<int> last;
-	int offset = 0;
 
 #if DEBUG_TCLPARSER
 	void DEBUG_PRINT(const std::string& s);

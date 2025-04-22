@@ -184,7 +184,7 @@ Main features:
 namespace openmsx {
 
 MegaFlashRomSCCPlus::MegaFlashRomSCCPlus(
-		const DeviceConfig& config, Rom&& rom_)
+		DeviceConfig& config, Rom&& rom_)
 	: MSXRom(config, std::move(rom_))
 	, scc("MFR SCC+ SCC-I", config, getCurrentTime(), SCC::Mode::Compatible)
 	, psg("MFR SCC+ PSG", DummyAY8910Periphery::instance(), config,
@@ -192,16 +192,12 @@ MegaFlashRomSCCPlus::MegaFlashRomSCCPlus(
 	, flash(rom, AmdFlashChip::M29W800DB, {}, config)
 {
 	powerUp(getCurrentTime());
-	for (auto port : {0x10, 0x11}) {
-		getCPUInterface().register_IO_Out(narrow_cast<byte>(port), this);
-	}
+	getCPUInterface().register_IO_Out_range(0x10, 2, this);
 }
 
 MegaFlashRomSCCPlus::~MegaFlashRomSCCPlus()
 {
-	for (auto port : {0x10, 0x11}) {
-		getCPUInterface().unregister_IO_Out(narrow_cast<byte>(port), this);
-	}
+	getCPUInterface().unregister_IO_Out_range(0x10, 2, this);
 }
 
 void MegaFlashRomSCCPlus::powerUp(EmuTime::param time)
@@ -484,7 +480,7 @@ void MegaFlashRomSCCPlus::writeMem(word addr, byte value, EmuTime::param time)
 	if (((configReg & 0xC0) == 0x40) ||
 	    ((0x4000 <= addr) && (addr < 0xC000))) {
 		assert(flashAddr != unsigned(-1));
-		return flash.write(flashAddr, value);
+		flash.write(flashAddr, value);
 	}
 }
 

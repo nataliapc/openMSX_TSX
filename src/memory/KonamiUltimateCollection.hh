@@ -1,10 +1,12 @@
 #ifndef KONAMIULTIMATECOLLECTION_HH
 #define KONAMIULTIMATECOLLECTION_HH
 
-#include "MSXRom.hh"
 #include "AmdFlash.hh"
-#include "SCC.hh"
 #include "DACSound8U.hh"
+#include "MSXRom.hh"
+#include "RomBlockDebuggable.hh"
+#include "SCC.hh"
+
 #include <array>
 
 namespace openmsx {
@@ -12,7 +14,7 @@ namespace openmsx {
 class KonamiUltimateCollection final : public MSXRom
 {
 public:
-	KonamiUltimateCollection(const DeviceConfig& config, Rom&& rom);
+	KonamiUltimateCollection(DeviceConfig& config, Rom&& rom);
 
 	void powerUp(EmuTime::param time) override;
 	void reset(EmuTime::param time) override;
@@ -36,6 +38,12 @@ private:
 	[[nodiscard]] bool areBankRegsEnabled()      const { return (mapperReg & 0x02) == 0; }
 
 private:
+	struct Blocks final : RomBlockDebuggableBase {
+		explicit Blocks(const KonamiUltimateCollection& device)
+			: RomBlockDebuggableBase(device) {}
+		[[nodiscard]] unsigned readExt(unsigned address) override;
+	} romBlockDebug;
+
 	AmdFlash flash;
 	SCC scc;
 	DACSound8U dac;

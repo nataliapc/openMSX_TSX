@@ -4,7 +4,6 @@
 #include "GLScaleNxScaler.hh"
 #include "GLTVScaler.hh"
 #include "GLHQScaler.hh"
-#include "GLHQLiteScaler.hh"
 #include "GLContext.hh"
 #include "RenderSettings.hh"
 #include "unreachable.hh"
@@ -12,7 +11,8 @@
 
 namespace openmsx::GLScalerFactory {
 
-std::unique_ptr<GLScaler> createScaler(RenderSettings& renderSettings)
+std::unique_ptr<GLScaler> createScaler(
+	RenderSettings& renderSettings, unsigned maxWidth, unsigned maxHeight)
 {
 	GLScaler& fallback = gl::context->getFallbackScaler();
 	switch (renderSettings.getScaleAlgorithm()) {
@@ -26,9 +26,7 @@ std::unique_ptr<GLScaler> createScaler(RenderSettings& renderSettings)
 	case TV:
 		return std::make_unique<GLTVScaler>(renderSettings);
 	case HQ:
-		return std::make_unique<GLHQScaler>(fallback);
-	case HQLITE:
-		return std::make_unique<GLHQLiteScaler>(fallback);
+		return std::make_unique<GLHQScaler>(fallback, maxWidth, maxHeight);
 	default:
 		UNREACHABLE;
 	}

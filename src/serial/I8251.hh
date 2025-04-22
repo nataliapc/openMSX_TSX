@@ -5,10 +5,13 @@
 
 #include "ClockPin.hh"
 #include "SerialDataInterface.hh"
+
 #include "Schedulable.hh"
 #include "serialize_meta.hh"
-#include "openmsx.hh"
+
 #include "outer.hh"
+
+#include <cstdint>
 
 namespace openmsx {
 
@@ -34,9 +37,9 @@ public:
 	I8251(Scheduler& scheduler, I8251Interface& interface, EmuTime::param time);
 
 	void reset(EmuTime::param time);
-	[[nodiscard]] byte readIO(word port, EmuTime::param time);
-	[[nodiscard]] byte peekIO(word port, EmuTime::param time) const;
-	void writeIO(word port, byte value, EmuTime::param time);
+	[[nodiscard]] uint8_t readIO(uint16_t port, EmuTime::param time);
+	[[nodiscard]] uint8_t peekIO(uint16_t port, EmuTime::param time) const;
+	void writeIO(uint16_t port, uint8_t value, EmuTime::param time);
 	[[nodiscard]] ClockPin& getClockPin() { return clock; }
 	[[nodiscard]] bool isRecvReady() const { return recvReady; }
 	[[nodiscard]] bool isRecvEnabled() const;
@@ -45,7 +48,7 @@ public:
 	void setDataBits(DataBits bits) override { recvDataBits = bits; }
 	void setStopBits(StopBits bits) override { recvStopBits = bits; }
 	void setParityBit(bool enable, Parity parity) override;
-	void recvByte(byte value, EmuTime::param time) override;
+	void recvByte(uint8_t value, EmuTime::param time) override;
 
 	void execRecv(EmuTime::param time);
 	void execTrans(EmuTime::param time);
@@ -54,17 +57,17 @@ public:
 	void serialize(Archive& ar, unsigned version);
 
 	// public for serialize
-	enum class CmdPhase {
+	enum class CmdPhase : uint8_t {
 		MODE, SYNC1, SYNC2, CMD
 	};
 
 private:
-	void setMode(byte newMode);
-	void writeCommand(byte value, EmuTime::param time);
-	[[nodiscard]] byte readStatus(EmuTime::param time);
-	[[nodiscard]] byte readTrans(EmuTime::param time);
-	void writeTrans(byte value, EmuTime::param time);
-	void send(byte value, EmuTime::param time);
+	void setMode(uint8_t newMode);
+	void writeCommand(uint8_t value, EmuTime::param time);
+	[[nodiscard]] uint8_t readStatus(EmuTime::param time);
+	[[nodiscard]] uint8_t readTrans(EmuTime::param time);
+	void writeTrans(uint8_t value, EmuTime::param time);
+	void send(uint8_t value, EmuTime::param time);
 
 private:
 	// Schedulable
@@ -94,16 +97,16 @@ private:
 	SerialDataInterface::StopBits  recvStopBits;
 	SerialDataInterface::Parity recvParityBit;
 	bool recvParityEnabled;
-	byte recvBuf;
+	uint8_t recvBuf;
 	bool recvReady;
 
-	byte sendByte;
-	byte sendBuffer;
+	uint8_t sendByte;
+	uint8_t sendBuffer;
 
-	byte status;
-	byte command;
-	byte mode;
-	byte sync1, sync2;
+	uint8_t status;
+	uint8_t command;
+	uint8_t mode;
+	uint8_t sync1, sync2;
 };
 SERIALIZE_CLASS_VERSION(I8251, 2);
 

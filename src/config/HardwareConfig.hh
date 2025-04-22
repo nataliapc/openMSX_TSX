@@ -3,11 +3,11 @@
 
 #include "FileContext.hh"
 #include "XMLElement.hh"
-#include "openmsx.hh"
 #include "serialize_constr.hh"
 #include "serialize_meta.hh"
 
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <span>
 #include <string>
@@ -23,7 +23,7 @@ class TclObject;
 class HardwareConfig
 {
 public:
-	enum class Type {
+	enum class Type : uint8_t {
 		MACHINE,
 		EXTENSION,
 		ROM
@@ -54,17 +54,19 @@ public:
 
 	[[nodiscard]] XMLDocument& getXMLDocument() { return config; }
 	[[nodiscard]] const XMLElement& getConfig() const { return *config.getRoot(); }
+	[[nodiscard]] XMLElement& getConfig() { return *config.getRoot(); }
 	[[nodiscard]] const std::string& getName() const { return name; }
 	[[nodiscard]] const std::string& getConfigName() const { return hwName; }
 	[[nodiscard]] std::string_view getRomFilename() const;
 	[[nodiscard]] const XMLElement& getDevicesElem() const;
+	[[nodiscard]] XMLElement& getDevicesElem();
 	[[nodiscard]] Type getType() const { return type; }
 
 	/** Parses a slot mapping.
 	  * Returns the slot selection: two bits per page for the slot to be
 	  * selected in that page, like MSX port 0xA8.
 	  */
-	[[nodiscard]] byte parseSlotMap() const;
+	[[nodiscard]] uint8_t parseSlotMap() const;
 
 	void parseSlots();
 	void createDevices();
@@ -83,8 +85,7 @@ private:
 	void setConfig(XMLElement* root) { config.setRoot(root); }
 	void load(std::string_view type);
 
-	void createDevices(const XMLElement& elem,
-	                   const XMLElement* primary, const XMLElement* secondary);
+	void createDevices(XMLElement& elem, XMLElement* primary, XMLElement* secondary);
 	void createExternalSlot(int ps);
 	void createExternalSlot(int ps, int ss);
 	void createExpandedSlot(int ps);

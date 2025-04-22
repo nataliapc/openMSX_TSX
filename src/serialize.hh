@@ -356,7 +356,7 @@ protected:
 	/** Returns a reference to the most derived class.
 	 * Helper function to implement static polymorphism.
 	 */
-	inline Derived& self()
+	Derived& self()
 	{
 		return static_cast<Derived&>(*this);
 	}
@@ -367,11 +367,11 @@ class OutputArchiveBase2
 {
 public:
 	static constexpr bool IS_LOADER = false;
-	[[nodiscard]] inline bool versionAtLeast(unsigned /*actual*/, unsigned /*required*/) const
+	[[nodiscard]] bool versionAtLeast(unsigned /*actual*/, unsigned /*required*/) const
 	{
 		return true;
 	}
-	[[nodiscard]] inline bool versionBelow(unsigned /*actual*/, unsigned /*required*/) const
+	[[nodiscard]] bool versionBelow(unsigned /*actual*/, unsigned /*required*/) const
 	{
 		return false;
 	}
@@ -675,7 +675,7 @@ public:
 	{
 		buffer.insert(&t, sizeof(t));
 	}
-	inline void saveChar(char c)
+	void saveChar(char c)
 	{
 		save(c);
 	}
@@ -721,7 +721,10 @@ public:
 		                &skip, sizeof(skip));
 	}
 
-	[[nodiscard]] MemBuffer<uint8_t> releaseBuffer(size_t& size);
+	[[nodiscard]] MemBuffer<uint8_t> releaseBuffer() &&
+	{
+		return std::move(buffer).release();
+	}
 
 private:
 	ALWAYS_INLINE void serialize_group(const std::tuple<>& /*tuple*/) const
@@ -759,19 +762,19 @@ private:
 class MemInputArchive final : public InputArchiveBase<MemInputArchive>
 {
 public:
-	MemInputArchive(const uint8_t* data, size_t size,
+	MemInputArchive(std::span<const uint8_t> buf_,
 	                std::span<const std::shared_ptr<DeltaBlock>> deltaBlocks_)
-		: buffer(data, size)
+		: buffer(buf_)
 		, deltaBlocks(deltaBlocks_)
 	{
 	}
 
 	static constexpr bool NEED_VERSION = false;
-	[[nodiscard]] inline bool versionAtLeast(unsigned /*actual*/, unsigned /*required*/) const
+	[[nodiscard]] bool versionAtLeast(unsigned /*actual*/, unsigned /*required*/) const
 	{
 		return true;
 	}
-	[[nodiscard]] inline bool versionBelow(unsigned /*actual*/, unsigned /*required*/) const
+	[[nodiscard]] bool versionBelow(unsigned /*actual*/, unsigned /*required*/) const
 	{
 		return false;
 	}
@@ -780,7 +783,7 @@ public:
 	{
 		buffer.read(&t, sizeof(t));
 	}
-	inline void loadChar(char& c)
+	void loadChar(char& c)
 	{
 		load(c);
 	}
@@ -920,11 +923,11 @@ class XmlInputArchive final : public InputArchiveBase<XmlInputArchive>
 public:
 	explicit XmlInputArchive(const std::string& filename);
 
-	[[nodiscard]] inline bool versionAtLeast(unsigned actual, unsigned required) const
+	[[nodiscard]] bool versionAtLeast(unsigned actual, unsigned required) const
 	{
 		return actual >= required;
 	}
-	[[nodiscard]] inline bool versionBelow(unsigned actual, unsigned required) const
+	[[nodiscard]] bool versionBelow(unsigned actual, unsigned required) const
 	{
 		return actual < required;
 	}
@@ -960,7 +963,7 @@ public:
 		this->self().serialize(std::forward<Args>(args)...);
 	}
 
-	[[nodiscard]] const XMLElement* currentElement() const {
+	[[nodiscard]] XMLElement* currentElement() const {
 		return elems.back().first;
 	}
 
@@ -1001,7 +1004,7 @@ public:
 
 private:
 	XMLDocument xmlDoc{16384}; // tweak: initial allocator buffer size
-	std::vector<std::pair<const XMLElement*, const XMLElement*>> elems;
+	std::vector<std::pair<XMLElement*, XMLElement*>> elems;
 };
 
 #define INSTANTIATE_SERIALIZE_METHODS(CLASS) \

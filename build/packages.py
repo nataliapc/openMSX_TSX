@@ -46,11 +46,11 @@ class FreeType(DownloadablePackage):
 	downloadURL = 'http://downloads.sourceforge.net/freetype'
 	niceName = 'FreeType'
 	sourceName = 'freetype'
-	version = '2.11.1'
-	fileLength = 3451359
+	version = '2.13.3'
+	fileLength = 4063324
 	checksums = {
 		'sha256':
-			'f8db94d307e9c54961b39a1cc799a67d46681480696ed72ecf78d4473770f09b',
+			'5c3a8e78f7b24c20b25b54ee575d6daa40007a5f4eea2845861c3409b3021747',
 		}
 
 class GLEW(DownloadablePackage):
@@ -72,11 +72,11 @@ class LibPNG(DownloadablePackage):
 	downloadURL = 'http://downloads.sourceforge.net/libpng'
 	niceName = 'libpng'
 	sourceName = 'libpng'
-	version = '1.6.39'
-	fileLength = 1507328
+	version = '1.6.44'
+	fileLength = 1545850
 	checksums = {
 		'sha256':
-			'af4fb7f260f839919e5958e5ab01a275d4fe436d45442a36ee62f73e5beb75ba',
+			'8c25a7792099a0089fa1cc76c94260d0bb3f1ec52b93671b572f8bb61577b732',
 		}
 
 	@classmethod
@@ -117,11 +117,11 @@ class SDL2(DownloadablePackage):
 	downloadURL = 'https://www.libsdl.org/release'
 	niceName = 'SDL2'
 	sourceName = 'SDL2'
-	version = '2.30.1'
-	fileLength = 7428023
+	version = '2.30.7'
+	fileLength = 7525092
 	checksums = {
 		'sha256':
-			'01215ffbc8cfc4ad165ba7573750f15ddda1f971d5a66e9dcaffd37c587f473a',
+			'2508c80438cd5ff3bbeb8fe36b8f3ce7805018ff30303010b61b03bb83ab9694',
 		}
 
 class SDL2_ttf(DownloadablePackage):
@@ -139,11 +139,11 @@ class TCL(DownloadablePackage):
 	downloadURL = 'http://downloads.sourceforge.net/tcl'
 	niceName = 'Tcl'
 	sourceName = 'tcl'
-	version = '8.6.13'
-	fileLength = 10834396
+	version = '8.6.15'
+	fileLength = 11765231
 	checksums = {
 		'sha256':
-			'43a1fae7412f61ff11de2cfd05d28cfc3a73762f354a417c62370a54e2caf066',
+			'861e159753f2e2fbd6ec1484103715b0be56be3357522b858d3cbb5f893ffef1',
 		}
 
 	@classmethod

@@ -8,10 +8,13 @@
 
 #include "Clock.hh"
 #include "EnumSetting.hh"
-#include "openmsx.hh"
+
+#include <cstdint>
 #include <string>
 
 namespace openmsx {
+
+using uint4_t = uint8_t;
 
 class CommandController;
 class SRAM;
@@ -19,15 +22,15 @@ class SRAM;
 class RP5C01
 {
 public:
-	enum RTCMode { EMUTIME, REALTIME };
+	enum RTCMode : uint8_t { EMUTIME, REALTIME };
 
 	RP5C01(CommandController& commandController, SRAM& regs,
 	       EmuTime::param time, const std::string& name);
 
 	void reset(EmuTime::param time);
-	[[nodiscard]] nibble readPort(nibble port, EmuTime::param time);
-	[[nodiscard]] nibble peekPort(nibble port) const;
-	void writePort(nibble port, nibble value, EmuTime::param time);
+	[[nodiscard]] uint4_t readPort(uint4_t port, EmuTime::param time);
+	[[nodiscard]] uint4_t peekPort(uint4_t port) const;
+	void writePort(uint4_t port, uint4_t value, EmuTime::param time);
 
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
@@ -51,7 +54,7 @@ private:
 	unsigned dayWeek, years, leapYear;
 	int days, months; // these two can be -1
 
-	nibble modeReg, testReg, resetReg;
+	uint4_t modeReg, testReg, resetReg;
 };
 
 } // namespace openmsx

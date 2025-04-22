@@ -129,6 +129,9 @@
     <ClCompile Include="$(OpenMSXSrcDir)\cassette\CassettePlayerCLI.cc">
       <Filter>cassette</Filter>
     </ClCompile>
+    <ClCompile Include="$(OpenMSXSrcDir)\cassette\CassettePlayerCommand.cc">
+      <Filter>cassette</Filter>
+    </ClCompile>
     <ClCompile Include="$(OpenMSXSrcDir)\cassette\CassettePort.cc">
       <Filter>cassette</Filter>
     </ClCompile>
@@ -210,9 +213,6 @@
     <ClCompile Include="$(OpenMSXSrcDir)\console\TTFFont.cc">
       <Filter>console</Filter>
     </ClCompile>
-    <ClCompile Include="$(OpenMSXSrcDir)\cpu\BreakPointBase.cc">
-      <Filter>cpu</Filter>
-    </ClCompile>
     <ClCompile Include="$(OpenMSXSrcDir)\cpu\CPURegs.cc">
       <Filter>cpu</Filter>
     </ClCompile>
@@ -243,10 +243,10 @@
     <ClCompile Include="$(OpenMSXSrcDir)\cpu\MSXMultiMemDevice.cc">
       <Filter>cpu</Filter>
     </ClCompile>
-    <ClCompile Include="$(OpenMSXSrcDir)\cpu\MSXWatchIODevice.cc">
+    <ClCompile Include="$(OpenMSXSrcDir)\cpu\VDPIODelay.cc">
       <Filter>cpu</Filter>
     </ClCompile>
-    <ClCompile Include="$(OpenMSXSrcDir)\cpu\VDPIODelay.cc">
+    <ClCompile Include="$(OpenMSXSrcDir)\cpu\WatchPoint.cc">
       <Filter>cpu</Filter>
     </ClCompile>
     <ClCompile Include="$(OpenMSXSrcDir)\debugger\DasmTables.cc">
@@ -432,6 +432,9 @@
     <ClCompile Include="$(OpenMSXSrcDir)\fdc\XSADiskImage.cc">
       <Filter>fdc</Filter>
     </ClCompile>
+    <ClCompile Include="$(OpenMSXSrcDir)\fdc\XSAExtractor.cc">
+      <Filter>fdc</Filter>
+    </ClCompile>
     <ClCompile Include="$(OpenMSXSrcDir)\file\CompressedFileAdapter.cc">
       <Filter>file</Filter>
     </ClCompile>
@@ -531,6 +534,9 @@
     <ClCompile Include="$(OpenMSXSrcDir)\imgui\DebuggableEditor.cc">
       <Filter>imgui</Filter>
     </ClCompile>
+    <ClCompile Include="$(OpenMSXSrcDir)\imgui\FileListWidget.cc">
+      <Filter>imgui</Filter>
+    </ClCompile>
     <ClCompile Include="$(OpenMSXSrcDir)\imgui\ImGuiAdjust.cc">
       <Filter>imgui</Filter>
     </ClCompile>
@@ -553,6 +559,9 @@
       <Filter>imgui</Filter>
     </ClCompile>
     <ClCompile Include="$(OpenMSXSrcDir)\imgui\ImGuiDebugger.cc">
+      <Filter>imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OpenMSXSrcDir)\imgui\ImGuiDisassembly.cc">
       <Filter>imgui</Filter>
     </ClCompile>
     <ClCompile Include="$(OpenMSXSrcDir)\imgui\ImGuiDiskManipulator.cc">
@@ -972,6 +981,9 @@
     <ClCompile Include="$(OpenMSXSrcDir)\sound\DACSound8U.cc">
       <Filter>sound</Filter>
     </ClCompile>
+    <ClCompile Include="$(OpenMSXSrcDir)\sound\DalSoRiR2.cc">
+      <Filter>sound</Filter>
+    </ClCompile>
     <ClCompile Include="$(OpenMSXSrcDir)\sound\DummyAudioInputDevice.cc">
       <Filter>sound</Filter>
     </ClCompile>
@@ -1024,9 +1036,6 @@
       <Filter>sound</Filter>
     </ClCompile>
     <ClCompile Include="$(OpenMSXSrcDir)\sound\ResampleHQ.cc">
-      <Filter>sound</Filter>
-    </ClCompile>
-    <ClCompile Include="$(OpenMSXSrcDir)\sound\ResampleLQ.cc">
       <Filter>sound</Filter>
     </ClCompile>
     <ClCompile Include="$(OpenMSXSrcDir)\sound\ResampleTrivial.cc">
@@ -1099,6 +1108,9 @@
       <Filter>sound</Filter>
     </ClCompile>
     <ClCompile Include="$(OpenMSXSrcDir)\sound\YMF278.cc">
+      <Filter>sound</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OpenMSXSrcDir)\sound\YMF278B.cc">
       <Filter>sound</Filter>
     </ClCompile>
     <ClCompile Include="$(OpenMSXSrcDir)\thread\Thread.cc">
@@ -1436,6 +1448,7 @@
     <ClCompile Include="$(OpenMSXSrcDir)\PrinterPortDevice.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\PrinterPortLogger.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\PrinterPortSimpl.cc" />
+    <ClCompile Include="$(OpenMSXSrcDir)\ProgrammableDevice.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\Reactor.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\RealTime.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\RenShaTurbo.cc" />
@@ -1470,7 +1483,6 @@
     <ClCompile Include="$(OpenMSXSrcDir)\input\JoyMega.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\memory\RomDooly.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\sound\ResampledSoundDevice.cc" />
-    <ClCompile Include="$(OpenMSXSrcDir)\video\scalers\GLHQLiteScaler.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\video\scalers\GLHQScaler.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\video\scalers\GLRGBScaler.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\video\scalers\GLScaleNxScaler.cc" />
@@ -1502,6 +1514,7 @@
     <ClCompile Include="$(OpenMSXSrcDir)\memory\MegaFlashRomSCCPlusSD.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\memory\ROMHunterMk2.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\memory\SdCard.cc" />
+    <ClCompile Include="$(OpenMSXSrcDir)\memory\Yamanooto.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\video\scalers\GLDefaultScaler.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\video\GLContext.cc" />
     <ClCompile Include="$(OpenMSXSrcDir)\sound\SVIPSG.cc" />
@@ -1572,6 +1585,9 @@
       <Filter>cassette</Filter>
     </None>
     <None Include="$(OpenMSXSrcDir)\cassette\CassettePlayerCLI.hh">
+      <Filter>cassette</Filter>
+    </None>
+    <None Include="$(OpenMSXSrcDir)\cassette\CassettePlayerCommand.hh">
       <Filter>cassette</Filter>
     </None>
     <None Include="$(OpenMSXSrcDir)\cassette\CassettePort.hh">
@@ -1704,9 +1720,6 @@
       <Filter>cpu</Filter>
     </None>
     <None Include="$(OpenMSXSrcDir)\cpu\MSXMultiMemDevice.hh">
-      <Filter>cpu</Filter>
-    </None>
-    <None Include="$(OpenMSXSrcDir)\cpu\MSXWatchIODevice.hh">
       <Filter>cpu</Filter>
     </None>
     <None Include="$(OpenMSXSrcDir)\cpu\R800.hh">
@@ -1910,6 +1923,9 @@
     <None Include="$(OpenMSXSrcDir)\fdc\XSADiskImage.hh">
       <Filter>fdc</Filter>
     </None>
+    <None Include="$(OpenMSXSrcDir)\fdc\XSAExtractor.hh">
+      <Filter>fdc</Filter>
+    </None>
     <None Include="$(OpenMSXSrcDir)\file\CompressedFileAdapter.hh">
       <Filter>file</Filter>
     </None>
@@ -2024,6 +2040,9 @@
     <None Include="$(OpenMSXSrcDir)\imgui\DebuggableEditor.hh">
       <Filter>imgui</Filter>
     </None>
+    <None Include="$(OpenMSXSrcDir)\imgui\FileListWidget.hh">
+      <Filter>imgui</Filter>
+    </None>
     <None Include="$(OpenMSXSrcDir)\imgui\ImGuiAdjust.hh">
       <Filter>imgui</Filter>
     </None>
@@ -2049,6 +2068,9 @@
       <Filter>imgui</Filter>
     </None>
     <None Include="$(OpenMSXSrcDir)\imgui\ImGuiDebugger.hh">
+      <Filter>imgui</Filter>
+    </None>
+    <None Include="$(OpenMSXSrcDir)\imgui\ImGuiDisassembly.hh">
       <Filter>imgui</Filter>
     </None>
     <None Include="$(OpenMSXSrcDir)\imgui\ImGuiDiskManipulator.hh">
@@ -2489,6 +2511,9 @@
     <None Include="$(OpenMSXSrcDir)\sound\DACSound8U.hh">
       <Filter>sound</Filter>
     </None>
+    <None Include="$(OpenMSXSrcDir)\sound\DalSoRiR2.hh">
+      <Filter>sound</Filter>
+    </None>
     <None Include="$(OpenMSXSrcDir)\sound\DummyAudioInputDevice.hh">
       <Filter>sound</Filter>
     </None>
@@ -2547,9 +2572,6 @@
       <Filter>sound</Filter>
     </None>
     <None Include="$(OpenMSXSrcDir)\sound\ResampleHQ.hh">
-      <Filter>sound</Filter>
-    </None>
-    <None Include="$(OpenMSXSrcDir)\sound\ResampleLQ.hh">
       <Filter>sound</Filter>
     </None>
     <None Include="$(OpenMSXSrcDir)\sound\ResampleTrivial.hh">
@@ -2637,6 +2659,9 @@
       <Filter>sound</Filter>
     </None>
     <None Include="$(OpenMSXSrcDir)\sound\YMF278.hh">
+      <Filter>sound</Filter>
+    </None>
+    <None Include="$(OpenMSXSrcDir)\sound\YMF278B.hh">
       <Filter>sound</Filter>
     </None>
     <None Include="$(OpenMSXSrcDir)\thread\Thread.hh">
@@ -2757,9 +2782,6 @@
       <Filter>utils</Filter>
     </None>
     <None Include="$(OpenMSXSrcDir)\utils\utf8_unchecked.hh">
-      <Filter>utils</Filter>
-    </None>
-    <None Include="$(OpenMSXSrcDir)\utils\vla.hh">
       <Filter>utils</Filter>
     </None>
     <None Include="$(OpenMSXSrcDir)\utils\win32-arggen.hh">
@@ -3094,6 +3116,7 @@
     <None Include="$(OpenMSXSrcDir)\PrinterPortDevice.hh" />
     <None Include="$(OpenMSXSrcDir)\PrinterPortLogger.hh" />
     <None Include="$(OpenMSXSrcDir)\PrinterPortSimpl.hh" />
+    <None Include="$(OpenMSXSrcDir)\ProgrammableDevice.hh" />
     <None Include="$(OpenMSXSrcDir)\Reactor.hh" />
     <None Include="$(OpenMSXSrcDir)\RealTime.hh" />
     <None Include="$(OpenMSXSrcDir)\RenShaTurbo.hh" />
@@ -3138,7 +3161,6 @@
     <None Include="$(OpenMSXSrcDir)\utils\hash_set.hh" />
     <None Include="$(OpenMSXSrcDir)\utils\strCat.hh" />
     <None Include="$(OpenMSXSrcDir)\utils\rapidsax.hh" />
-    <None Include="$(OpenMSXSrcDir)\video\scalers\GLHQLiteScaler.hh" />
     <None Include="$(OpenMSXSrcDir)\video\scalers\GLHQScaler.hh" />
     <None Include="$(OpenMSXSrcDir)\video\scalers\GLRGBScaler.hh" />
     <None Include="$(OpenMSXSrcDir)\video\scalers\GLScaleNxScaler.hh" />
@@ -3173,6 +3195,7 @@
     <None Include="$(OpenMSXSrcDir)\memory\MegaFlashRomSCCPlusSD.hh" />
     <None Include="$(OpenMSXSrcDir)\memory\ROMHunterMk2.hh" />
     <None Include="$(OpenMSXSrcDir)\memory\SdCard.cc.hh" />
+    <None Include="$(OpenMSXSrcDir)\memory\Yamanooto.hh" />
     <None Include="$(OpenMSXSrcDir)\video\GLContext.hh" />
     <None Include="$(OpenMSXSrcDir)\video\scalers\GLDefaultScaler.hh" />
     <None Include="$(OpenMSXSrcDir)\video\SuperImposedFrame.hh" />

@@ -12,7 +12,9 @@
 #include "AY8910.hh"
 #include "YM2413.hh"
 #include "serialize_meta.hh"
+
 #include <array>
+#include <cstdint>
 #include <utility>
 
 namespace openmsx {
@@ -25,7 +27,7 @@ class Carnivore2 final
 	, public GlobalReadClient<Carnivore2, CT_Interval<0x0000>, CT_Interval<0x4000, 0x4010>>
 {
 public:
-	explicit Carnivore2(const DeviceConfig& config);
+	explicit Carnivore2(DeviceConfig& config);
 	~Carnivore2() override;
 
 	void powerUp(EmuTime::param time) override;
@@ -74,7 +76,7 @@ private:
 		return (configRegs[0x1e] & 0x10) && !(port3C & 0x20);
 	}
 
-	enum class SubDevice { MultiMapper, IDE, MemoryMapper, FmPac, Nothing };
+	enum class SubDevice : uint8_t { MultiMapper, IDE, MemoryMapper, FmPac, Nothing };
 
 	[[nodiscard]] SubDevice getSubDevice(word address) const;
 

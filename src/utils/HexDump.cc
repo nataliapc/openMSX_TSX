@@ -1,5 +1,7 @@
 #include "HexDump.hh"
+
 #include "narrow.hh"
+
 #include "strCat.hh"
 #include "xrange.hh"
 #include <algorithm>
@@ -46,7 +48,7 @@ std::string encode(std::span<const uint8_t> input, bool newlines)
 		return -1;
 	}
 }
-std::pair<MemBuffer<uint8_t>, size_t> decode(std::string_view input)
+MemBuffer<uint8_t> decode(std::string_view input)
 {
 	auto inSize = input.size();
 	auto outSize = inSize / 2; // overestimation
@@ -70,7 +72,7 @@ std::pair<MemBuffer<uint8_t>, size_t> decode(std::string_view input)
 
 	assert(outSize >= out);
 	ret.resize(out); // shrink to correct size
-	return {std::move(ret), out};
+	return ret;
 }
 
 bool decode_inplace(std::string_view input, std::span<uint8_t> output)

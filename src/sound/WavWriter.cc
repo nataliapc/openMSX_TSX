@@ -1,14 +1,15 @@
 #include "WavWriter.hh"
-#include "MSXException.hh"
-#include "Math.hh"
+
 #include "Mixer.hh"
+#include "MSXException.hh"
+
+#include "Math.hh"
 #include "endian.hh"
 #include "enumerate.hh"
 #include "narrow.hh"
-#include "one_of.hh"
 #include "ranges.hh"
-#include "vla.hh"
-#include "xrange.hh"
+#include "small_buffer.hh"
+
 #include <array>
 #include <vector>
 
@@ -35,10 +36,10 @@ WavWriter::WavWriter(const Filename& filename,
 		Endian::L32         subChunk2Size; // +40
 	} header;
 
-	ranges::copy(std::string_view("RIFF"), header.chunkID);
+	copy_to_range(std::string_view("RIFF"), header.chunkID);
 	header.chunkSize     = 0; // actual value filled in later
-	ranges::copy(std::string_view("WAVE"), header.format);
-	ranges::copy(std::string_view("fmt "), header.subChunk1ID);
+	copy_to_range(std::string_view("WAVE"), header.format);
+	copy_to_range(std::string_view("fmt "), header.subChunk1ID);
 	header.subChunk1Size = 16;
 	header.audioFormat   = 1;
 	header.numChannels   = narrow<uint16_t>(channels);
@@ -46,7 +47,7 @@ WavWriter::WavWriter(const Filename& filename,
 	header.byteRate      = (channels * frequency * bits) / 8;
 	header.blockAlign    = narrow<uint16_t>((channels * bits) / 8);
 	header.bitsPerSample = narrow<uint16_t>(bits);
-	ranges::copy(std::string_view("data"), header.subChunk2ID);
+	copy_to_range(std::string_view("data"), header.subChunk2ID);
 	header.subChunk2Size = 0; // actual value filled in later
 
 	file.write(std::span{&header, 1});
@@ -89,14 +90,7 @@ void Wav8Writer::write(std::span<const uint8_t> buffer)
 void Wav16Writer::write(std::span<const int16_t> buffer)
 {
 	if constexpr (Endian::BIG) {
-		// Variable length arrays (VLA) are part of c99 but not of c++
-		// (not even c++11). Some compilers (like gcc) do support VLA
-		// in c++ mode, others (like VC++) don't. Still other compilers
-		// (like clang) only support VLA for POD types.
-		// To side-step this issue we simply use a std::vector, this
-		// code is anyway not performance critical.
-		//VLA(Endian::L16, buf, samples); // doesn't work in clang
-		std::vector<Endian::L16> buf(buffer.begin(), buffer.end());
+		small_buffer<Endian::L16, 4096> buf(buffer);
 		file.write(std::span{buf});
 	} else {
 		file.write(buffer);
@@ -113,7 +107,7 @@ void Wav16Writer::write(std::span<const float> buffer, float amp)
 {
 	std::vector<Endian::L16> buf_(buffer.size());
 	std::span buf{buf_};
-	ranges::transform(buffer, buf.data(), [=](float f) { return float2int16(f * amp); });
+	std::ranges::transform(buffer, buf.data(), [=](float f) { return float2int16(f * amp); });
 	file.write(buf);
 	bytes += narrow<uint32_t>(buf.size_bytes());
 }
@@ -132,8 +126,8 @@ void Wav16Writer::write(std::span<const StereoFloat> buffer, float ampLeft, floa
 
 void Wav16Writer::writeSilence(uint32_t samples)
 {
-	VLA(int16_t, buf, samples);
-	ranges::fill(buf, 0);
+	small_buffer<int16_t, 4096> buf_(samples, 0);
+	std::span buf{buf_};
 	file.write(buf);
 	bytes += narrow<uint32_t>(buf.size_bytes());
 }

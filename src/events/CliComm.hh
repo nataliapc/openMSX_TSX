@@ -4,23 +4,24 @@
 #include "stl.hh"
 #include "strCat.hh"
 
-#include <array>
+#include <cstdint>
 #include <span>
 #include <string_view>
+#include <utility>
 
 namespace openmsx {
 
 class CliComm
 {
 public:
-	enum class LogLevel {
+	enum class LogLevel : uint8_t {
 		INFO,
 		WARNING,
 		LOGLEVEL_ERROR, // ERROR may give preprocessor name clashes
 		PROGRESS,
 		NUM // must be last
 	};
-	enum class UpdateType {
+	enum class UpdateType : uint8_t {
 		LED,
 		SETTING,
 		SETTING_INFO,
@@ -114,12 +115,12 @@ protected:
 
 [[nodiscard]] inline auto toString(CliComm::LogLevel type)
 {
-	return CliComm::getLevelStrings()[to_underlying(type)];
+	return CliComm::getLevelStrings()[std::to_underlying(type)];
 }
 
 [[nodiscard]] inline auto toString(CliComm::UpdateType type)
 {
-	return CliComm::getUpdateStrings()[to_underlying(type)];
+	return CliComm::getUpdateStrings()[std::to_underlying(type)];
 }
 
 } // namespace openmsx

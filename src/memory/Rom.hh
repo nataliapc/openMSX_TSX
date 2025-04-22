@@ -5,8 +5,9 @@
 #include "MemBuffer.hh"
 #include "sha1.hh"
 #include "static_string_view.hh"
-#include "openmsx.hh"
+
 #include <cassert>
+#include <cstdint>
 #include <memory>
 #include <span>
 #include <string>
@@ -25,11 +26,11 @@ class Rom final
 {
 public:
 	Rom(std::string name, static_string_view description,
-	    const DeviceConfig& config, const std::string& id = {});
+	    DeviceConfig& config, std::string_view id = {});
 	Rom(Rom&& other) noexcept;
 	~Rom();
 
-	[[nodiscard]] const byte& operator[](size_t address) const {
+	[[nodiscard]] const uint8_t& operator[](size_t address) const {
 		assert(address < rom.size());
 		return rom[address];
 	}
@@ -43,7 +44,7 @@ public:
 	[[nodiscard]] const Sha1Sum& getOriginalSHA1() const;
 	[[nodiscard]] const Sha1Sum& getSHA1() const;
 
-	void addPadding(size_t newSize, byte filler = 0xff);
+	void addPadding(size_t newSize, uint8_t filler = 0xff);
 
 	/**
 	 * Add dict values with info to result
@@ -51,14 +52,14 @@ public:
 	void getInfo(TclObject& result) const;
 
 private:
-	void init(MSXMotherBoard& motherBoard, const XMLElement& config,
+	void init(MSXMotherBoard& motherBoard, XMLElement& config,
 	          const FileContext& context);
 	[[nodiscard]] bool checkSHA1(const XMLElement& config) const;
 
 private:
 	// !! update the move constructor when changing these members !!
-	std::span<const byte> rom;
-	MemBuffer<byte> extendedRom;
+	std::span<const uint8_t> rom;
+	MemBuffer<uint8_t> extendedRom;
 
 	File file; // can be a closed file
 

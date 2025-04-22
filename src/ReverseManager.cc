@@ -23,16 +23,14 @@
 #include "serialize.hh"
 #include "serialize_meta.hh"
 
-#include "MemBuffer.hh"
 #include "narrow.hh"
 #include "one_of.hh"
-#include "ranges.hh"
-#include "view.hh"
 
 #include <array>
 #include <cassert>
 #include <cmath>
 #include <iomanip>
+#include <ranges>
 
 namespace openmsx {
 
@@ -233,7 +231,7 @@ void ReverseManager::status(TclObject& result) const
 	result.addDictKeyValue("current", getCurrent());
 
 	TclObject snapshots;
-	snapshots.addListElements(view::transform(history.chunks, [](auto& p) {
+	snapshots.addListElements(std::views::transform(history.chunks, [](auto& p) {
 		return (p.second.time - EmuTime::zero()).toDouble();
 	}));
 	result.addDictKeyValue("snapshots", snapshots);
@@ -256,9 +254,9 @@ void ReverseManager::debugInfo(TclObject& result) const
 		strAppend(res, idx, ' ',
 		          (chunk.time - EmuTime::zero()).toDouble(), ' ',
 		          ((chunk.time - EmuTime::zero()).toDouble() / (getCurrentTime() - EmuTime::zero()).toDouble()) * 100, "%"
-		          " (", chunk.size, ")"
+		          " (", chunk.savestate.size(), ")"
 		          " (next event index: ", chunk.eventCount, ")\n");
-		totalSize += chunk.size;
+		totalSize += chunk.savestate.size();
 	}
 	strAppend(res, "total size: ", totalSize, '\n');
 	result = res;
@@ -405,8 +403,7 @@ void ReverseManager::goTo(
 			// suppress messages we'd get by deserializing (and
 			// thus instantiating the parts of) the new board
 			newBoard->getMSXCliComm().setSuppressMessages(true);
-			MemInputArchive in(chunk.savestate.data(),
-					   chunk.size,
+			MemInputArchive in(chunk.savestate,
 					   chunk.deltaBlocks);
 			in.serialize("machine", *newBoard);
 
@@ -573,8 +570,7 @@ void ReverseManager::saveReplay(
 
 	// restore first snapshot to be able to serialize it to a file
 	auto initialBoard = reactor.createEmptyMotherBoard();
-	MemInputArchive in(begin(chunks)->second.savestate.data(),
-	                   begin(chunks)->second.size,
+	MemInputArchive in(begin(chunks)->second.savestate,
 			   begin(chunks)->second.deltaBlocks);
 	in.serialize("machine", *initialBoard);
 	replay.motherBoards.push_back(std::move(initialBoard));
@@ -602,8 +598,7 @@ void ReverseManager::saveReplay(
 				if (it != lastAddedIt) {
 					// this is a new one, add it to the list of snapshots
 					Reactor::Board board = reactor.createEmptyMotherBoard();
-					MemInputArchive in2(it->second.savestate.data(),
-							    it->second.size,
+					MemInputArchive in2(it->second.savestate,
 							    it->second.deltaBlocks);
 					in2.serialize("machine", *board);
 					replay.motherBoards.push_back(std::move(board));
@@ -646,7 +641,7 @@ void ReverseManager::saveReplay(
 		history.events.pop_back();
 	}
 
-	result = tmpStrCat("Saved replay to ", filename);
+	result = filename;
 }
 
 void ReverseManager::loadReplay(
@@ -737,7 +732,7 @@ void ReverseManager::loadReplay(
 		MemOutputArchive out(newHistory.lastDeltaBlocks,
 		                     newChunk.deltaBlocks, false);
 		out.serialize("machine", *m);
-		newChunk.savestate = out.releaseBuffer(newChunk.size);
+		newChunk.savestate = std::move(out).releaseBuffer();
 
 		// update replayIdx
 		// TODO: should we use <= instead??
@@ -880,7 +875,7 @@ void ReverseManager::takeSnapshot(EmuTime::param time)
 	MemOutputArchive out(history.lastDeltaBlocks, newChunk.deltaBlocks, true);
 	out.serialize("machine", motherBoard);
 	newChunk.time = time;
-	newChunk.savestate = out.releaseBuffer(newChunk.size);
+	newChunk.savestate = std::move(out).releaseBuffer();
 	newChunk.eventCount = replayIndex;
 }
 
@@ -907,7 +902,7 @@ void ReverseManager::stopReplay(EmuTime::param time) noexcept
 		Events& events = history.events;
 		events.erase(begin(events) + replayIndex, end(events));
 		// search snapshots that are newer than 'time' and erase them
-		auto it = ranges::find_if(history.chunks, [&](auto& p) {
+		auto it = std::ranges::find_if(history.chunks, [&](auto& p) {
 			return p.second.time > time;
 		});
 		history.chunks.erase(it, end(history.chunks));

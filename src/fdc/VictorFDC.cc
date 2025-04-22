@@ -32,9 +32,12 @@ static constexpr int DATA_REQUEST  = 0x40;
 static constexpr int INTR_REQUEST  = 0x80;
 
 
-VictorFDC::VictorFDC(const DeviceConfig& config)
+VictorFDC::VictorFDC(DeviceConfig& config)
 	: WD2793BasedFDC(config)
 {
+	// ROM only visible in 0x4000-0x7FFF by default
+	parseRomVisibility(config, 0x4000, 0x4000);
+
 	reset(getCurrentTime());
 }
 
@@ -89,12 +92,7 @@ byte VictorFDC::peekMem(word address, EmuTime::param time) const
 		return value;
 	}
 	default:
-		if ((0x4000 <= address) && (address < 0x8000)) {
-			// ROM only visible in 0x4000-0x7FFF
-			return MSXFDC::peekMem(address, time);
-		} else {
-			return 255;
-		}
+		return MSXFDC::peekMem(address, time);
 	}
 }
 
@@ -103,11 +101,8 @@ const byte* VictorFDC::getReadCacheLine(word start) const
 	if ((start & CacheLine::HIGH) == (0x7FF8 & CacheLine::HIGH)) {
 		// FDC at 0x7FF8-0x7FFC
 		return nullptr;
-	} else if ((0x4000 <= start) && (start < 0x8000)) {
-		// ROM at 0x4000-0x7FFF
-		return MSXFDC::getReadCacheLine(start);
 	} else {
-		return unmappedRead.data();
+		return MSXFDC::getReadCacheLine(start);
 	}
 }
 

@@ -1,12 +1,13 @@
 #include "TclParser.hh"
+
 #include "ScopedAssign.hh"
 #include "narrow.hh"
 #include "one_of.hh"
-#include "ranges.hh"
 #include "strCat.hh"
+
 #include <algorithm>
-#include <iostream>
 #include <cassert>
+#include <iostream>
 
 #if DEBUG_TCLPARSER
 void TclParser::DEBUG_PRINT(const std::string& s)
@@ -55,13 +56,13 @@ static bool isNumber(std::string_view str)
 	}
 	if (str.starts_with("0x") || str.starts_with("0X")) {
 		str.remove_prefix(2);
-		return ranges::all_of(str, [](char c) {
+		return std::ranges::all_of(str, [](char c) {
 			return inRange(c, '0', '9') ||
 			       inRange(c, 'a', 'f') ||
 			       inRange(c, 'A', 'F');
 		});
 	} else {
-		return ranges::all_of(str,
+		return std::ranges::all_of(str,
 		                      [](char c) { return inRange(c, '0', '9'); });
 	}
 }
@@ -70,15 +71,13 @@ static bool isNumber(std::string_view str)
 TclParser::TclParser(Tcl_Interp* interp_, std::string_view input)
 	: interp(interp_)
 	, colors(input.size(), '.')
-	, parseStr(input)
 {
-	parse(parseStr.data(), narrow<int>(parseStr.size()), COMMAND);
+	parse(std::string(input), 0, COMMAND);
 }
 
-void TclParser::parse(const char* p, int size, ParseType type)
+void TclParser::parse(std::string parseStr, int offset, ParseType type)
 {
-	ScopedAssign sa1(offset, offset + narrow<int>(p - parseStr.data()));
-	ScopedAssign sa2(parseStr, std::string(p, size));
+	int origSize = narrow<int>(parseStr.size());
 	last.push_back(offset);
 
 	// The functions Tcl_ParseCommand() and Tcl_ParseExpr() are meant to
@@ -90,7 +89,7 @@ void TclParser::parse(const char* p, int size, ParseType type)
 	int retryCount = 0;
 	while (true) {
 		int parseStatus = (type == EXPRESSION)
-			? Tcl_ParseExpr(interp, parseStr.data(), int(parseStr.size()), &parseInfo)
+			? Tcl_ParseExpr   (interp, parseStr.data(), int(parseStr.size()), &parseInfo)
 			: Tcl_ParseCommand(interp, parseStr.data(), int(parseStr.size()), 1, &parseInfo);
 		if (parseStatus == TCL_OK) break;
 		Tcl_FreeParse(&parseInfo);
@@ -121,9 +120,9 @@ void TclParser::parse(const char* p, int size, ParseType type)
 		} else if (allowComplete && error.starts_with("missing )")) {
 			parseStr += ')';
 		} else {
-			DEBUG_PRINT("ERROR: " + parseStr + ": " + error);
-			setColors(parseStr.data(), int(parseStr.size()), 'E');
-			if ((offset + size) < int(colors.size())) last.pop_back();
+			DEBUG_PRINT(strCat("ERROR: ", parseStr, ": ", error));
+			setColors(parseStr, offset, parseStr.data(), int(parseStr.size()), 'E');
+			if ((offset + origSize) < int(colors.size())) last.pop_back();
 			return;
 		}
 	}
@@ -132,17 +131,17 @@ void TclParser::parse(const char* p, int size, ParseType type)
 		DEBUG_PRINT("EXPRESSION: " + parseStr);
 	} else {
 		if (parseInfo.commentSize) {
-			DEBUG_PRINT("COMMENT: " + std::string_view(parseInfo.commentStart, parseInfo.commentSize));
-			setColors(parseInfo.commentStart, parseInfo.commentSize, 'c');
+			DEBUG_PRINT(strCat("COMMENT: ", std::string_view(parseInfo.commentStart, parseInfo.commentSize)));
+			setColors(parseStr, offset, parseInfo.commentStart, parseInfo.commentSize, 'c');
 		}
-		DEBUG_PRINT("COMMAND: " + std::string_view(parseInfo.commandStart, parseInfo.commandSize));
+		DEBUG_PRINT(strCat("COMMAND: ", std::string_view(parseInfo.commandStart, parseInfo.commandSize)));
 	}
-	printTokens({parseInfo.tokenPtr, size_t(parseInfo.numTokens)});
+	printTokens(parseStr, offset, {parseInfo.tokenPtr, size_t(parseInfo.numTokens)});
 
 	// If the current sub-command stops before the end of the original
 	// full command, then it's not the last sub-command. Note that
 	// sub-commands can be nested.
-	if ((offset + size) < int(colors.size())) last.pop_back();
+	if ((offset + origSize) < int(colors.size())) last.pop_back();
 
 	const char* nextStart = parseInfo.commandStart + parseInfo.commandSize;
 	Tcl_FreeParse(&parseInfo);
@@ -151,12 +150,13 @@ void TclParser::parse(const char* p, int size, ParseType type)
 		// next command
 		auto nextSize = int((parseStr.data() + parseStr.size()) - nextStart);
 		if (nextSize > 0) {
-			parse(nextStart, nextSize, type);
+			int newOffset = offset + narrow<int>(nextStart - parseStr.data());
+			parse(std::string(nextStart, nextSize), newOffset, type);
 		}
 	}
 }
 
-void TclParser::printTokens(std::span<const Tcl_Token> tokens)
+void TclParser::printTokens(std::string_view parseStr, int offset, std::span<const Tcl_Token> tokens)
 {
 #if DEBUG_TCLPARSER
 	ScopedAssign sa(level, level + 1);
@@ -164,44 +164,46 @@ void TclParser::printTokens(std::span<const Tcl_Token> tokens)
 	for (size_t i = 0; i < tokens.size(); /**/) {
 		const Tcl_Token& token = tokens[i];
 		std::string_view tokenStr(token.start, token.size);
-		DEBUG_PRINT(type2string(token.type) + " -> " + tokenStr);
+		DEBUG_PRINT(strCat(type2string(token.type), " -> ", tokenStr));
 		switch (token.type) {
 		case TCL_TOKEN_VARIABLE:
 			assert(token.numComponents >= 1);
-			setColors(tokens[i + 1].start - 1, tokens[i + 1].size + 1, 'v');
+			setColors(parseStr, offset, tokens[i + 1].start - 1, tokens[i + 1].size + 1, 'v');
 			break;
 		case TCL_TOKEN_WORD:
 		case TCL_TOKEN_SIMPLE_WORD:
 			if (*token.start == '"') {
-				setColors(token.start, token.size, 'l');
+				setColors(parseStr, offset, token.start, token.size, 'l');
 			}
 			if ((i == 0) && isProc(interp, tokenStr)) {
-				setColors(token.start, token.size, 'p');
+				setColors(parseStr, offset, token.start, token.size, 'p');
 			}
 			break;
 		case TCL_TOKEN_EXPAND_WORD:
-			setColors(token.start, 3, 'o');
+			setColors(parseStr, offset, token.start, 3, 'o');
 			break;
 		case TCL_TOKEN_OPERATOR:
 		case TCL_TOKEN_BS:
-			setColors(token.start, token.size, 'o');
+			setColors(parseStr, offset, token.start, token.size, 'o');
 			break;
 		case TCL_TOKEN_TEXT:
 			if (isNumber(tokenStr) || (*token.start == '"')) {
 				// TODO only works if the same as 'l'
-				setColors(token.start, token.size, 'l');
+				setColors(parseStr, offset, token.start, token.size, 'l');
 			}
 			break;
 		}
 		if (token.type == TCL_TOKEN_COMMAND) {
-			parse(token.start + 1, token.size - 2, COMMAND);
+			int newOffset = offset + narrow<int>(token.start + 1 - parseStr.data());
+			parse(std::string(token.start + 1, token.size - 2), newOffset, COMMAND);
 		} else if (token.type == TCL_TOKEN_SIMPLE_WORD) {
 			ParseType subType = guessSubType(tokens, i);
 			if (subType != OTHER) {
-				parse(tokens[i + 1].start, tokens[i + 1].size, subType);
+				int newOffset = offset + narrow<int>(tokens[i + 1].start - parseStr.data());
+				parse(std::string(tokens[i + 1].start, tokens[i + 1].size), newOffset, subType);
 			}
 		}
-		printTokens(tokens.subspan(++i, token.numComponents));
+		printTokens(parseStr, offset, tokens.subspan(++i, token.numComponents));
 		i += token.numComponents;
 	}
 }
@@ -235,7 +237,7 @@ bool TclParser::isProc(Tcl_Interp* interp, std::string_view str)
 	return result != 0;
 }
 
-void TclParser::setColors(const char* p, int size, char c)
+void TclParser::setColors(std::string_view parseStr, int offset, const char* p, int size, char c)
 {
 	int start = narrow<int>(p - parseStr.data()) + offset;
 	int stop = std::min(start + size, int(colors.size()));

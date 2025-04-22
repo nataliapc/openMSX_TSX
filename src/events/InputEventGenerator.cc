@@ -12,9 +12,7 @@
 #include "unreachable.hh"
 #include "utf8_unchecked.hh"
 
-#include "build-info.hh"
-
-#include <memory>
+#include <utility>
 
 namespace openmsx {
 
@@ -120,8 +118,8 @@ void InputEventGenerator::setNewOsdControlButtonState(unsigned newState)
 	unsigned deltaState = osdControlButtonsState ^ newState;
 	using enum OsdControlEvent::Button;
 	for (auto b : {LEFT, RIGHT, UP, DOWN, A, B}) {
-		if (deltaState & (1 << to_underlying(b))) {
-			if (newState & (1 << to_underlying(b))) {
+		if (deltaState & (1 << std::to_underlying(b))) {
+			if (newState & (1 << std::to_underlying(b))) {
 				eventDistributor.distributeEvent(OsdControlReleaseEvent(b));
 			} else {
 				eventDistributor.distributeEvent(OsdControlPressEvent(b));
@@ -138,11 +136,11 @@ void InputEventGenerator::triggerOsdControlEventsFromJoystickAxisMotion(
 		switch (axis) {
 		using enum OsdControlEvent::Button;
 		case 0:
-			return std::pair{1u << to_underlying(LEFT),
-			                 1u << to_underlying(RIGHT)};
+			return std::pair{1u << std::to_underlying(LEFT),
+			                 1u << std::to_underlying(RIGHT)};
 		case 1:
-			return std::pair{1u << to_underlying(UP),
-			                 1u << to_underlying(DOWN)};
+			return std::pair{1u << std::to_underlying(UP),
+			                 1u << std::to_underlying(DOWN)};
 		default:
 			// Ignore all other axis (3D joysticks and flight joysticks may
 			// have more than 2 axis)
@@ -169,12 +167,12 @@ void InputEventGenerator::triggerOsdControlEventsFromJoystickHat(int value)
 {
 	using enum OsdControlEvent::Button;
 	unsigned dir = 0;
-	if (!(value & SDL_HAT_UP   )) dir |= 1 << to_underlying(UP);
-	if (!(value & SDL_HAT_DOWN )) dir |= 1 << to_underlying(DOWN);
-	if (!(value & SDL_HAT_LEFT )) dir |= 1 << to_underlying(LEFT);
-	if (!(value & SDL_HAT_RIGHT)) dir |= 1 << to_underlying(RIGHT);
-	unsigned ab = osdControlButtonsState & ((1 << to_underlying(A)) |
-	                                        (1 << to_underlying(B)));
+	if (!(value & SDL_HAT_UP   )) dir |= 1 << std::to_underlying(UP);
+	if (!(value & SDL_HAT_DOWN )) dir |= 1 << std::to_underlying(DOWN);
+	if (!(value & SDL_HAT_LEFT )) dir |= 1 << std::to_underlying(LEFT);
+	if (!(value & SDL_HAT_RIGHT)) dir |= 1 << std::to_underlying(RIGHT);
+	unsigned ab = osdControlButtonsState & ((1 << std::to_underlying(A)) |
+	                                        (1 << std::to_underlying(B)));
 	setNewOsdControlButtonState(ab | dir);
 }
 
@@ -191,8 +189,8 @@ void InputEventGenerator::triggerOsdControlEventsFromJoystickButtonEvent(unsigne
 	using enum OsdControlEvent::Button;
 	osdControlChangeButton(
 		down,
-		((button & 1) ? (1 << to_underlying(B))
-		              : (1 << to_underlying(A))));
+		((button & 1) ? (1 << std::to_underlying(B))
+		              : (1 << std::to_underlying(A))));
 }
 
 void InputEventGenerator::triggerOsdControlEventsFromKeyEvent(SDLKey key, bool repeat)
@@ -200,13 +198,13 @@ void InputEventGenerator::triggerOsdControlEventsFromKeyEvent(SDLKey key, bool r
 	unsigned buttonMask = [&] {
 		switch (key.sym.sym) {
 		using enum OsdControlEvent::Button;
-		case SDLK_LEFT:   return 1 << to_underlying(LEFT);
-		case SDLK_RIGHT:  return 1 << to_underlying(RIGHT);
-		case SDLK_UP:     return 1 << to_underlying(UP);
-		case SDLK_DOWN:   return 1 << to_underlying(DOWN);
-		case SDLK_SPACE:  return 1 << to_underlying(A);
-		case SDLK_RETURN: return 1 << to_underlying(A);
-		case SDLK_ESCAPE: return 1 << to_underlying(B);
+		case SDLK_LEFT:   return 1 << std::to_underlying(LEFT);
+		case SDLK_RIGHT:  return 1 << std::to_underlying(RIGHT);
+		case SDLK_UP:     return 1 << std::to_underlying(UP);
+		case SDLK_DOWN:   return 1 << std::to_underlying(DOWN);
+		case SDLK_SPACE:  return 1 << std::to_underlying(A);
+		case SDLK_RETURN: return 1 << std::to_underlying(A);
+		case SDLK_ESCAPE: return 1 << std::to_underlying(B);
 		default: return 0;
 		}
 	}();
@@ -251,7 +249,7 @@ void InputEventGenerator::handleKeyDown(const SDL_KeyboardEvent& key, uint32_t u
 		evt.key.keysym.mod = normalizeModifier(key.keysym.sym, key.keysym.mod);
 		evt.key.keysym.unused = unicode;
 		Event event = KeyDownEvent(evt);
-		triggerOsdControlEventsFromKeyEvent(SDLKey{key.keysym, true}, key.repeat);
+		triggerOsdControlEventsFromKeyEvent({.sym = key.keysym, .down = true}, key.repeat);
 		eventDistributor.distributeEvent(std::move(event));
 	}
 }
@@ -266,7 +264,7 @@ void InputEventGenerator::splitText(uint32_t timestamp, const char* utf8)
 	}
 }
 
-void InputEventGenerator::handle(const SDL_Event& evt)
+void InputEventGenerator::handle(SDL_Event& evt)
 {
 	std::optional<Event> event;
 	switch (evt.type) {
@@ -294,7 +292,7 @@ void InputEventGenerator::handle(const SDL_Event& evt)
 			event = KeyUpEvent(e);
 			bool down = false;
 			bool repeat = false;
-			triggerOsdControlEventsFromKeyEvent(SDLKey{e.key.keysym, down}, repeat);
+			triggerOsdControlEventsFromKeyEvent({.sym = e.key.keysym, .down = down}, repeat);
 		}
 		break;
 	case SDL_KEYDOWN:
@@ -312,24 +310,45 @@ void InputEventGenerator::handle(const SDL_Event& evt)
 		break;
 	case SDL_MOUSEMOTION:
 		event = MouseMotionEvent(evt);
+		if (auto* window = SDL_GL_GetCurrentWindow(); SDL_GetWindowGrab(window)) {
+			int w, h;
+			SDL_GetWindowSize(window, &w, &h);
+			int x, y;
+			SDL_GetMouseState(&x, &y);
+			// There seems to be a bug in Windows in which the mouse can be locked on the right edge
+			// only when moving fast to the right (not so fast actually) when grabbing is enabled
+			// which stops generating mouse events
+			// When moving to the left, events resume, and then moving even slower to the right fixes it
+			// This only occurs when grabbing is explicitly enabled in windowed mode,
+			// not in fullscreen mode (though not sure what happens with multiple monitors)
+			// To reduce the impact of this bug, long range warping (e.g. to the middle of the window)
+			// was attempted but that caused race conditions with fading in of gui elements
+			// So, in the end it was decided that to go for the least kind of trouble
+			// The value of 10 below is a heuristic value which seems to balance all factors
+			// such as font size and the overall size of gui elements
+			// and the speed of crossing virtual barriers
+			static constexpr int MARGIN = 10;
+			int xn = std::clamp(x, MARGIN, w - 1 - MARGIN);
+			int yn = std::clamp(y, MARGIN, h - 1 - MARGIN);
+			if (xn != x || yn != y) SDL_WarpMouseInWindow(window, xn, yn);
+		}
 		break;
-
 	case SDL_JOYBUTTONUP:
-		if (joystickManager.translateSdlInstanceId(const_cast<SDL_Event&>(evt))) {
+		if (joystickManager.translateSdlInstanceId(evt)) {
 			event = JoystickButtonUpEvent(evt);
 			triggerOsdControlEventsFromJoystickButtonEvent(
 				evt.jbutton.button, false);
 		}
 		break;
 	case SDL_JOYBUTTONDOWN:
-		if (joystickManager.translateSdlInstanceId(const_cast<SDL_Event&>(evt))) {
+		if (joystickManager.translateSdlInstanceId(evt)) {
 			event = JoystickButtonDownEvent(evt);
 			triggerOsdControlEventsFromJoystickButtonEvent(
 				evt.jbutton.button, true);
 		}
 		break;
 	case SDL_JOYAXISMOTION: {
-		if (auto joyId = joystickManager.translateSdlInstanceId(const_cast<SDL_Event&>(evt))) {
+		if (auto joyId = joystickManager.translateSdlInstanceId(evt)) {
 			const auto* setting = joystickManager.getJoyDeadZoneSetting(*joyId);
 			assert(setting);
 			int deadZone = setting->getInt();
@@ -344,7 +363,7 @@ void InputEventGenerator::handle(const SDL_Event& evt)
 		break;
 	}
 	case SDL_JOYHATMOTION:
-		if (auto joyId = joystickManager.translateSdlInstanceId(const_cast<SDL_Event&>(evt))) {
+		if (auto joyId = joystickManager.translateSdlInstanceId(evt)) {
 			event = JoystickHatEvent(evt);
 			triggerOsdControlEventsFromJoystickHat(evt.jhat.value);
 		}
@@ -443,12 +462,7 @@ bool InputEventGenerator::signalEvent(const Event& event)
 
 void InputEventGenerator::setGrabInput(bool grab) const
 {
-	SDL_SetRelativeMouseMode(grab ? SDL_TRUE : SDL_FALSE);
-
-	// TODO is this still the correct place in SDL2
-	// TODO get the SDL_window
-	//SDL_Window* window = ...;
-	//SDL_SetWindowGrab(window, grab ? SDL_TRUE : SDL_FALSE);
+	SDL_SetWindowGrab(SDL_GL_GetCurrentWindow(), grab ? SDL_TRUE : SDL_FALSE);
 }
 
 

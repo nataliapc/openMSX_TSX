@@ -41,6 +41,9 @@ public:
 	explicit DebuggableEditor(ImGuiManager& manager_, std::string debuggableName, size_t index);
 	[[nodiscard]] std::string_view getDebuggableName() const { return {title.data(), debuggableNameSize}; }
 
+	void makeSnapshot(MSXMotherBoard& motherBoard);
+	void makeSnapshot(Debuggable& debuggable);
+
 	// ImGuiPart
 	[[nodiscard]] zstring_view iniName() const override { return title; }
 	void save(ImGuiTextBuffer& buf) override;
@@ -58,6 +61,7 @@ private:
 	bool setAddr(const Sizes& s, Debuggable& debuggable, unsigned memSize, unsigned addr);
 	void scrollAddr(const Sizes& s, Debuggable& debuggable, unsigned memSize, unsigned addr, bool forceScroll);
 
+	void drawExport(const Sizes& s, Debuggable& debuggable);
 	void drawContents(const Sizes& s, Debuggable& debuggable, unsigned memSize);
 	void drawSearch(const Sizes& s, Debuggable& debuggable, unsigned memSize);
 	void parseSearchString(std::string_view str);
@@ -72,6 +76,11 @@ private:
 	enum class SearchDirection : int {FWD, BWD};
 	enum PreviewEndianess : int {LE, BE};
 
+	enum ExportRange : int {RANGE_ALL, RANGE_RANGE};
+	enum ExportFormatted : int {EXPORT_RAW, EXPORT_FORMATTED};
+	enum ExportFormat : int {FORMAT_BIN, FORMAT_DEC, FORMAT_HEX, FORMAT_CUSTOM};
+	enum ExportDestination : int {OUTPUT_CLIPBOARD, OUTPUT_FILE};
+
 	SymbolManager& symbolManager;
 	std::string title; // debuggableName + suffix
 	size_t debuggableNameSize;
@@ -83,6 +92,7 @@ private:
 	bool showAddress = true;      // display the address bar (e.g. on small views it can make sense to hide this)
 	bool showSearch = false;      // display search functionality
 	bool showDataPreview = false; // display a footer previewing the decimal/binary/hex/float representation of the currently selected bytes.
+	bool showSymbolInfo = false;  // display symbol information and highlight known symbols in hex view
 	bool greyOutZeroes = true;    // display null/zero bytes using the TextDisabled color.
 	std::string addrExpr;
 	std::string searchString;
@@ -94,6 +104,20 @@ private:
 	int previewEndianess = LE;
 	ImGuiDataType previewDataType = ImGuiDataType_U8;
 
+	bool showExportWindow = false;
+	int exportRange = RANGE_ALL;
+	int exportFormatted = EXPORT_FORMATTED;
+	int exportFormat = FORMAT_HEX;
+	int exportDestination = OUTPUT_CLIPBOARD;
+	int exportColumns = 16;
+	std::string exportBegin, exportEnd;
+	std::string exportPrefix;
+	std::string exportSuffix;
+	std::string exportCustomFormat = "#%02X";
+	std::string exportFilename;
+	std::string exportStatus;
+	float exportStatusTimeout = 0.0f;
+
 	static constexpr auto persistentElements = std::tuple{
 		PersistentElement   {"open",             &DebuggableEditor::open},
 		PersistentElementMax{"columns",          &DebuggableEditor::columns, MAX_COLUMNS + 1},
@@ -101,6 +125,7 @@ private:
 		PersistentElement   {"showAddress",      &DebuggableEditor::showAddress},
 		PersistentElement   {"showSearch",       &DebuggableEditor::showSearch},
 		PersistentElement   {"showDataPreview",  &DebuggableEditor::showDataPreview},
+		PersistentElement   {"showSymbolInfo",   &DebuggableEditor::showSymbolInfo},
 		PersistentElement   {"greyOutZeroes",    &DebuggableEditor::greyOutZeroes},
 		PersistentElement   {"addrExpr",         &DebuggableEditor::addrExpr},
 		PersistentElement   {"searchString",     &DebuggableEditor::searchString},
@@ -118,10 +143,14 @@ private:
 	std::string addrStr;
 	std::optional<std::vector<uint8_t>> searchPattern;
 	std::optional<unsigned> searchResult;
-	enum EditType { HEX, ASCII };
+	enum EditType : uint8_t { HEX, ASCII };
 	EditType dataEditingActive = HEX;
-	bool dataEditingTakeFocus = true;
+	bool dataEditingTakeFocus = false;
 	bool updateAddr = false;
+	bool switchedTab = false;
+	bool resetCursor = false;
+
+	std::vector<uint8_t> snapshot;
 };
 
 } // namespace openmsx

@@ -18,7 +18,6 @@
 #include "Reactor.hh"
 
 #include "enumerate.hh"
-#include "ranges.hh"
 #include "StringOp.hh"
 #include "stl.hh"
 #include "strCat.hh"
@@ -28,6 +27,7 @@
 #include <imgui.h>
 
 #include <cassert>
+#include <ranges>
 
 namespace openmsx {
 
@@ -103,7 +103,7 @@ void ImGuiSymbols::loadEnd()
 void ImGuiSymbols::loadFile(const std::string& filename, SymbolManager::LoadEmpty loadEmpty, SymbolFile::Type type, std::optional<uint8_t> slot)
 {
 	auto& cliComm = manager.getCliComm();
-	auto it = ranges::find(fileError, filename, &FileInfo::filename);
+	auto it = std::ranges::find(fileError, filename, &FileInfo::filename);
 	try {
 		if (!symbolManager.reloadFile(filename, loadEmpty, type, slot)) {
 			cliComm.printWarning("Symbol file \"", filename,
@@ -169,19 +169,23 @@ static void checkSort(const SymbolManager& manager, std::vector<SymbolRef>& symb
 
 void ImGuiSymbols::drawContext(MSXMotherBoard* motherBoard, const SymbolRef& sym)
 {
-	if (ImGui::MenuItem("Show in Dissassembly", nullptr, nullptr, motherBoard != nullptr)) {
+	if (ImGui::MenuItem("Show in Disassembly", nullptr, nullptr, motherBoard != nullptr)) {
 		manager.debugger->setGotoTarget(sym.value(symbolManager));
 	}
 	if (ImGui::MenuItem("Set breakpoint", nullptr, nullptr, motherBoard != nullptr)) {
-		std::string cond;
+		auto& interp = motherBoard->getReactor().getInterpreter();
+		BreakPoint newBp;
+		newBp.setAddress(interp, TclObject(strCat("$sym(", sym.name(symbolManager), ')')));
+
 		if (auto slot = sym.slot(symbolManager)) {
-			strAppend(cond, "[pc_in_slot ", *slot & 3, ' ', (*slot >> 2) & 3);
+			auto cond = strCat("[pc_in_slot ", *slot & 3, ' ', (*slot >> 2) & 3);
 			if (auto segment = sym.segment(symbolManager)) {
 				strAppend(cond, ' ', *segment);
 			}
 			strAppend(cond, ']');
+			newBp.setCondition(TclObject(cond));
 		}
-		BreakPoint newBp(sym.value(symbolManager), TclObject("debug break"), TclObject(cond), false);
+
 		auto& cpuInterface = motherBoard->getCPUInterface();
 		cpuInterface.insertBreakPoint(std::move(newBp));
 	}
@@ -219,8 +223,8 @@ void ImGuiSymbols::drawTable(MSXMotherBoard* motherBoard, const std::string& fil
 
 			if (ImGui::TableNextColumn()) { // name
 				im::ScopedFont sf(manager.fontMono);
-				auto symName = sym.name(symbolManager);
-				ImGui::Selectable(symName.data(), false, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap);
+				const auto& symName = sym.name(symbolManager);
+				ImGui::Selectable(symName.c_str(), false, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap);
 				auto symNameMenu = strCat("symbol-manager##", symName);
 				if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
 					ImGui::OpenPopup(symNameMenu.c_str());
@@ -345,7 +349,7 @@ void ImGuiSymbols::paint(MSXMotherBoard* motherBoard)
 			}
 			if (!removeAction.empty()) {
 				symbolManager.removeFile(removeAction);
-				if (auto it = ranges::find(fileError, removeAction, &FileInfo::filename);
+				if (auto it = std::ranges::find(fileError, removeAction, &FileInfo::filename);
 					it != fileError.end()) {
 					fileError.erase(it);
 				}
@@ -353,7 +357,7 @@ void ImGuiSymbols::paint(MSXMotherBoard* motherBoard)
 		});
 		im::TreeNode("All symbols", [&]{
 			if (ImGui::Button("Reload all")) {
-				auto tmp = to_vector(view::transform(symbolManager.getFiles(), [&](const auto& file) {
+				auto tmp = to_vector(std::views::transform(symbolManager.getFiles(), [&](const auto& file) {
 					return FileInfo{file.filename, std::string{}, file.type, file.slot};
 				}));
 				append(tmp, std::move(fileError));
@@ -380,8 +384,8 @@ void ImGuiSymbols::notifySymbolsChanged()
 			//symbols.emplace_back(narrow<unsigned>(fileIdx),
 			//                     narrow<unsigned>(symbolIdx));
 			// clang workaround
-			symbols.push_back(SymbolRef{narrow<unsigned>(fileIdx),
-			                            narrow<unsigned>(symbolIdx)});
+			symbols.push_back(SymbolRef{.fileIdx = narrow<unsigned>(fileIdx),
+			                            .symbolIdx = narrow<unsigned>(symbolIdx)});
 		}
 	}
 

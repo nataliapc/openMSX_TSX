@@ -1,15 +1,17 @@
 #include "V9990SDLRasterizer.hh"
+
 #include "V9990.hh"
 #include "RawFrame.hh"
 #include "PostProcessor.hh"
 #include "Display.hh"
 #include "OutputSurface.hh"
 #include "RenderSettings.hh"
-#include "MemoryOps.hh"
+
 #include "enumerate.hh"
 #include "narrow.hh"
 #include "one_of.hh"
 #include "xrange.hh"
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -132,10 +134,9 @@ void V9990SDLRasterizer::drawBorder(
 	if (startX >= endX) return;
 
 	unsigned lineWidth = vdp.getLineWidth();
-	MemoryOps::MemSet<Pixel> memset;
 	for (auto y : xrange(startY, endY)) {
-		memset(workFrame->getLineDirect(y).subspan(startX, size_t(endX - startX)),
-		       bgColor);
+		std::ranges::fill(workFrame->getLineDirect(y).subspan(startX, size_t(endX - startX)),
+		             bgColor);
 		workFrame->setLineWidth(y, lineWidth);
 	}
 }
@@ -164,12 +165,8 @@ void V9990SDLRasterizer::drawDisplay(
 		displayYB -= fromY;
 		fromY = 0;
 	}
-	if (toX > screenW) {
-		toX = screenW;
-	}
-	if (toY > screenH) {
-		toY = screenH;
-	}
+	toX = std::min(toX, screenW);
+	toY = std::min(toY, screenH);
 	fromX = V9990::UCtoX(fromX, displayMode);
 	toX   = V9990::UCtoX(toX,   displayMode);
 
@@ -316,8 +313,7 @@ void V9990SDLRasterizer::preCalcPalettes()
 	resetPalette();
 }
 
-void V9990SDLRasterizer::setPalette(int index,
-                                           byte r, byte g, byte b, bool ys)
+void V9990SDLRasterizer::setPalette(int index, uint8_t r, uint8_t g, uint8_t b, bool ys)
 {
 	auto idx32768 = ((g & 31) << 10) | ((r & 31) << 5) | ((b & 31) << 0);
 	palette64_32768[index & 63] = narrow<int16_t>(idx32768); // TODO what with ys?

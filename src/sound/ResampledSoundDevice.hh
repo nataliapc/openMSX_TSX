@@ -8,6 +8,7 @@
 
 #include "Observer.hh"
 
+#include <cstdint>
 #include <memory>
 
 namespace openmsx {
@@ -19,7 +20,7 @@ class Setting;
 class ResampledSoundDevice : public SoundDevice, protected Observer<Setting>
 {
 public:
-	enum class ResampleType { HQ, LQ, BLIP };
+	enum class ResampleType : uint8_t { HQ, BLIP };
 
 	/** Note: To enable various optimizations (like SSE), this method is
 	  * allowed to generate up to 3 extra sample.
@@ -28,6 +29,12 @@ public:
 	bool generateInput(float* buffer, size_t num);
 
 	[[nodiscard]] DynamicClock& getEmuClock() { return emuClock; }
+
+	// setBalance() might switch between mono/stereo
+	void postSetBalance() override {
+		createResampler();
+		SoundDevice::postSetBalance();
+	}
 
 protected:
 	ResampledSoundDevice(MSXMotherBoard& motherBoard, std::string_view name,

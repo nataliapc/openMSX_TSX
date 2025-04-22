@@ -6,7 +6,8 @@
 
 #include "narrow.hh"
 #include "stl.hh"
-#include "view.hh"
+
+#include <ranges>
 
 namespace openmsx {
 
@@ -27,7 +28,7 @@ void ImGuiCheatFinder::paint(MSXMotherBoard* /*motherBoard*/)
 		auto height = 12.5f * ImGui::GetTextLineHeightWithSpacing();
 		auto sWidth = 2.0f * (style.WindowBorderSize + style.WindowPadding.x)
 		              + style.IndentSpacing + 6 * tSize + 5 * bSpacing;
-		im::Child("search", {sWidth, height}, ImGuiChildFlags_Border, [&]{
+		im::Child("search", {sWidth, height}, ImGuiChildFlags_Borders, [&]{
 			ImGui::TextUnformatted("Search"sv);
 			HelpMarker("OpenMSX cheat finder. See here for a quick tutorial:\n"
 			           "  openMSX tutorial: Working with the Cheat Finder\n"
@@ -70,7 +71,7 @@ void ImGuiCheatFinder::paint(MSXMotherBoard* /*motherBoard*/)
 		});
 
 		ImGui::SameLine();
-		im::Child("result", {0.0f, height}, ImGuiChildFlags_Border, [&]{
+		im::Child("result", {0.0f, height}, ImGuiChildFlags_Borders, [&]{
 			auto num = searchResults.size();
 			if (num == 0) {
 				ImGui::TextUnformatted("Results: no remaining locations"sv);
@@ -92,7 +93,8 @@ void ImGuiCheatFinder::paint(MSXMotherBoard* /*motherBoard*/)
 					ImGui::TableSetupColumn("New value");
 					ImGui::TableHeadersRow();
 
-					for (const auto& row : searchResults) {
+					im::ListClipper(searchResults.size(), [&](int i) {
+						const auto& row = searchResults[i];
 						if (ImGui::TableNextColumn()) { // addr
 							ImGui::Text("0x%04x", row.address);
 						}
@@ -102,7 +104,7 @@ void ImGuiCheatFinder::paint(MSXMotherBoard* /*motherBoard*/)
 						if (ImGui::TableNextColumn()) { // new
 							ImGui::Text("%d", row.newValue);
 						}
-					}
+					});
 				});
 			}
 		});
@@ -114,14 +116,14 @@ void ImGuiCheatFinder::paint(MSXMotherBoard* /*motherBoard*/)
 	}
 	if (!searchExpr.empty()) {
 		auto result = manager.execute(makeTclList("cheat_finder::search", searchExpr)).value_or(TclObject{});
-		searchResults = to_vector(view::transform(xrange(result.size()), [&](size_t i) {
+		searchResults = to_vector(std::views::transform(xrange(result.size()), [&](size_t i) {
 			auto line = result.getListIndexUnchecked(narrow<unsigned>(i));
 			auto addr     = line.getListIndexUnchecked(0).getOptionalInt().value_or(0);
 			auto oldValue = line.getListIndexUnchecked(1).getOptionalInt().value_or(0);
 			auto newValue = line.getListIndexUnchecked(2).getOptionalInt().value_or(0);
-			return SearchResult{narrow_cast<uint16_t>(addr),
-			                    narrow_cast<uint8_t>(oldValue),
-			                    narrow_cast<uint8_t>(newValue)};
+			return SearchResult{.address = narrow_cast<uint16_t>(addr),
+			                    .oldValue = narrow_cast<uint8_t>(oldValue),
+			                    .newValue = narrow_cast<uint8_t>(newValue)};
 		}));
 	}
 }

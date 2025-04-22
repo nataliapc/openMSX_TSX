@@ -2,6 +2,7 @@
 #define CASSETTEPORT_HH
 
 #include "Connector.hh"
+#include "CassettePlayerCommand.hh"
 #include "serialize_meta.hh"
 #include "components.hh"
 
@@ -58,12 +59,17 @@ public:
 	*/
 	virtual void setLaserdiscPlayer(LaserdiscPlayer *laserdisc) = 0;
 #endif
+
+	/**
+	* Get the cassette player (if available)
+	*/
+	virtual CassettePlayer* getCassettePlayer() = 0;
 };
 
 class CassettePort final : public CassettePortInterface, public Connector
 {
 public:
-	explicit CassettePort(const HardwareConfig& hwConf);
+	explicit CassettePort(HardwareConfig& hwConf);
 	~CassettePort() override;
 	void setMotor(bool status, EmuTime::param time) override;
 	void cassetteOut(bool output, EmuTime::param time) override;
@@ -72,6 +78,7 @@ public:
 	void setLaserdiscPlayer(LaserdiscPlayer* laserdisc) override;
 #endif
 	[[nodiscard]] bool lastOut() const override;
+	CassettePlayer* getCassettePlayer() override { return cassettePlayer; }
 
 	// Connector
 	[[nodiscard]] std::string_view getDescription() const override;
@@ -98,6 +105,7 @@ SERIALIZE_CLASS_VERSION(CassettePort, 2);
 class DummyCassettePort final : public CassettePortInterface
 {
 public:
+	explicit DummyCassettePort(MSXMotherBoard& motherBoard);
 	void setMotor(bool status, EmuTime::param time) override;
 	void cassetteOut(bool output, EmuTime::param time) override;
 	bool cassetteIn(EmuTime::param time) override;
@@ -105,6 +113,9 @@ public:
 	void setLaserdiscPlayer(LaserdiscPlayer *laserdisc) override;
 #endif
 	[[nodiscard]] bool lastOut() const override;
+	CassettePlayer* getCassettePlayer() override { return nullptr; }
+private:
+	CassettePlayerCommand cassettePlayerCommand;
 };
 
 } // namespace openmsx

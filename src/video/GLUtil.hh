@@ -15,6 +15,7 @@
 #include <bit>
 #include <cassert>
 #include <cstdint>
+#include <span>
 #include <string_view>
 
 // arbitrary but distinct values, (roughly) ordered according to version number
@@ -74,9 +75,9 @@ public:
 
 	/** Return as a 'void*' (needed for 'Dear ImGui').
 	  */
-	[[nodiscard]] void* getImGui() const {
+	[[nodiscard]] unsigned long long getImGui() const {
 		assert(textureId);
-		return std::bit_cast<void*>(uintptr_t(textureId));
+		return uintptr_t(textureId);
 	}
 
 	/** Makes this texture the active GL texture.
@@ -164,11 +165,9 @@ public:
 	PixelBuffer& operator=(PixelBuffer&& other) noexcept;
 	~PixelBuffer();
 
-	/** Sets the image for this buffer.
-	  * TODO: Actually, only image size for now;
-	  *       later, if we need it, image data too.
+	/** Allocate the maximum required size for this buffer.
 	  */
-	void setImage(GLuint width, GLuint height);
+	void allocate(GLuint size);
 
 	/** Bind this PixelBuffer. Must be called before the methods
 	  * getOffset() or mapWrite() are used. (Is a wrapper around
@@ -180,14 +179,6 @@ public:
 	  */
 	void unbind() const;
 
-	/** Gets a pointer relative to the start of this buffer.
-	  * You must not dereference this pointer, but you can pass it to
-	  * glTexImage etc when this buffer is bound as the source.
-	  * @pre This PixelBuffer must be bound (see bind()) before calling
-	  *      this method.
-	  */
-	[[nodiscard]] T* getOffset(GLuint x, GLuint y);
-
 	/** Maps the contents of this buffer into memory. The returned buffer
 	  * is write-only (reading could be very slow or even result in a
 	  * segfault).
@@ -196,7 +187,7 @@ public:
 	  * @pre This PixelBuffer must be bound (see bind()) before calling
 	  *      this method.
 	  */
-	[[nodiscard]] T* mapWrite();
+	[[nodiscard]] std::span<T> mapWrite();
 
 	/** Unmaps the contents of this buffer.
 	  * After this call, you must no longer use the pointer returned by
@@ -212,36 +203,26 @@ private:
 	/** Handle of the GL buffer, or 0 if no GL buffer is available.
 	  */
 	//GLuint bufferId;
-
-	/** Number of pixels per line.
-	  */
-	GLuint width = 0;
-
-	/** Number of lines.
-	  */
-	GLuint height = 0;
 };
 
 // class PixelBuffer
 
 template<typename T>
-PixelBuffer<T>::PixelBuffer()
-{
-	//glGenBuffers(1, &bufferId);
-}
+PixelBuffer<T>::PixelBuffer() = default;
+//{
+//	glGenBuffers(1, &bufferId);
+//}
 
 template<typename T>
-PixelBuffer<T>::~PixelBuffer()
-{
-	//glDeleteBuffers(1, &bufferId); // ok to delete '0'
-}
+PixelBuffer<T>::~PixelBuffer() = default;
+//{
+//	glDeleteBuffers(1, &bufferId); // ok to delete '0'
+//}
 
 template<typename T>
 PixelBuffer<T>::PixelBuffer(PixelBuffer<T>&& other) noexcept
 	: allocated(std::move(other.allocated))
 	//, bufferId(other.bufferId)
-	, width(other.width)
-	, height(other.height)
 {
 	//other.bufferId = 0;
 }
@@ -251,26 +232,22 @@ PixelBuffer<T>& PixelBuffer<T>::operator=(PixelBuffer<T>&& other) noexcept
 {
 	std::swap(allocated, other.allocated);
 	//std::swap(bufferId,  other.bufferId);
-	std::swap(width,     other.width);
-	std::swap(height,    other.height);
 	return *this;
 }
 
 template<typename T>
-void PixelBuffer<T>::setImage(GLuint width_, GLuint height_)
+void PixelBuffer<T>::allocate(GLuint size)
 {
-	width = width_;
-	height = height_;
 	//if (bufferId != 0) {
 	//	bind();
 	//	// TODO make performance hint configurable?
 	//	glBufferData(GL_PIXEL_UNPACK_BUFFER,
-	//	             width * height * 4,
+	//	             size * 4,
 	//	             nullptr, // leave data undefined
 	//	             GL_STREAM_DRAW); // performance hint
 	//	unbind();
 	//} else {
-		allocated.resize(width * height);
+		allocated.resize(size);
 	//}
 }
 
@@ -291,26 +268,13 @@ void PixelBuffer<T>::unbind() const
 }
 
 template<typename T>
-T* PixelBuffer<T>::getOffset(GLuint x, GLuint y)
-{
-	assert(x < width);
-	assert(y < height);
-	auto offset = x + size_t(width) * y;
-	//if (bufferId != 0) {
-	//	return std::bit_cast<T*>(offset * sizeof(T));
-	//} else {
-		return &allocated[offset];
-	//}
-}
-
-template<typename T>
-T* PixelBuffer<T>::mapWrite()
+std::span<T> PixelBuffer<T>::mapWrite()
 {
 	//if (bufferId != 0) {
 	//	return std::bit_cast<T*>(glMapBuffer(
 	//		GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY));
 	//} else {
-		return allocated.data();
+		return std::span{allocated};
 	//}
 }
 

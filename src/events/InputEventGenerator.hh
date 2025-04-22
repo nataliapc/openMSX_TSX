@@ -9,6 +9,8 @@
 #include "SDLKey.hh"
 #include <SDL.h>
 
+#include <cstdint>
+
 namespace openmsx {
 
 class CommandController;
@@ -42,7 +44,7 @@ public:
 	[[nodiscard]] JoystickManager& getJoystickManager() { return joystickManager; }
 
 private:
-	void handle(const SDL_Event& evt);
+	void handle(SDL_Event& evt);
 	void handleKeyDown(const SDL_KeyboardEvent& key, uint32_t unicode);
 	void splitText(uint32_t timestamp, const char* utf8);
 	void setGrabInput(bool grab) const;
@@ -61,7 +63,7 @@ private:
 		[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override;
 	} escapeGrabCmd;
 
-	enum EscapeGrabState {
+	enum EscapeGrabState : uint8_t {
 		ESCAPE_GRAB_WAIT_CMD,
 		ESCAPE_GRAB_WAIT_LOST,
 		ESCAPE_GRAB_WAIT_GAIN

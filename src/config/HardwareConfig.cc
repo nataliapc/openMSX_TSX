@@ -12,9 +12,9 @@
 #include "serialize.hh"
 #include "serialize_stl.hh"
 
-#include "unreachable.hh"
 #include "xrange.hh"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <iostream>
@@ -157,11 +157,11 @@ HardwareConfig::HardwareConfig(MSXMotherBoard& motherBoard_, std::string hwName_
 	, hwName(std::move(hwName_))
 {
 	for (auto& sub : externalSlots) {
-		ranges::fill(sub, false);
+		std::ranges::fill(sub, false);
 	}
-	ranges::fill(externalPrimSlots, false);
-	ranges::fill(expandedSlots, false);
-	ranges::fill(allocatedPrimarySlots, false);
+	std::ranges::fill(externalPrimSlots, false);
+	std::ranges::fill(expandedSlots, false);
+	std::ranges::fill(allocatedPrimarySlots, false);
 	userName = motherBoard.getUserName(hwName);
 }
 
@@ -237,6 +237,11 @@ const XMLElement& HardwareConfig::getDevicesElem() const
 	return getConfig().getChild("devices");
 }
 
+XMLElement& HardwareConfig::getDevicesElem()
+{
+	return getConfig().getChild("devices");
+}
+
 static void loadHelper(XMLDocument& doc, const std::string& filename)
 {
 	try {
@@ -288,8 +293,8 @@ void HardwareConfig::parseSlots()
 	//      once machine and extensions are parsed separately move parsing
 	//      of 'expanded' to MSXCPUInterface
 	//
-	for (const auto* psElem : getDevicesElem().getChildren("primary")) {
-		const auto& primSlot = psElem->getAttribute("slot");
+	for (auto* psElem : getDevicesElem().getChildren("primary")) {
+		auto& primSlot = psElem->getAttribute("slot");
 		int ps = CartridgeSlotManager::getSlotNum(primSlot.getValue());
 		if (psElem->getAttributeValueAsBool("external", false)) {
 			if (ps < 0) {
@@ -329,8 +334,7 @@ void HardwareConfig::parseSlots()
 				} else {
 					ps = getSpecificFreePrimarySlot(-ps - 1);
 				}
-				auto& mutablePrimSlot = const_cast<XMLAttribute&>(primSlot);
-				mutablePrimSlot.setValue(config.allocateString(strCat(ps)));
+				primSlot.setValue(config.allocateString(strCat(ps)));
 			}
 			createExpandedSlot(ps);
 			if (ssElem->getAttributeValueAsBool("external", false)) {
@@ -347,9 +351,9 @@ void HardwareConfig::parseSlots()
 	}
 }
 
-byte HardwareConfig::parseSlotMap() const
+uint8_t HardwareConfig::parseSlotMap() const
 {
-	byte initialPrimarySlots = 0;
+	uint8_t initialPrimarySlots = 0;
 	if (const auto* slotMap = getConfig().findChild("slotmap")) {
 		for (const auto* child : slotMap->getChildren("map")) {
 			int page = child->getAttributeValueAsInt("page", -1);
@@ -361,8 +365,8 @@ byte HardwareConfig::parseSlotMap() const
 				throw MSXException("Invalid or missing slot in slotmap entry");
 			}
 			unsigned offset = page * 2;
-			initialPrimarySlots &= byte(~(3 << offset));
-			initialPrimarySlots |= byte(slot << offset);
+			initialPrimarySlots &= uint8_t(~(3 << offset));
+			initialPrimarySlots |= uint8_t(slot << offset);
 		}
 	}
 	return initialPrimarySlots;
@@ -373,18 +377,18 @@ void HardwareConfig::createDevices()
 	createDevices(getDevicesElem(), nullptr, nullptr);
 }
 
-void HardwareConfig::createDevices(const XMLElement& elem,
-	const XMLElement* primary, const XMLElement* secondary)
+void HardwareConfig::createDevices(XMLElement& elem,
+	XMLElement* primary, XMLElement* secondary)
 {
-	for (const auto& c : elem.getChildren()) {
+	for (auto& c : elem.getChildren()) {
 		const auto& childName = c.getName();
 		if (childName == "primary") {
 			createDevices(c, &c, secondary);
 		} else if (childName == "secondary") {
 			createDevices(c, primary, &c);
 		} else {
-			auto device = DeviceFactory::create(
-				DeviceConfig(*this, c, primary, secondary));
+			DeviceConfig config2(*this, c, primary, secondary);
+			auto device = DeviceFactory::create(config2);
 			if (device) {
 				addDevice(std::move(device));
 			} else {
@@ -452,11 +456,10 @@ void HardwareConfig::setName(std::string_view proposedName)
 
 void HardwareConfig::setSlot(std::string_view slotName)
 {
-	for (const auto* psElem : getDevicesElem().getChildren("primary")) {
-		const auto& primSlot = psElem->getAttribute("slot");
+	for (auto* psElem : getDevicesElem().getChildren("primary")) {
+		auto& primSlot = psElem->getAttribute("slot");
 		if (primSlot.getValue() == "any") {
-			auto& mutablePrimSlot = const_cast<XMLAttribute&>(primSlot);
-			mutablePrimSlot.setValue(config.allocateString(slotName));
+			primSlot.setValue(config.allocateString(slotName));
 		}
 	}
 }

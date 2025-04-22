@@ -71,7 +71,7 @@ public:
 		auto [q, r] = divMod.divMod(dur);
 		auto f = float(r) / float(getStep());
 		assert(0.0f <= f); assert(f < 1.0f);
-		return {q, f};
+		return {.integral = q, .fractional = f};
 	}
 
 	template<typename FIXED>
@@ -166,6 +166,7 @@ public:
 	/** Calculate the time at which this clock will have ticked the given
 	  * number of times (counted from its last tick).
 	  */
+	// TODO should be friend, workaround for pre-gcc-13 bug
 	[[nodiscard]] EmuTime operator+(uint64_t n) const {
 		return EmuTime(lastTick.time + n * getStep());
 	}

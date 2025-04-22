@@ -64,6 +64,7 @@
 #include "RomDatabase.hh"
 #include "DeviceConfig.hh"
 #include "XMLElement.hh"
+#include "Yamanooto.hh"
 #include "MSXException.hh"
 
 #include "enumerate.hh"
@@ -168,7 +169,7 @@ using enum RomType;
 	}
 }
 
-std::unique_ptr<MSXDevice> create(const DeviceConfig& config)
+std::unique_ptr<MSXDevice> create(DeviceConfig& config)
 {
 	Rom rom(std::string(config.getAttributeValue("id")), "rom", config);
 
@@ -215,9 +216,8 @@ std::unique_ptr<MSXDevice> create(const DeviceConfig& config)
 	// was updated).
 	// We do it at this point so that constructors used below can use this
 	// information for warning messages etc.
-	auto& doc = const_cast<DeviceConfig&>(config).getXMLDocument();
-	doc.setChildData(const_cast<XMLElement&>(*config.getXML()),
-	                 "mappertype", RomInfo::romTypeToName(type).data());
+	auto& doc = config.getXMLDocument();
+	doc.setChildData(*config.getXML(), "mappertype", RomInfo::romTypeToName(type).data());
 
 	std::unique_ptr<MSXRom> result;
 	switch (type) {
@@ -419,6 +419,9 @@ std::unique_ptr<MSXDevice> create(const DeviceConfig& config)
 		break;
 	case REPRO_CARTRIDGE2:
 		result = make_unique<ReproCartridgeV2>(config, std::move(rom));
+		break;
+	case YAMANOOTO:
+		result = make_unique<Yamanooto>(config, std::move(rom));
 		break;
 	case KONAMI_ULTIMATE_COLLECTION:
 		result = make_unique<KonamiUltimateCollection>(config, std::move(rom));

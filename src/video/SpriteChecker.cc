@@ -9,9 +9,11 @@ TODO:
 */
 
 #include "SpriteChecker.hh"
+
 #include "RenderSettings.hh"
 #include "BooleanSetting.hh"
 #include "serialize.hh"
+
 #include <algorithm>
 #include <bit>
 #include <cassert>
@@ -110,7 +112,7 @@ inline void SpriteChecker::checkSprites1(int minLine, int maxLine)
 	bool mag = vdp.isSpriteMag();
 	int magSize = (mag + 1) * size;
 	auto attributePtr = vram.spriteAttribTable.getReadArea<32 * 4>(0);
-	byte patternIndexMask = size == 16 ? 0xFC : 0xFF;
+	uint8_t patternIndexMask = size == 16 ? 0xFC : 0xFF;
 	int fifthSpriteNum  = -1;  // no 5th sprite detected yet
 	int fifthSpriteLine = 999; // larger than any possible valid line
 
@@ -144,7 +146,7 @@ inline void SpriteChecker::checkSprites1(int minLine, int maxLine)
 			if (mag) spriteLine /= 2;
 			sip.pattern = calculatePatternNP(patternIndex, spriteLine);
 			sip.x = attributePtr[4 * sprite + 1];
-			byte colorAttrib = attributePtr[4 * sprite + 3];
+			uint8_t colorAttrib = attributePtr[4 * sprite + 3];
 			if (colorAttrib & 0x80) sip.x -= 32;
 			sip.colorAttrib = colorAttrib;
 
@@ -153,18 +155,18 @@ inline void SpriteChecker::checkSprites1(int minLine, int maxLine)
 	}
 
 	// Update status register.
-	byte status = vdp.getStatusReg0();
+	uint8_t status = vdp.getStatusReg0();
 	if (fifthSpriteNum != -1) {
 		// Five sprites on a line.
 		// According to TMS9918.pdf 5th sprite detection is only
 		// active when F flag is zero.
 		if ((status & 0xC0) == 0) {
-			status = byte(0x40 | (status & 0x20) | fifthSpriteNum);
+			status = uint8_t(0x40 | (status & 0x20) | fifthSpriteNum);
 		}
 	}
 	if (~status & 0x40) {
 		// No 5th sprite detected, store number of latest sprite processed.
-		status = (status & 0x20) | byte(std::min(sprite, 31));
+		status = (status & 0x20) | uint8_t(std::min(sprite, 31));
 	}
 	vdp.setSpriteStatus(status);
 
@@ -308,7 +310,7 @@ inline void SpriteChecker::checkSprites2(int minLine, int maxLine)
 
 				if (mag) spriteLine /= 2;
 				unsigned colorIndex = (~0u << 10) | (sprite * 16 + spriteLine);
-				byte colorAttrib =
+				uint8_t colorAttrib =
 					vram.spriteAttribTable.readPlanar(colorIndex);
 
 				SpriteInfo& sip = spriteBuffer[line][visibleIndex];
@@ -353,7 +355,7 @@ inline void SpriteChecker::checkSprites2(int minLine, int maxLine)
 
 				if (mag) spriteLine /= 2;
 				unsigned colorIndex = (~0u << 10) | (sprite * 16 + spriteLine);
-				byte colorAttrib =
+				uint8_t colorAttrib =
 					vram.spriteAttribTable.readNP(colorIndex);
 				// Sprites with CC=1 are only visible if preceded by
 				// a sprite with CC=0. However they DO contribute towards
@@ -383,19 +385,19 @@ inline void SpriteChecker::checkSprites2(int minLine, int maxLine)
 	}
 
 	// Update status register.
-	byte status = vdp.getStatusReg0();
+	uint8_t status = vdp.getStatusReg0();
 	if (ninthSpriteNum != -1) {
 		// Nine sprites on a line.
 		// According to TMS9918.pdf 5th sprite detection is only
 		// active when F flag is zero. Stuck to this for V9938.
 		// Dragon Quest 2 needs this.
 		if ((status & 0xC0) == 0) {
-			status = byte(0x40 | (status & 0x20) | ninthSpriteNum);
+			status = uint8_t(0x40 | (status & 0x20) | ninthSpriteNum);
 		}
 	}
 	if (~status & 0x40) {
 		// No 9th sprite detected, store number of latest sprite processed.
-		status = (status & 0x20) | byte(std::min(sprite, 31));
+		status = (status & 0x20) | uint8_t(std::min(sprite, 31));
 	}
 	vdp.setSpriteStatus(status);
 
@@ -494,7 +496,7 @@ void SpriteChecker::serialize(Archive& ar, unsigned version)
 		// any influence on the MSX state. So the effect of not
 		// serializing these two is that no sprites will be shown in the
 		// first (partial) frame after loadstate.
-		ranges::fill(spriteCount, 0);
+		std::ranges::fill(spriteCount, 0);
 		// content of spriteBuffer[] doesn't matter if spriteCount[] is 0
 	}
 	ar.serialize("collisionX", collisionX,

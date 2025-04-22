@@ -3,10 +3,11 @@
 
 #include "DeviceConfig.hh"
 #include "EmuTime.hh"
+
 #include "IterableBitSet.hh"
 #include "narrow.hh"
-#include "openmsx.hh"
 #include "serialize_meta.hh"
+
 #include <array>
 #include <cassert>
 #include <span>
@@ -14,6 +15,9 @@
 #include <vector>
 
 namespace openmsx {
+
+using byte = uint8_t;  // TODO over time deprecate and remove these
+using word = uint16_t;
 
 class XMLElement;
 class MSXMotherBoard;
@@ -47,6 +51,9 @@ public:
 	/** Returns the hardwareconfig this device belongs to.
 	  */
 	[[nodiscard]] const HardwareConfig& getHardwareConfig() const {
+		return deviceConfig.getHardwareConfig();
+	}
+	[[nodiscard]] HardwareConfig& getHardwareConfig() {
 		return deviceConfig.getHardwareConfig();
 	}
 
@@ -236,7 +243,13 @@ public:
 	[[nodiscard]] const XMLElement& getDeviceConfig() const {
 		return *deviceConfig.getXML();
 	}
+	[[nodiscard]] XMLElement& getDeviceConfig() {
+		return *deviceConfig.getXML();
+	}
 	[[nodiscard]] const DeviceConfig& getDeviceConfig2() const { // TODO
+		return deviceConfig;
+	}
+	[[nodiscard]] DeviceConfig& getDeviceConfig2() { // TODO
 		return deviceConfig;
 	}
 
@@ -319,17 +332,21 @@ private:
 	void registerSlots();
 	void unregisterSlots();
 
+protected:
 	void registerPorts();
+	void doRegisterPorts();
 	void unregisterPorts();
 
-protected:
-	std::string deviceName;
+	mutable std::string deviceName; // MSXMultiXxxDevice has a dynamic (lazy) name
 
 	[[nodiscard]] byte getPrimarySlot() const {
 		// must already be resolved to an actual slot
 		assert((0 <= ps) && (ps <= 3));
 		return narrow_cast<byte>(ps);
 	}
+
+	IterableBitSet<256> inPorts;
+	IterableBitSet<256> outPorts;
 
 private:
 	struct BaseSize {
@@ -339,8 +356,6 @@ private:
 	};
 	using MemRegions = std::vector<BaseSize>;
 	MemRegions memRegions;
-	IterableBitSet<256> inPorts;
-	IterableBitSet<256> outPorts;
 
 	DeviceConfig deviceConfig;
 

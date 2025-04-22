@@ -7,15 +7,16 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 
-#include "openmsx.hh"
 #include "MidiInDevice.hh"
 #include "EventListener.hh"
 #include "serialize_meta.hh"
 #include "circular_buffer.hh"
 #include <windows.h>
 #include <mmsystem.h>
-#include <mutex>
+
 #include <condition_variable>
+#include <cstdint>
+#include <mutex>
 #include <thread>
 
 namespace openmsx {
@@ -68,7 +69,7 @@ private:
 	std::mutex threadIdMutex;
 	std::condition_variable threadIdCond;
 	DWORD threadId;
-	cb_queue<byte> queue;
+	cb_queue<uint8_t> queue;
 	std::mutex queueMutex;
 	std::string name;
 	std::string desc;

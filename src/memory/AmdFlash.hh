@@ -6,14 +6,15 @@
 #include "cstd.hh"
 #include "narrow.hh"
 #include "power_of_two.hh"
-#include "ranges.hh"
 #include "static_vector.hh"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace openmsx {
@@ -30,6 +31,7 @@ public:
 	enum class ManufacturerID : uint8_t {
 		AMD = 0x01,
 		STM = 0x20,
+		SST = 0xBF,
 	};
 
 	struct AutoSelect {
@@ -42,9 +44,9 @@ public:
 
 		constexpr void validate() const {
 			// check parity
-			assert(std::popcount(to_underlying(manufacturer)) & 1);
+			assert(std::popcount(std::to_underlying(manufacturer)) & 1);
 			// extended marker is not part of ID
-			assert(device.size() > 0 && device[0] != 0x7E);
+			assert(!device.empty() && device[0] != 0x7E);
 		}
 	};
 
@@ -76,7 +78,7 @@ public:
 		size_t sectorCount;
 
 		constexpr void validate() const {
-			assert(ranges::all_of(regions, [](const auto& region) { return region.count > 0; }));
+			assert(std::ranges::all_of(regions, [](const auto& region) { return region.count > 0; }));
 			assert(narrow_cast<unsigned>(cstd::abs(writeProtectPinRange)) <= sectorCount);
 		}
 	};
@@ -197,10 +199,10 @@ public:
 	 */
 	AmdFlash(const Rom& rom, const ValidatedChip& chip,
 	         std::span<const bool> writeProtectSectors,
-	         const DeviceConfig& config);
+	         DeviceConfig& config);
 	AmdFlash(const std::string& name, const ValidatedChip& chip,
 	         std::span<const bool> writeProtectSectors,
-	         const DeviceConfig& config);
+	         DeviceConfig& config, std::string_view id = {});
 	~AmdFlash();
 
 	void reset();
@@ -232,7 +234,7 @@ public:
 		void serialize(Archive& ar, unsigned version);
 	};
 
-	enum class State { IDLE, IDENT, CFI, STATUS, PRGERR };
+	enum class State : uint8_t { IDLE, IDENT, CFI, STATUS, PRGERR };
 
 	struct Sector {
 		size_t address;
@@ -248,7 +250,7 @@ public:
 private:
 	AmdFlash(const std::string& name, const ValidatedChip& chip,
 	         const Rom* rom, std::span<const bool> writeProtectSectors,
-	         const DeviceConfig& config);
+	         DeviceConfig& config, std::string_view id);
 
 	[[nodiscard]] size_t getSectorIndex(size_t address) const;
 	[[nodiscard]] Sector& getSector(size_t address) { return sectors[getSectorIndex(address)]; };
@@ -302,47 +304,128 @@ namespace AmdFlashChip
 	// AMD AM29F040
 	static constexpr ValidatedChip AM29F040 = {{
 		.autoSelect{.manufacturer = AMD, .device{0xA4}, .extraCode = 0x01},
-		.geometry{DeviceInterface::x8, {{8, 0x10000}}},
+		.geometry{DeviceInterface::x8, {{.count = 8, .size = 0x10000}}},
 	}};
 
 	// AMD AM29F016
 	static constexpr ValidatedChip AM29F016 = {{
 		.autoSelect{.manufacturer = AMD, .device{0xAD}},
-		.geometry{DeviceInterface::x8, {{32, 0x10000}}},
+		.geometry{DeviceInterface::x8, {{.count = 32, .size = 0x10000}}},
+	}};
+
+	// Microchip SST39SF010  (128kB, 32 x 4kB sectors)
+	static constexpr ValidatedChip SST39SF010 = {{
+		.autoSelect{.manufacturer = SST, .device{0xB5}},
+		.geometry{DeviceInterface::x8, {{.count = 32, .size = 0x1000}}},
 	}};
 
 	// Numonyx M29W800DB
 	static constexpr ValidatedChip M29W800DB = {{
 		.autoSelect{.manufacturer = STM, .device{0x5B}},
-		.geometry{DeviceInterface::x8x16, {{1, 0x4000}, {2, 0x2000}, {1, 0x8000}, {15, 0x10000}}},
+		.geometry{DeviceInterface::x8x16, {
+				{.count = 1, .size = 0x4000},
+				{.count = 2, .size = 0x2000},
+				{.count = 1, .size = 0x8000},
+				{.count = 15, .size = 0x10000}}},
 		.cfi{
 			.command = true,
-			.systemInterface{{0x27, 0x36, 0x00, 0x00}, {16, 1, 1024, 1}, {16, 1, 8, 1}},
-			.primaryAlgorithm{{1, 0}, 0, 0, 2, 1, 1, 4, 0, 0, 0},
+			.systemInterface{.supply = {.minVcc = 0x27, .maxVcc = 0x36, .minVpp = 0x00, .maxVpp = 0x00},
+			                 .typTimeout     = {.singleProgram = 16, .multiProgram = 1, .sectorErase = 1024, .chipErase = 1},
+			                 .maxTimeoutMult = {.singleProgram = 16, .multiProgram = 1, .sectorErase =    8, .chipErase = 1}},
+			.primaryAlgorithm{.version = {.major = 1, .minor = 0},
+			                  .addressSensitiveUnlock = 0,
+			                  .siliconRevision = 0,
+			                  .eraseSuspend = 2,
+			                  .sectorProtect = 1,
+			                  .sectorTemporaryUnprotect = 1,
+			                  .sectorProtectScheme = 4,
+			                  .simultaneousOperation = 0,
+			                  .burstMode = 0,
+			                  .pageMode = 0},
 		},
 	}};
 
 	// Micron M29W640GB
 	static constexpr ValidatedChip M29W640GB = {{
 		.autoSelect{.manufacturer = STM, .device{0x10, 0x00}, .extraCode = 0x0008, .undefined = 0, .oddZero = true, .readMask = 0x7F},
-		.geometry{DeviceInterface::x8x16, {{8, 0x2000}, {127, 0x10000}}, 2},
+		.geometry{DeviceInterface::x8x16, {
+				{.count = 8, .size = 0x2000},
+				{.count = 127, .size = 0x10000}}, 2},
 		.program{.fastCommand = true, .bufferCommand = true, .shortAbortReset = true, .pageSize = 32},
 		.cfi{
 			.command = true, .withManufacturerDevice = true, .commandMask = 0xFFF, .readMask = 0xFF,
-			.systemInterface{{0x27, 0x36, 0xB5, 0xC5}, {16, 1, 1024, 1}, {16, 1, 8, 1}},
-			.primaryAlgorithm{{1, 3}, 0, 0, 2, 4, 1, 4, 0, 0, 1, {0xB5, 0xC5}, 0x02, 1},
+			.systemInterface{.supply = {.minVcc = 0x27, .maxVcc = 0x36, .minVpp = 0xB5, .maxVpp = 0xC5},
+			                 .typTimeout     = {.singleProgram = 16, .multiProgram = 1, .sectorErase = 1024, .chipErase = 1},
+			                 .maxTimeoutMult = {.singleProgram = 16, .multiProgram = 1, .sectorErase =    8, .chipErase = 1}},
+			.primaryAlgorithm{.version = {.major = 1, .minor = 3},
+			                  .addressSensitiveUnlock = 0,
+			                  .siliconRevision = 0,
+			                  .eraseSuspend = 2,
+			                  .sectorProtect = 4,
+			                  .sectorTemporaryUnprotect = 1,
+			                  .sectorProtectScheme = 4,
+			                  .simultaneousOperation = 0,
+			                  .burstMode = 0,
+			                  .pageMode = 1,
+			                  .supply = {.minAcc = 0xB5, .maxAcc = 0xC5},
+			                  .bootBlockFlag = 0x02,
+			                  .programSuspend = 1},
 		},
+	}};
+
+	// Infineon / Cypress / Spansion S29GL064N90TFI04
+	static constexpr ValidatedChip S29GL064N90TFI04 = {{
+		.autoSelect{.manufacturer = AMD, .device{0x10, 0x00}, .extraCode = 0xFF0A, .readMask = 0x0F},
+		.geometry{DeviceInterface::x8x16, {
+				{.count = 8, .size = 0x2000},
+				{.count = 127, .size = 0x10000}}, 1},
+		.program{.bufferCommand = true, .pageSize = 32},
+		.cfi{
+			.command = true,
+			.systemInterface{.supply = {.minVcc = 0x27, .maxVcc = 0x36, .minVpp = 0x00, .maxVpp = 0x00},
+			                 .typTimeout     = {.singleProgram = 128, .multiProgram = 128, .sectorErase = 1024, .chipErase = 1},
+			                 .maxTimeoutMult = {.singleProgram =   8, .multiProgram =  32, .sectorErase =   16, .chipErase = 1}},
+			.primaryAlgorithm{.version = {.major = 1, .minor = 3},
+			                  .addressSensitiveUnlock = 0,
+			                  .siliconRevision = 8,
+			                  .eraseSuspend = 2,
+			                  .sectorProtect = 1,
+			                  .sectorTemporaryUnprotect = 0,
+			                  .sectorProtectScheme = 8,
+			                  .simultaneousOperation = 0,
+			                  .burstMode = 0,
+			                  .pageMode = 2,
+			                  .supply = {.minAcc = 0xB5, .maxAcc = 0xC5},
+			                  .bootBlockFlag = 0x02,
+			                  .programSuspend = 1},
+		}
 	}};
 
 	// Infineon / Cypress / Spansion S29GL064S70TFI040
 	static constexpr ValidatedChip S29GL064S70TFI040 = {{
 		.autoSelect{.manufacturer = AMD, .device{0x10, 0x00}, .extraCode = 0xFF0A, .readMask = 0x0F},
-		.geometry{DeviceInterface::x8x16, {{8, 0x2000}, {127, 0x10000}}, 2},
+		.geometry{DeviceInterface::x8x16, {
+				{.count = 8, .size = 0x2000},
+				{.count = 127, .size = 0x10000}}, 2},
 		.program{.bufferCommand = true, .pageSize = 256},
 		.cfi{
 			.command = true, .withAutoSelect = true, .exitCommand = true, .commandMask = 0xFF, .readMask = 0x7F,
-			.systemInterface{{0x27, 0x36, 0x00, 0x00}, {256, 256, 512, 65536}, {8, 8, 2, 1}},
-			.primaryAlgorithm{{1, 3}, 0, 8, 2, 1, 0, 8, 0, 0, 2, {0xB5, 0xC5}, 0x02, 1},
+			.systemInterface{.supply = {.minVcc = 0x27, .maxVcc = 0x36, .minVpp = 0x00, .maxVpp = 0x00},
+			                 .typTimeout     = {.singleProgram = 256, .multiProgram = 256, .sectorErase = 512, .chipErase = 65536},
+			                 .maxTimeoutMult = {.singleProgram =   8, .multiProgram =   8, .sectorErase =   2, .chipErase =     1}},
+			.primaryAlgorithm{.version = {.major = 1, .minor = 3},
+			                  .addressSensitiveUnlock = 0,
+			                  .siliconRevision = 8,
+			                  .eraseSuspend = 2,
+			                  .sectorProtect = 1,
+			                  .sectorTemporaryUnprotect = 0,
+			                  .sectorProtectScheme = 8,
+			                  .simultaneousOperation = 0,
+			                  .burstMode = 0,
+			                  .pageMode = 2,
+			                  .supply = {.minAcc = 0xB5, .maxAcc = 0xC5},
+			                  .bootBlockFlag = 0x02,
+			                  .programSuspend = 1},
 		},
 		.misc {.statusCommand = true, .continuityCommand = true},
 	}};

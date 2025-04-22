@@ -12,8 +12,8 @@
 namespace openmsx {
 
 // Documented in MSX-Datapack Vol. 3, section 4 (MSX-MIDI), from page 634
-static constexpr byte LIMITED_RANGE_VALUE = 0x01; // b0 = "E8" => determines port range
-static constexpr byte DISABLED_VALUE      = 0x80; // b7 = EN
+static constexpr uint8_t LIMITED_RANGE_VALUE = 0x01; // b0 = "E8" => determines port range
+static constexpr uint8_t DISABLED_VALUE      = 0x80; // b7 = EN
 
 MSXMidi::MSXMidi(const DeviceConfig& config)
 	: MSXDevice(config)
@@ -74,7 +74,7 @@ void MSXMidi::reset(EmuTime::param time)
 	i8251.reset(time);
 }
 
-byte MSXMidi::readIO(word port, EmuTime::param time)
+uint8_t MSXMidi::readIO(uint16_t port, EmuTime::param time)
 {
 	// If not enabled then no ports should have been registered.
 	assert(isEnabled);
@@ -98,7 +98,7 @@ byte MSXMidi::readIO(word port, EmuTime::param time)
 	}
 }
 
-byte MSXMidi::peekIO(word port, EmuTime::param time) const
+uint8_t MSXMidi::peekIO(uint16_t port, EmuTime::param time) const
 {
 	// If not enabled then no ports should have been registered.
 	assert(isEnabled);
@@ -122,7 +122,7 @@ byte MSXMidi::peekIO(word port, EmuTime::param time) const
 	}
 }
 
-void MSXMidi::writeIO(word port, byte value, EmuTime::param time)
+void MSXMidi::writeIO(uint16_t port, uint8_t value, EmuTime::param time)
 {
 	if (isExternalMSXMIDI && ((port & 0xFF) == 0xE2)) {
 		// control register
@@ -151,12 +151,13 @@ void MSXMidi::writeIO(word port, byte value, EmuTime::param time)
 	}
 }
 
-void MSXMidi::registerIOports(byte value)
+void MSXMidi::registerIOports(uint8_t value)
 {
 	assert(isExternalMSXMIDI);
 	bool newIsEnabled = (value & DISABLED_VALUE) == 0;
 	bool newIsLimited = (value & LIMITED_RANGE_VALUE) != 0;
 
+	auto& cpuInterface = getCPUInterface();
 	if (newIsEnabled != isEnabled) {
 		// Enable/disabled status changes, possibly limited status
 		// changes as well but that doesn't matter, we anyway need
@@ -164,16 +165,16 @@ void MSXMidi::registerIOports(byte value)
 		if (newIsEnabled) {
 			// disabled -> enabled
 			if (newIsLimited) {
-				registerRange(0xE0, 2);
+				cpuInterface.register_IO_InOut_range(0xE0, 2, this);
 			} else {
-				registerRange(0xE8, 8);
+				cpuInterface.register_IO_InOut_range(0xE8, 8, this);
 			}
 		} else {
 			// enabled -> disabled
 			if (isLimitedTo8251) { // note: old isLimited status
-				unregisterRange(0xE0, 2);
+				cpuInterface.unregister_IO_InOut_range(0xE0, 2, this);
 			} else {
-				unregisterRange(0xE8, 8);
+				cpuInterface.unregister_IO_InOut_range(0xE8, 8, this);
 			}
 		}
 
@@ -182,32 +183,17 @@ void MSXMidi::registerIOports(byte value)
 		// Need to switch between the low/high range.
 		if (newIsLimited) {
 			// Switch high->low range.
-			unregisterRange(0xE8, 8);
-			registerRange  (0xE0, 2);
+			cpuInterface.unregister_IO_InOut_range(0xE8, 8, this);
+			cpuInterface.register_IO_InOut_range  (0xE0, 2, this);
 		} else {
 			// Switch low->high range.
-			unregisterRange(0xE0, 2);
-			registerRange  (0xE8, 8);
+			cpuInterface.unregister_IO_InOut_range(0xE0, 2, this);
+			cpuInterface.register_IO_InOut_range  (0xE8, 8, this);
 		}
 	}
 
 	isEnabled       = newIsEnabled;
 	isLimitedTo8251 = newIsLimited;
-}
-
-void MSXMidi::registerRange(byte port, unsigned num)
-{
-	for (auto i : xrange(num)) {
-		getCPUInterface().register_IO_In (narrow<byte>(port + i), this);
-		getCPUInterface().register_IO_Out(narrow<byte>(port + i), this);
-	}
-}
-void MSXMidi::unregisterRange(byte port, unsigned num)
-{
-	for (auto i : xrange(num)) {
-		getCPUInterface().unregister_IO_In (narrow<byte>(port + i), this);
-		getCPUInterface().unregister_IO_Out(narrow<byte>(port + i), this);
-	}
 }
 
 void MSXMidi::setTimerIRQ(bool status, EmuTime::param time)
@@ -308,7 +294,7 @@ void MSXMidi::Interface::setParityBit(bool enable, Parity parity)
 	midi.outConnector.setParityBit(enable, parity);
 }
 
-void MSXMidi::Interface::recvByte(byte value, EmuTime::param time)
+void MSXMidi::Interface::recvByte(uint8_t value, EmuTime::param time)
 {
 	auto& midi = OUTER(MSXMidi, interface);
 	midi.outConnector.recvByte(value, time);
@@ -389,7 +375,7 @@ void MSXMidi::setParityBit(bool enable, Parity parity)
 	i8251.setParityBit(enable, parity);
 }
 
-void MSXMidi::recvByte(byte value, EmuTime::param time)
+void MSXMidi::recvByte(uint8_t value, EmuTime::param time)
 {
 	i8251.recvByte(value, time);
 }

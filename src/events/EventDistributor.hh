@@ -3,12 +3,12 @@
 
 #include "Event.hh"
 
-#include "stl.hh"
-
 #include <array>
 #include <condition_variable>
+#include <cstdint>
 #include <mutex>
 #include <vector>
+#include <utility>
 
 namespace openmsx {
 
@@ -21,7 +21,7 @@ public:
 	/** Priorities from high to low, higher priority listeners can block
 	  * events for lower priority listeners.
 	  */
-	enum class Priority {
+	enum class Priority : uint8_t {
 		OTHER,
 		HOTKEY_HIGH, // above IMGUI
 		IMGUI,
@@ -29,7 +29,7 @@ public:
 		MSX,
 		LOWEST, // should only be used internally in EventDistributor
 	};
-	friend auto operator<=>(Priority x, Priority y) { return to_underlying(x) <=> to_underlying(y); }
+	friend auto operator<=>(Priority x, Priority y) { return std::to_underlying(x) <=> std::to_underlying(y); }
 
 	explicit EventDistributor(Reactor& reactor);
 

@@ -92,7 +92,7 @@
         <li><a class="internal" href="#console">console</a></li>
         <li><a class="internal" href="#contrast">contrast</a></li>
         <li><a class="internal" href="#cputrace">cputrace</a></li>
-        <li><a class="internal" href="#debugoutput">debugoutput</a></li>
+        <li><a class="internal" href="#debugoutput">Debug Device output</a></li>
         <li><a class="internal" href="#default_machine">default_machine</a></li>
         <li><a class="internal" href="#deflicker">deflicker</a></li>
         <li><a class="internal" href="#deinterlace">deinterlace</a></li>
@@ -243,6 +243,12 @@
       <td><code>after machine_switch &lt;command&gt;</code></td>
 
       <td>Execute a command after switch to new a machine</td>
+    </tr>
+
+    <tr>
+      <td><code>after quit &lt;command&gt;</code></td>
+
+      <td>Execute a command after receiving a quit event, while openMSX shuts down.</td>
     </tr>
 
     <tr>
@@ -2453,26 +2459,12 @@
       <td>Show (or hide) a widget which shows which keys are pressed</td>
     </tr>
     <tr>
-      <td><code>toggle_fps</code></td>
-      <td>Show (or hide) a frames-per-second (fps) indicator</td>
-    </tr>
-    <tr>
       <td><code>toggle_frame_counter</code></td>
       <td>Show (or hide) a widget which shows the current frame number since start-up</td>
     </tr>
     <tr>
       <td><code>toggle_freq</code></td>
       <td>Switch between PAL/NTSC</td>
-    </tr>
-    <tr>
-      <td><code>toggle_info_panel</code></td>
-      <td>Show (or hide) a panel with various types of info on the currently
-          running MSX (emulation); similar to the info in the panel you get
-          when using the DIGIblue theme in blueMSX. In the future, this will be
-          fully replaced by the Status bar, which can be toggled via <span
-          class="menu-reference">Main menu bar &rarr; Settings &rarr; Misc
-          &rarr; Show status bar</span>.
-      </td>
     </tr>
     <tr>
       <td><code>toggle_mog_overlay</code></td>
@@ -2517,15 +2509,6 @@
     <tr>
       <td><code>toggle_vdp_busy</code></td>
       <td>Enable (or disable) display on the OSD how busy the VDP is</td>
-    </tr>
-    <tr>
-      <td><code>toggle_vu_meters</code></td>
-      <td>Show (or hide) a graphical view of the volumes of the sound channels
-      of several sound chips. These are volumes based on the current register
-      values of the chips and only for those for which this is implemented. For
-      "physical" VU-meters for all possible audio channels, check out <span
-      class="menu-reference">Main menu bar &rarr; Tools &rarr; Audio channel
-      viewer...</span>.</td>
     </tr>
     <tr>
       <td><code>type_via_keybuf</code></td>
@@ -2968,7 +2951,7 @@
     </tr>
   </table>
 
-  <h3><a id="debugoutput">debugoutput</a></h3>
+  <h3><a id="debugoutput">Debug Device output</a></h3>
 
   <p>Selects the file to where the output from the debug device goes.</p>
 
@@ -2980,25 +2963,25 @@
 
   <table>
     <tr>
-      <td><code>set debugoutput</code></td>
+      <td><code>set {Debug Device output}</code></td>
 
       <td>Shows the current output file name</td>
     </tr>
 
     <tr>
-      <td><code>set debugoutput stdout</code></td>
+      <td><code>set {Debug Device output} stdout</code></td>
 
       <td>Writes debug output to openMSX's standard output stream</td>
     </tr>
 
     <tr>
-      <td><code>set debugoutput stderr</code></td>
+      <td><code>set {Debug Device output} stderr</code></td>
 
       <td>Writes debug output to openMSX's standard error stream</td>
     </tr>
 
     <tr>
-      <td><code>set debugoutput &lt;output file&gt;</code></td>
+      <td><code>set {Debug Device output} &lt;output file&gt;</code></td>
 
       <td>Writes debug output to the specified file</td>
     </tr>

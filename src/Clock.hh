@@ -84,6 +84,7 @@ public:
 	/** Calculate the time at which this clock will have ticked the given
 	  * number of times (counted from its last tick).
 	  */
+	// TODO should be friend, workaround for pre-gcc-13 bug
 	[[nodiscard]] constexpr EmuTime operator+(uint64_t n) const {
 		return EmuTime(lastTick.time + n * MASTER_TICKS);
 	}

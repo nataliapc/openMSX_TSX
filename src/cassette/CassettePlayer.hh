@@ -1,18 +1,20 @@
 #ifndef CASSETTEPLAYER_HH
 #define CASSETTEPLAYER_HH
 
-#include "EventListener.hh"
 #include "CassetteDevice.hh"
+
 #include "ResampledSoundDevice.hh"
 #include "MSXMotherBoard.hh"
-#include "RecordedCommand.hh"
+#include "CassettePlayerCommand.hh"
 #include "Schedulable.hh"
 #include "ThrottleManager.hh"
 #include "Filename.hh"
 #include "EmuTime.hh"
 #include "BooleanSetting.hh"
+
 #include "outer.hh"
 #include "serialize_meta.hh"
+
 #include <array>
 #include <cstdint>
 #include <memory>
@@ -26,14 +28,13 @@ class Wav8Writer;
 
 class CassettePlayer final : public CassetteDevice, public ResampledSoundDevice
                            , public MediaInfoProvider
-                           , private EventListener
 {
 public:
 	static constexpr std::string_view TAPE_RECORDING_DIR = "taperecordings";
 	static constexpr std::string_view TAPE_RECORDING_EXTENSION = ".wav";
 
 public:
-	explicit CassettePlayer(const HardwareConfig& hwConf);
+	explicit CassettePlayer(HardwareConfig& hwConf);
 	~CassettePlayer() override;
 
 	// CassetteDevice
@@ -57,15 +58,30 @@ public:
 	template<typename Archive>
 	void serialize(Archive& ar, unsigned version);
 
-	enum State { PLAY, RECORD, STOP }; // public for serialization
+	enum class State : uint8_t { PLAY, RECORD, STOP };
+
+	// methods to query the status of the player
+	const Filename& getImageName() const { return casImage; }
+	[[nodiscard]] State getState() const { return state; }
+	[[nodiscard]] bool isMotorControlEnabled() const { return motorControl; }
+
+	/** Returns the position of the tape, in seconds from the
+	  * beginning of the tape. */
+	double getTapePos(EmuTime::param time);
+
+	/** Returns the length of the tape in seconds.
+	  * When no tape is inserted, this returns 0. While recording this
+	  * returns the current position (so while recording, tape length grows
+	  * continuously). */
+	double getTapeLength(EmuTime::param time);
+
+	friend class CassettePlayerCommand;
 
 private:
-	[[nodiscard]] State getState() const { return state; }
 	[[nodiscard]] std::string getStateString() const;
 	void setState(State newState, const Filename& newImage,
 	              EmuTime::param time);
 	void setImageName(const Filename& newImage);
-	const Filename& getImageName() const { return casImage; }
 	void checkInvariants() const;
 
 	/** Insert a tape for use in PLAY mode.
@@ -87,6 +103,7 @@ private:
 	  * anyway.)
 	  */
 	void rewind(EmuTime::param time);
+	void wind(EmuTime::param time);
 
 	/** Enable or disable motor control.
 	 */
@@ -103,15 +120,9 @@ private:
 	  */
 	void updateLoadingState(EmuTime::param time);
 
-	/** Returns the position of the tape, in seconds from the
-	  * beginning of the tape. */
-	double getTapePos(EmuTime::param time);
-
-	/** Returns the length of the tape in seconds.
-	  * When no tape is inserted, this returns 0. While recording this
-	  * returns the current position (so while recording, tape length grows
-	  * continuously). */
-	double getTapeLength(EmuTime::param time);
+	/** Set the position of the tape, in seconds from the
+	  * beginning of the tape. Clipped to [0, tape-length]. */
+	void setTapePos(EmuTime::param time, double newPos);
 
 	void sync(EmuTime::param time);
 	void updateTapePosition(EmuDuration::param duration, EmuTime::param time);
@@ -120,9 +131,6 @@ private:
 	void fillBuf(size_t length, double x);
 	void flushOutput();
 	void autoRun();
-
-	// EventListener
-	bool signalEvent(const Event& event) override;
 
 	// Schedulable
 	struct SyncEndOfTape final : Schedulable {
@@ -166,16 +174,7 @@ private:
 
 	MSXMotherBoard& motherBoard;
 
-	struct TapeCommand final : RecordedCommand {
-		TapeCommand(CommandController& commandController,
-			    StateChangeDistributor& stateChangeDistributor,
-			    Scheduler& scheduler);
-		void execute(std::span<const TclObject> tokens, TclObject& result,
-			     EmuTime::param time) override;
-		[[nodiscard]] std::string help(std::span<const TclObject> tokens) const override;
-		void tabCompletion(std::vector<std::string>& tokens) const override;
-		[[nodiscard]] bool needRecord(std::span<const TclObject> tokens) const override;
-	} tapeCommand;
+	CassettePlayerCommand cassettePlayerCommand;
 
 	LoadingIndicator loadingIndicator;
 	BooleanSetting autoRunSetting;
@@ -183,7 +182,7 @@ private:
 	std::unique_ptr<CassetteImage> playImage;
 
 	size_t sampCnt = 0;
-	State state = STOP;
+	State state = State::STOP;
 	bool lastOutput = false;
 	bool motor = false, motorControl = true;
 	bool syncScheduled = false;

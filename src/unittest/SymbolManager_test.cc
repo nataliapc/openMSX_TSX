@@ -120,11 +120,14 @@ TEST_CASE("SymbolManager: detectType")
 		std::string_view buffer = "content doesn't matter";
 		CHECK(SymbolManager::detectType("symbols.noi", buffer) == SymbolFile::Type::NOICE);
 		CHECK(SymbolManager::detectType("symbols.NOI", buffer) == SymbolFile::Type::NOICE);
-		CHECK(SymbolManager::detectType("symbols.Map", buffer) == SymbolFile::Type::LINKMAP);
 		CHECK(SymbolManager::detectType("symbols.symbol", buffer) == SymbolFile::Type::GENERIC); // pasmo
 		CHECK(SymbolManager::detectType("symbols.publics", buffer) == SymbolFile::Type::GENERIC); // pasmo
 		CHECK(SymbolManager::detectType("symbols.sys", buffer) == SymbolFile::Type::GENERIC); // pasmo
 		CHECK(SymbolManager::detectType("symbols.unknown", buffer) == SymbolFile::Type::GENERIC); // unknown extension
+	}
+	SECTION(".map extension") {
+		CHECK(SymbolManager::detectType("symbols.Map", "HI-TECH Software ZC Compiler V7.80PL2") == SymbolFile::Type::LINKMAP);
+		CHECK(SymbolManager::detectType("symbols.Map", "CHGMOD                          = $005F ; const, local, , sample025, , sample025.asm:2") == SymbolFile::Type::GENERIC);
 	}
 	SECTION(".sym extension") {
 		CHECK(SymbolManager::detectType("myfile.sym", "; Symbol table from myfile.asm") == SymbolFile::Type::ASMSX);
@@ -132,6 +135,7 @@ TEST_CASE("SymbolManager: detectType")
 		CHECK(SymbolManager::detectType("myfile.sym", "bla: equ 123") == SymbolFile::Type::GENERIC);
 		CHECK(SymbolManager::detectType("myfile.sym", "bla equ #123") == SymbolFile::Type::GENERIC);
 		CHECK(SymbolManager::detectType("myfile.sym", "Sections:") == SymbolFile::Type::VASM);
+		CHECK(SymbolManager::detectType("myfile.sym", "; this file was created with wlalink") == SymbolFile::Type::WLALINK_NOGMB);
 		CHECK(SymbolManager::detectType("myfile.sym", "anything else") == SymbolFile::Type::HTC);
 	}
 }
@@ -171,8 +175,8 @@ TEST_CASE("SymbolManager: loadGeneric")
 {
 	std::string_view buffer =
 		"foo: equ 1\n"
-		"bar equ 2\n"
-		"qux: equ 3 ; comment\n"
+		"bar %equ 2\n"
+		"qux = 3 ; comment\n"
 		"; only comment\n"
 		"error equ\n"
 		"error equ 123 extra stuff\n";
@@ -275,6 +279,29 @@ TEST_CASE("SymbolManager: loadASMSX")
 	CHECK(file.symbols[0].value == 0x1234);
 	CHECK(file.symbols[1].name == "l2");
 	CHECK(file.symbols[1].value == 0xabcd);
+}
+
+TEST_CASE("SymbolManager: loadNoGmb")
+{
+	std::string_view buffer =
+		"; this file was created with wlalink\n"
+		"; no$gmb symbolic information for \"test.rom\".\n"
+		"00:4010 main\n"
+		"00:402d main@main_loop\n"
+		"00:404f Game_Initialize\n"
+		"00:404e Game_Update\n";
+	auto file = SymbolManager::loadNoGmb("myfile.sym", buffer);
+	CHECK(file.filename == "myfile.sym");
+	CHECK(file.type == SymbolFile::Type::WLALINK_NOGMB);
+	REQUIRE(file.symbols.size() == 4);
+	CHECK(file.symbols[0].name == "main");
+	CHECK(file.symbols[0].value == 0x4010);
+	CHECK(file.symbols[1].name == "main@main_loop");
+	CHECK(file.symbols[1].value == 0x402d);
+	CHECK(file.symbols[2].name == "Game_Initialize");
+	CHECK(file.symbols[2].value == 0x404f);
+	CHECK(file.symbols[3].name == "Game_Update");
+	CHECK(file.symbols[3].value == 0x404e);
 }
 
 TEST_CASE("SymbolManager: loadLinkMap")

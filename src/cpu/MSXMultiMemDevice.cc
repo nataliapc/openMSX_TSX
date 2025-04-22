@@ -1,11 +1,15 @@
 #include "MSXMultiMemDevice.hh"
+
 #include "DummyDevice.hh"
 #include "MSXCPUInterface.hh"
 #include "TclObject.hh"
-#include "ranges.hh"
+
 #include "stl.hh"
 #include "view.hh"
+
+#include <algorithm>
 #include <cassert>
+#include <ranges>
 
 namespace openmsx {
 
@@ -15,8 +19,8 @@ MSXMultiMemDevice::Range::Range(
 {
 }
 
+MSXMultiMemDevice::MSXMultiMemDevice(HardwareConfig& hwConf)
 
-MSXMultiMemDevice::MSXMultiMemDevice(const HardwareConfig& hwConf)
 	: MSXMultiDevice(hwConf)
 {
 	// add sentinel at the end
@@ -42,7 +46,7 @@ static constexpr bool overlap(unsigned start1, unsigned size1,
 
 bool MSXMultiMemDevice::canAdd(unsigned base, unsigned size)
 {
-	return ranges::none_of(view::drop_back(ranges, 1), [&](auto& rn) {
+	return std::ranges::none_of(view::drop_back(ranges, 1), [&](auto& rn) {
 		return overlap(base, size, rn.base, rn.size);
 	});
 }
@@ -60,7 +64,7 @@ void MSXMultiMemDevice::remove(MSXDevice& device, unsigned base, unsigned size)
 
 std::vector<MSXDevice*> MSXMultiMemDevice::getDevices() const
 {
-	return to_vector(view::transform(view::drop_back(ranges, 1),
+	return to_vector(std::views::transform(view::drop_back(ranges, 1),
 	                                 [](auto& rn) { return rn.device; }));
 }
 
@@ -68,7 +72,7 @@ const std::string& MSXMultiMemDevice::getName() const
 {
 	TclObject list;
 	getNameList(list);
-	const_cast<std::string&>(deviceName) = list.getString();
+	deviceName = list.getString();
 	return deviceName;
 }
 void MSXMultiMemDevice::getNameList(TclObject& result) const
@@ -83,7 +87,7 @@ void MSXMultiMemDevice::getNameList(TclObject& result) const
 
 const MSXMultiMemDevice::Range& MSXMultiMemDevice::searchRange(unsigned address) const
 {
-	auto it = ranges::find_if(ranges, [&](const auto& r) { return isInside(address, r.base, r.size); });
+	auto it = std::ranges::find_if(ranges, [&](const auto& r) { return isInside(address, r.base, r.size); });
 	assert(it != ranges.end());
 	return *it;
 }
@@ -93,22 +97,22 @@ MSXDevice* MSXMultiMemDevice::searchDevice(unsigned address) const
 	return searchRange(address).device;
 }
 
-byte MSXMultiMemDevice::readMem(word address, EmuTime::param time)
+uint8_t MSXMultiMemDevice::readMem(uint16_t address, EmuTime::param time)
 {
 	return searchDevice(address)->readMem(address, time);
 }
 
-byte MSXMultiMemDevice::peekMem(word address, EmuTime::param time) const
+uint8_t MSXMultiMemDevice::peekMem(uint16_t address, EmuTime::param time) const
 {
 	return searchDevice(address)->peekMem(address, time);
 }
 
-void MSXMultiMemDevice::writeMem(word address, byte value, EmuTime::param time)
+void MSXMultiMemDevice::writeMem(uint16_t address, uint8_t value, EmuTime::param time)
 {
 	searchDevice(address)->writeMem(address, value, time);
 }
 
-const byte* MSXMultiMemDevice::getReadCacheLine(word start) const
+const uint8_t* MSXMultiMemDevice::getReadCacheLine(uint16_t start) const
 {
 	assert((start & CacheLine::HIGH) == start); // start is aligned
 	// Because start is aligned we don't need to worry about the begin
@@ -123,7 +127,7 @@ const byte* MSXMultiMemDevice::getReadCacheLine(word start) const
 	return range.device->getReadCacheLine(start);
 }
 
-byte* MSXMultiMemDevice::getWriteCacheLine(word start)
+uint8_t* MSXMultiMemDevice::getWriteCacheLine(uint16_t start)
 {
 	assert((start & CacheLine::HIGH) == start);
 	const auto& range = searchRange(start);

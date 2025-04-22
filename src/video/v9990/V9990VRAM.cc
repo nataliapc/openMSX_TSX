@@ -4,6 +4,8 @@
 
 #include "serialize.hh"
 
+#include <algorithm>
+
 namespace openmsx {
 
 V9990VRAM::V9990VRAM(V9990& vdp_, EmuTime::param /*time*/)
@@ -19,8 +21,8 @@ void V9990VRAM::clear()
 	std::span s = data.getWriteBackdoor();
 	assert((s.size() % 1024) == 0);
 	while (!s.empty()) {
-		ranges::fill(s.subspan(  0, 512), 0x00);
-		ranges::fill(s.subspan(512, 512), 0xff);
+		std::ranges::fill(s.subspan(  0, 512), 0x00);
+		std::ranges::fill(s.subspan(512, 512), 0xff);
 		s = s.subspan(1024);
 	}
 }
@@ -38,14 +40,14 @@ unsigned V9990VRAM::mapAddress(unsigned address) const
 	}
 }
 
-byte V9990VRAM::readVRAMCPU(unsigned address, EmuTime::param time)
+uint8_t V9990VRAM::readVRAMCPU(unsigned address, EmuTime::param time)
 {
 	// note: used for both normal and debug read
 	sync(time);
 	return data[mapAddress(address)];
 }
 
-void V9990VRAM::writeVRAMCPU(unsigned address, byte value, EmuTime::param time)
+void V9990VRAM::writeVRAMCPU(unsigned address, uint8_t value, EmuTime::param time)
 {
 	sync(time);
 	data.write(mapAddress(address), value);

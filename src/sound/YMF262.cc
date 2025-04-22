@@ -49,6 +49,7 @@
 #include "outer.hh"
 #include "xrange.hh"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <iostream>
@@ -571,9 +572,7 @@ void YMF262::Slot::advanceEnvelopeGenerator(unsigned egCnt)
 			// during sustain phase chip adds Release Rate (in percussive mode)
 			if (!(egCnt & eg_m_rr)) {
 				volume += eg_inc[eg_sel_rr + ((egCnt >> eg_sh_rr) & 7)];
-				if (volume >= MAX_ATT_INDEX) {
-					volume = MAX_ATT_INDEX;
-				}
+				volume = std::min(volume, MAX_ATT_INDEX);
 			} else {
 				// do nothing in sustain phase
 			}
@@ -1486,8 +1485,8 @@ uint8_t YMF262::peekStatus() const
 bool YMF262::checkMuteHelper() const
 {
 	// TODO this doesn't always mute when possible
-	for (auto& ch : channel) {
-		for (auto& sl : ch.slot) {
+	for (const auto& ch : channel) {
+		for (const auto& sl : ch.slot) {
 			if (!((sl.state == EnvelopeState::OFF) ||
 			      ((sl.state == EnvelopeState::RELEASE) &&
 			       ((narrow<int>(sl.TLL) + sl.volume) >= ENV_QUIET)))) {
@@ -1526,7 +1525,7 @@ void YMF262::generateChannels(std::span<float*> bufs, unsigned num)
 	// TODO output rhythm on separate channels?
 	if (checkMuteHelper()) {
 		// TODO update internal state, even if muted
-		ranges::fill(bufs, nullptr);
+		std::ranges::fill(bufs, nullptr);
 		return;
 	}
 
@@ -1545,7 +1544,7 @@ void YMF262::generateChannels(std::span<float*> bufs, unsigned num)
 		unsigned lfo_am = lfo_am_depth ? tmp : tmp / 4;
 
 		// clear channel outputs
-		ranges::fill(chanOut, 0);
+		std::ranges::fill(chanOut, 0);
 
 		// channels 0,3 1,4 2,5  9,12 10,13 11,14
 		// in either 2op or 4op mode

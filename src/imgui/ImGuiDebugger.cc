@@ -1,9 +1,11 @@
 #include "ImGuiDebugger.hh"
 
+#include "DebuggableEditor.hh"
 #include "ImGuiBitmapViewer.hh"
 #include "ImGuiBreakPoints.hh"
 #include "ImGuiCharacter.hh"
 #include "ImGuiCpp.hh"
+#include "ImGuiDisassembly.hh"
 #include "ImGuiManager.hh"
 #include "ImGuiPalette.hh"
 #include "ImGuiSpriteViewer.hh"
@@ -12,40 +14,58 @@
 #include "ImGuiVdpRegs.hh"
 #include "ImGuiWatchExpr.hh"
 
-#include "CPURegs.hh"
-#include "Dasm.hh"
 #include "Debuggable.hh"
 #include "Debugger.hh"
 #include "MSXCPU.hh"
 #include "MSXCPUInterface.hh"
 #include "MSXMemoryMapperBase.hh"
 #include "MSXMotherBoard.hh"
-#include "RomPlain.hh"
+#include "MSXRom.hh"
+#include "RomBlockDebuggable.hh"
 #include "RomInfo.hh"
-#include "SymbolManager.hh"
 
 #include "narrow.hh"
-#include "join.hh"
-#include "ranges.hh"
 #include "stl.hh"
 #include "strCat.hh"
 #include "StringOp.hh"
-#include "view.hh"
 
 #include <imgui.h>
 #include <imgui_stdlib.h>
 
-#include <cstdint>
-#include <vector>
+#include <algorithm>
 
 using namespace std::literals;
 
 namespace openmsx {
 
+static constexpr std::string_view BREAKPOINT_DIR = "breakpoints";
+
 ImGuiDebugger::ImGuiDebugger(ImGuiManager& manager_)
 	: ImGuiPart(manager_)
-	, symbolManager(manager.getReactor().getSymbolManager())
+	, saveBreakpoints("breakpoint", ".breakpoints", BREAKPOINT_DIR)
+	, loadBreakpoints("breakpoint", ".breakpoints", BREAKPOINT_DIR)
 {
+	saveBreakpoints.drawAction = [&]{
+		saveBreakpoints.drawTable();
+		ImGui::TextUnformatted("Enter name:"sv);
+		ImGui::InputText("##save-layout-name", &breakpointFile);
+		ImGui::SameLine();
+		im::Disabled(breakpointFile.empty(), [&]{
+			if (ImGui::Button("Save as")) {
+				loadSaveBreakpoints(SAVE);
+				ImGui::CloseCurrentPopup();
+			}
+		});
+	};
+	saveBreakpoints.selectAction = [&](const FileListWidget::Entry& entry) {
+		breakpointFile = entry.displayName;
+	};
+
+	loadBreakpoints.selectAction = [&](const FileListWidget::Entry& entry) {
+		breakpointFile = entry.displayName;
+		loadSaveBreakpoints(LOAD);
+		ImGui::CloseCurrentPopup();
+	};
 }
 
 ImGuiDebugger::~ImGuiDebugger() = default;
@@ -88,12 +108,54 @@ void ImGuiDebugger::loadIcons()
 
 void ImGuiDebugger::signalBreak()
 {
-	syncDisassemblyWithPC = true;
+	for (auto& d : disassemblyViewers) {
+		d->signalBreak();
+	}
+}
+
+void ImGuiDebugger::signalContinue()
+{
+	auto* motherBoard = manager.getReactor().getMotherBoard();
+	if (!motherBoard) return;
+
+	auto& cpuInterface = motherBoard->getCPUInterface();
+	auto& debugger = motherBoard->getDebugger();
+	slotSnapshot = getSlotInfo(cpuInterface, debugger);
+
+	cpuRegsSnapshot = motherBoard->getCPU().getRegisters();
+
+	for (auto& h : hexEditors) {
+		h->makeSnapshot(*motherBoard);
+	}
+
+	showChangesFrameCounter = 10;
+}
+
+void ImGuiDebugger::signalQuit()
+{
+	if (reloadBreakpoints) loadSaveBreakpoints(SAVE);
+}
+
+template<typename T>
+static void openOrCreate(ImGuiManager& manager, std::vector<std::unique_ptr<T>>& viewers)
+{
+	// prefer to reuse a previously closed viewer
+	if (auto it = std::ranges::find(viewers, false, &T::show); it != viewers.end()) {
+		(*it)->show = true;
+		return;
+	}
+	// or create a new one
+	viewers.push_back(std::make_unique<T>(manager, viewers.size()));
 }
 
 void ImGuiDebugger::save(ImGuiTextBuffer& buf)
 {
 	savePersistent(buf, *this, persistentElements);
+
+	buf.appendf("disassemblyViewers=%d\n", narrow<int>(disassemblyViewers.size()));
+	buf.appendf("bitmapViewers=%d\n", narrow<int>(bitmapViewers.size()));
+	buf.appendf("tileViewers=%d\n", narrow<int>(tileViewers.size()));
+	buf.appendf("spriteViewers=%d\n", narrow<int>(spriteViewers.size()));
 
 	// TODO in the future use c++23 std::chunk_by
 	auto it = hexEditors.begin();
@@ -107,24 +169,48 @@ void ImGuiDebugger::save(ImGuiTextBuffer& buf)
 		} while (it != et && (*it)->getDebuggableName() == name);
 		buf.appendf("hexEditor.%s=%d\n", name.c_str(), count);
 	}
-
 }
 
 void ImGuiDebugger::loadStart()
 {
+	disassemblyViewers.clear();
+	bitmapViewers.clear();
+	tileViewers.clear();
+	spriteViewers.clear();
 	hexEditors.clear();
+}
+
+void ImGuiDebugger::loadEnd()
+{
+	if (reloadBreakpoints) loadSaveBreakpoints(LOAD);
 }
 
 void ImGuiDebugger::loadLine(std::string_view name, zstring_view value)
 {
-	static constexpr std::string_view prefix = "hexEditor.";
+	static constexpr std::string_view hexEditorPrefix = "hexEditor.";
 
 	if (loadOnePersistent(name, value, *this, persistentElements)) {
 		// already handled
-	} else if (name.starts_with(prefix)) {
+	} else if (name == "disassemblyViewers") {
 		if (auto r = StringOp::stringTo<unsigned>(value)) {
-			auto debuggableName = std::string(name.substr(prefix.size()));
-			auto [b, e] = ranges::equal_range(hexEditors, debuggableName, {}, &DebuggableEditor::getDebuggableName);
+			repeat(*r, [&] { openOrCreate(manager, disassemblyViewers); });
+		}
+	} else if (name == "bitmapViewers") {
+		if (auto r = StringOp::stringTo<unsigned>(value)) {
+			repeat(*r, [&] { openOrCreate(manager, bitmapViewers); });
+		}
+	} else if (name == "tileViewers") {
+		if (auto r = StringOp::stringTo<unsigned>(value)) {
+			repeat(*r, [&] { openOrCreate(manager, tileViewers); });
+		}
+	} else if (name == "spriteViewers") {
+		if (auto r = StringOp::stringTo<unsigned>(value)) {
+			repeat(*r, [&] { openOrCreate(manager, spriteViewers); });
+		}
+	} else if (name.starts_with(hexEditorPrefix)) {
+		if (auto r = StringOp::stringTo<unsigned>(value)) {
+			auto debuggableName = std::string(name.substr(hexEditorPrefix.size()));
+			auto [b, e] = std::ranges::equal_range(hexEditors, debuggableName, {}, &DebuggableEditor::getDebuggableName);
 			auto index = std::distance(b, e); // expected to be 0, but be robust against imgui.ini changes
 			for (auto i : xrange(*r)) {
 				e = hexEditors.insert(e, std::make_unique<DebuggableEditor>(manager, debuggableName, index + i));
@@ -134,16 +220,11 @@ void ImGuiDebugger::loadLine(std::string_view name, zstring_view value)
 	}
 }
 
-void ImGuiDebugger::loadEnd()
-{
-	setDisassemblyScrollY = disassemblyScrollY;
-}
-
 void ImGuiDebugger::showMenu(MSXMotherBoard* motherBoard)
 {
 	auto createHexEditor = [&](const std::string& name) {
 		// prefer to reuse a previously closed editor
-		auto [b, e] = ranges::equal_range(hexEditors, name, {}, &DebuggableEditor::getDebuggableName);
+		auto [b, e] = std::ranges::equal_range(hexEditors, name, {}, &DebuggableEditor::getDebuggableName);
 		for (auto it = b; it != e; ++it) {
 			if (!(*it)->open) {
 				(*it)->open = true;
@@ -158,12 +239,14 @@ void ImGuiDebugger::showMenu(MSXMotherBoard* motherBoard)
 
 	im::Menu("Debugger", motherBoard != nullptr, [&]{
 		ImGui::MenuItem("Tool bar", nullptr, &showControl);
-		ImGui::MenuItem("Disassembly", nullptr, &showDisassembly);
+		if (ImGui::MenuItem("Disassembly ...")) {
+			openOrCreate(manager, disassemblyViewers);
+		}
 		ImGui::MenuItem("CPU registers", nullptr, &showRegisters);
 		ImGui::MenuItem("CPU flags", nullptr, &showFlags);
 		ImGui::MenuItem("Slots", nullptr, &showSlots);
 		ImGui::MenuItem("Stack", nullptr, &showStack);
-		auto it = ranges::lower_bound(hexEditors, "memory", {}, &DebuggableEditor::getDebuggableName);
+		auto it = std::ranges::lower_bound(hexEditors, "memory", {}, &DebuggableEditor::getDebuggableName);
 		bool memoryOpen = (it != hexEditors.end()) && (*it)->open;
 		if (ImGui::MenuItem("Memory", nullptr, &memoryOpen)) {
 			if (memoryOpen) {
@@ -174,20 +257,32 @@ void ImGuiDebugger::showMenu(MSXMotherBoard* motherBoard)
 			}
 		}
 		ImGui::Separator();
-		ImGui::MenuItem("Breakpoints", nullptr, &manager.breakPoints->show);
+		im::Menu("Breakpoints", [&]{
+			ImGui::MenuItem("Editor", nullptr, &manager.breakPoints->show);
+			saveBreakpoints.menu("Save to file");
+			loadBreakpoints.menu("Load from file");
+			ImGui::Separator();
+			ImGui::MenuItem("Reload on startup", nullptr, &reloadBreakpoints);
+		});
 		ImGui::MenuItem("Symbol manager", nullptr, &manager.symbols->show);
 		ImGui::MenuItem("Watch expression", nullptr, &manager.watchExpr->show);
 		ImGui::Separator();
-		ImGui::MenuItem("VDP bitmap viewer", nullptr, &manager.bitmap->showBitmapViewer);
-		ImGui::MenuItem("VDP tile viewer", nullptr, &manager.character->show);
-		ImGui::MenuItem("VDP sprite viewer", nullptr, &manager.sprite->show);
+		if (ImGui::MenuItem("VDP bitmap viewer ...")) {
+			openOrCreate(manager, bitmapViewers);
+		}
+		if (ImGui::MenuItem("VDP tile viewer ...")) {
+			openOrCreate(manager, tileViewers);
+		}
+		if (ImGui::MenuItem("VDP sprite viewer ...")) {
+			openOrCreate(manager, spriteViewers);
+		}
 		ImGui::MenuItem("VDP register viewer", nullptr, &manager.vdpRegs->show);
 		ImGui::MenuItem("Palette editor", nullptr, &manager.palette->window.open);
 		ImGui::Separator();
 		im::Menu("Add hex editor", [&]{
 			const auto& debugger = motherBoard->getDebugger();
 			auto debuggables = to_vector<std::pair<std::string, Debuggable*>>(debugger.getDebuggables());
-			ranges::sort(debuggables, StringOp::caseless{}, [](const auto& p) { return p.first; }); // sort on name
+			std::ranges::sort(debuggables, StringOp::caseless{}, [](const auto& p) { return p.first; }); // sort on name
 			for (const auto& [name, debuggable] : debuggables) {
 				if (ImGui::Selectable(strCat(name, " ...").c_str())) {
 					createHexEditor(name);
@@ -197,11 +292,24 @@ void ImGuiDebugger::showMenu(MSXMotherBoard* motherBoard)
 	});
 }
 
+void ImGuiDebugger::loadSaveBreakpoints(LoadSave loadSave)
+{
+	if (breakpointFile.empty()) return;
+	try {
+		manager.execute(makeTclList(loadSave == LOAD ? "load_breakpoints" : "save_breakpoints",
+		                            breakpointFile));
+	} catch (MSXException& e) {
+		manager.getCliComm().printWarning(e.getMessage());
+	}
+}
+
+
 void ImGuiDebugger::setGotoTarget(uint16_t target)
 {
-	gotoTarget = target;
-	showDisassembly = true;
-	setDisassemblyScrollY.reset(); // don't restore initial scroll position
+	if (disassemblyViewers.empty()) {
+		openOrCreate(manager, disassemblyViewers);
+	}
+	disassemblyViewers.front()->setGotoTarget(target);
 }
 
 void ImGuiDebugger::paint(MSXMotherBoard* motherBoard)
@@ -213,11 +321,12 @@ void ImGuiDebugger::paint(MSXMotherBoard* motherBoard)
 	auto& debugger = motherBoard->getDebugger();
 	auto time = motherBoard->getCurrentTime();
 	drawControl(cpuInterface, *motherBoard);
-	drawDisassembly(regs, cpuInterface, debugger, *motherBoard, time);
 	drawSlots(cpuInterface, debugger);
 	drawStack(regs, cpuInterface, time);
 	drawRegisters(regs);
 	drawFlags(regs);
+
+	showChangesFrameCounter = std::max(0, showChangesFrameCounter - 1);
 }
 
 void ImGuiDebugger::actionBreakContinue(MSXCPUInterface& cpuInterface)
@@ -242,11 +351,14 @@ void ImGuiDebugger::actionStepOut()
 }
 void ImGuiDebugger::actionStepBack()
 {
-	manager.executeDelayed(TclObject("step_back"),
-	                       [&](const TclObject&) { syncDisassemblyWithPC = true; });
+	signalContinue(); // make a snapshot
+	manager.executeDelayed(TclObject("step_back"), [&](const TclObject&) {
+		for (auto& d : disassemblyViewers) d->syncWithPC();
+	});
 }
 
-void ImGuiDebugger::checkShortcuts(MSXCPUInterface& cpuInterface, MSXMotherBoard& motherBoard)
+void ImGuiDebugger::checkShortcuts(MSXCPUInterface& cpuInterface, MSXMotherBoard& motherBoard,
+                                   ImGuiDisassembly* disassembly)
 {
 	using enum Shortcuts::ID;
 	const auto& shortcuts = manager.getShortcuts();
@@ -262,7 +374,12 @@ void ImGuiDebugger::checkShortcuts(MSXCPUInterface& cpuInterface, MSXMotherBoard
 	} else if (shortcuts.checkShortcut(DEBUGGER_STEP_BACK)) {
 		actionStepBack();
 	} else if (shortcuts.checkShortcut(DISASM_TOGGLE_BREAKPOINT)) {
-		actionToggleBp(motherBoard);
+		if (!disassembly && !disassemblyViewers.empty()) {
+			// Just pick one, doesn't matter which one. Because disassembly view
+			//  doesn't have focus, they all behave the same (=toggle PC).
+			disassembly = disassemblyViewers.front().get();
+		}
+		if (disassembly) disassembly->actionToggleBp(motherBoard);
 	}
 }
 
@@ -270,13 +387,21 @@ void ImGuiDebugger::drawControl(MSXCPUInterface& cpuInterface, MSXMotherBoard& m
 {
 	if (!showControl) return;
 	im::Window("Debugger tool bar", &showControl, [&]{
-		checkShortcuts(cpuInterface, motherBoard);
+		checkShortcuts(cpuInterface, motherBoard, nullptr);
 
-		auto ButtonGlyph = [&](const char* id, ImWchar c, Shortcuts::ID sid) {
-			const auto* font = ImGui::GetFont();
-			auto texId = font->ContainerAtlas->TexID;
+		gl::vec2 maxIconSize;
+		auto* font = ImGui::GetFont();
+		for (auto c : {
+			DEBUGGER_ICON_RUN, DEBUGGER_ICON_BREAK,
+			DEBUGGER_ICON_STEP_IN, DEBUGGER_ICON_STEP_OVER,
+			DEBUGGER_ICON_STEP_OUT, DEBUGGER_ICON_STEP_BACK,
+		}) {
 			const auto* g = font->FindGlyph(c);
-			bool result = ImGui::ImageButton(id, texId, {g->X1 - g->X0, g->Y1 - g->Y0}, {g->U0, g->V0}, {g->U1, g->V1});
+			maxIconSize = max(maxIconSize, gl::vec2{g->X1 - g->X0, g->Y1 - g->Y0});
+		}
+
+		auto ButtonGlyph = [&](const char* id, ImWchar glyph, Shortcuts::ID sid) {
+			bool result = ButtonWithCenteredGlyph(glyph, maxIconSize);
 			simpleToolTip([&]() -> std::string {
 				const auto& shortcuts = manager.getShortcuts();
 				const auto& shortcut = shortcuts.getShortcut(sid);
@@ -292,8 +417,8 @@ void ImGuiDebugger::drawControl(MSXCPUInterface& cpuInterface, MSXMotherBoard& m
 		    ButtonGlyph("run", breakContinueIcon, DEBUGGER_BREAK_CONTINUE)) {
 			actionBreakContinue(cpuInterface);
 		}
-		ImGui::SameLine();
-		ImGui::SetCursorPosX(50.0f);
+		const auto& style = ImGui::GetStyle();
+		ImGui::SameLine(0.0f, 2.0f * style.ItemSpacing.x);
 
 		im::Disabled(!breaked, [&]{
 			if (ButtonGlyph("step-in", DEBUGGER_ICON_STEP_IN, DEBUGGER_STEP_IN)) {
@@ -318,468 +443,41 @@ void ImGuiDebugger::drawControl(MSXCPUInterface& cpuInterface, MSXMotherBoard& m
 	});
 }
 
-[[nodiscard]] static std::pair<const MSXRom*, Debuggable*> getRomBlocks(Debugger& debugger, const MSXDevice* device)
+ImGuiDebugger::SlotInfo ImGuiDebugger::getSlotInfo(MSXCPUInterface& cpuInterface, Debugger& debugger) const
 {
-	Debuggable* debuggable = nullptr;
-	const auto* rom = dynamic_cast<const MSXRom*>(device);
-	if (rom && !dynamic_cast<const RomPlain*>(rom)) {
-		debuggable = debugger.findDebuggable(rom->getName() + " romblocks");
-	}
-	return {rom, debuggable};
-}
+	SlotInfo result;
+	for (auto page : xrange(uint8_t(4))) {
+		auto& r = result[page];
 
-struct CurrentSlot {
-	int ps;
-	std::optional<int> ss;
-	std::optional<int> seg;
-};
-[[nodiscard]] static CurrentSlot getCurrentSlot(
-	MSXCPUInterface& cpuInterface, Debugger& debugger,
-	uint16_t addr, bool wantSs = true, bool wantSeg = true)
-{
-	CurrentSlot result;
-	int page = addr / 0x4000;
-	result.ps = cpuInterface.getPrimarySlot(page);
+		r.ps = cpuInterface.getPrimarySlot(page);
+		if (cpuInterface.isExpanded(r.ps)) {
+			r.ss = cpuInterface.getSecondarySlot(page);
+		}
 
-	if (wantSs && cpuInterface.isExpanded(result.ps)) {
-		result.ss = cpuInterface.getSecondarySlot(page);
-	}
-	if (wantSeg) {
 		const auto* device = cpuInterface.getVisibleMSXDevice(page);
 		if (const auto* mapper = dynamic_cast<const MSXMemoryMapperBase*>(device)) {
-			result.seg = mapper->getSelectedSegment(narrow<uint8_t>(page));
-		} else if (auto [_, romBlocks] = getRomBlocks(debugger, device); romBlocks) {
-			result.seg = romBlocks->read(addr);
-		}
-	}
-	return result;
-}
-
-[[nodiscard]] static TclObject toTclExpression(const CurrentSlot& slot)
-{
-	std::string result = strCat("[pc_in_slot ", slot.ps);
-	if (slot.ss) {
-		strAppend(result, ' ', *slot.ss);
-	} else {
-		if (slot.seg) strAppend(result, " X");
-	}
-	if (slot.seg) strAppend(result, ' ', *slot.seg);
-	strAppend(result, ']');
-	return TclObject(result);
-}
-
-[[nodiscard]] static bool addrInSlot(
-	const ParsedSlotCond& slot, MSXCPUInterface& cpuInterface, Debugger& debugger, uint16_t addr)
-{
-	if (!slot.hasPs) return true; // no ps specified -> always ok
-
-	auto current = getCurrentSlot(cpuInterface, debugger, addr, slot.hasSs, slot.hasSeg);
-	if (slot.ps != current.ps) return false;
-	if (slot.hasSs && current.ss && (slot.ss != current.ss)) return false;
-	if (slot.hasSeg && current.seg && (slot.seg != current.seg)) return false;
-	return true;
-}
-
-struct BpLine {
-	int count = 0;
-	int idx = -1; // only valid when count=1
-	bool anyEnabled = false;
-	bool anyDisabled = false;
-	bool anyInSlot = false;
-	bool anyComplex = false;
-};
-static BpLine examineBpLine(uint16_t addr, std::span<const ImGuiBreakPoints::GuiItem> bps, MSXCPUInterface& cpuInterface, Debugger& debugger)
-{
-	BpLine result;
-	for (auto [i, bp] : enumerate(bps)) {
-		if (!bp.addr || *bp.addr != addr) continue;
-		++result.count;
-		result.idx = int(i);
-
-		bool enabled = (bp.id > 0) && bp.wantEnable;
-		result.anyEnabled |= enabled;
-		result.anyDisabled |= !enabled;
-
-		ParsedSlotCond bpSlot("pc_in_slot", bp.cond.getString());
-		result.anyInSlot |= addrInSlot(bpSlot, cpuInterface, debugger, addr);
-
-		result.anyComplex |= !bpSlot.rest.empty() || (bp.cmd.getString() != "debug break");
-	}
-	return result;
-}
-
-static void toggleBp(uint16_t addr, const BpLine& bpLine, std::vector<ImGuiBreakPoints::GuiItem>& guiBps,
-                     MSXCPUInterface& cpuInterface, Debugger& debugger,
-                     std::optional<BreakPoint>& addBp, std::optional<unsigned>& removeBpId)
-{
-	if (bpLine.count != 0) {
-		// only allow to remove single breakpoints,
-		// others can be edited via the breakpoint viewer
-		if (bpLine.count == 1) {
-			auto& bp = guiBps[bpLine.idx];
-			if (bp.id > 0) {
-				removeBpId = bp.id; // schedule removal
-			} else {
-				guiBps.erase(guiBps.begin() + bpLine.idx);
-			}
-		}
-	} else {
-		// schedule creation of new bp
-		auto slot = getCurrentSlot(cpuInterface, debugger, addr);
-		addBp.emplace(addr, TclObject("debug break"), toTclExpression(slot), false);
-	}
-}
-void ImGuiDebugger::actionToggleBp(MSXMotherBoard& motherBoard)
-{
-	auto pc = motherBoard.getCPU().getRegisters().getPC();
-	auto& cpuInterface = motherBoard.getCPUInterface();
-	auto& debugger = motherBoard.getDebugger();
-	auto& guiBps = manager.breakPoints->getBps();
-
-	auto bpLine = examineBpLine(pc, guiBps, cpuInterface, debugger);
-
-	std::optional<BreakPoint> addBp;
-	std::optional<unsigned> removeBpId;
-	toggleBp(pc, bpLine, guiBps, cpuInterface, debugger, addBp, removeBpId);
-	if (addBp) {
-		cpuInterface.insertBreakPoint(std::move(*addBp));
-	}
-	if (removeBpId) {
-		cpuInterface.removeBreakPoint(*removeBpId);
-	}
-}
-
-void ImGuiDebugger::drawDisassembly(CPURegs& regs, MSXCPUInterface& cpuInterface, Debugger& debugger,
-                                    MSXMotherBoard& motherBoard, EmuTime::param time)
-{
-	if (!showDisassembly) return;
-	ImGui::SetNextWindowSize({340, 540}, ImGuiCond_FirstUseEver);
-	im::Window("Disassembly", &showDisassembly, [&]{
-		checkShortcuts(cpuInterface, motherBoard);
-
-		std::optional<BreakPoint> addBp;
-		std::optional<unsigned> removeBpId;
-
-		auto pc = regs.getPC();
-		if (followPC && !MSXCPUInterface::isBreaked()) {
-			gotoTarget = pc;
-		}
-
-		auto widthOpcode = ImGui::CalcTextSize("12 34 56 78"sv).x;
-		int flags = ImGuiTableFlags_RowBg |
-			ImGuiTableFlags_BordersV |
-			ImGuiTableFlags_BordersOuterV |
-			ImGuiTableFlags_Resizable |
-			ImGuiTableFlags_Hideable |
-			ImGuiTableFlags_Reorderable |
-			ImGuiTableFlags_ScrollY |
-			ImGuiTableFlags_ScrollX;
-		im::Table("table", 4, flags, [&]{
-			ImGui::TableSetupScrollFreeze(0, 1); // Make top row always visible
-			ImGui::TableSetupColumn("bp", ImGuiTableColumnFlags_WidthFixed);
-			ImGui::TableSetupColumn("address", ImGuiTableColumnFlags_NoHide);
-			ImGui::TableSetupColumn("opcode", ImGuiTableColumnFlags_WidthFixed, widthOpcode);
-			ImGui::TableSetupColumn("mnemonic", ImGuiTableColumnFlags_WidthStretch | ImGuiTableColumnFlags_NoHide);
-			ImGui::TableHeadersRow();
-
-			auto& guiBps = manager.breakPoints->getBps();
-			auto textSize = ImGui::GetTextLineHeight();
-
-			std::string mnemonic;
-			std::string opcodesStr;
-			std::vector<std::string_view> candidates;
-			std::array<uint8_t, 4> opcodes;
-			ImGuiListClipper clipper; // only draw the actually visible rows
-			clipper.Begin(0x10000);
-			if (gotoTarget) {
-				clipper.IncludeItemsByIndex(*gotoTarget, *gotoTarget + 4);
-			}
-			std::optional<unsigned> nextGotoTarget;
-			while (clipper.Step()) {
-				auto addr16 = instructionBoundary(cpuInterface, narrow<uint16_t>(clipper.DisplayStart), time);
-				for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
-					unsigned addr = addr16;
-					ImGui::TableNextRow();
-					if (addr >= 0x10000) continue;
-					im::ID(narrow<int>(addr), [&]{
-						if (gotoTarget && addr >= *gotoTarget) {
-							gotoTarget = {};
-							ImGui::SetScrollHereY(0.25f);
-						}
-
-						if (bool rowAtPc = !syncDisassemblyWithPC && (addr == pc);
-						    rowAtPc) {
-							ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1, getColor(imColor::YELLOW_BG));
-						}
-						bool bpRightClick = false;
-						if (ImGui::TableNextColumn()) { // bp
-							auto bpLine = examineBpLine(addr16, guiBps, cpuInterface, debugger);
-							bool hasBp = bpLine.count != 0;
-							bool multi = bpLine.count > 1;
-							if (hasBp) {
-								auto calcColor = [](bool enabled, bool inSlot) {
-									auto [r,g,b] = enabled ? std::tuple{0xE0, 0x00, 0x00}
-									                       : std::tuple{0x70, 0x70, 0x70};
-									auto a = inSlot ? 0xFF : 0x60;
-									return IM_COL32(r, g, b, a);
-								};
-								auto colIn = calcColor(bpLine.anyEnabled, bpLine.anyInSlot);
-								auto colOut = ImGui::GetColorU32(ImGuiCol_WindowBg);
-
-								auto* drawList = ImGui::GetWindowDrawList();
-								gl::vec2 scrn = ImGui::GetCursorScreenPos();
-								auto center = scrn + textSize * gl::vec2(multi ? 0.3f : 0.5f, 0.5f);
-								auto radiusIn = 0.4f * textSize;
-								auto radiusOut = 0.5f * textSize;
-
-								if (multi) {
-									auto center2 = center + textSize * gl::vec2(0.4f, 0.0f);
-									drawList->AddCircleFilled(center2, radiusOut, colOut);
-									auto colIn2 = calcColor(!bpLine.anyDisabled, bpLine.anyInSlot);
-									drawList->AddCircleFilled(center2, radiusIn, colIn2);
-								}
-								drawList->AddCircleFilled(center, radiusOut, colOut);
-								drawList->AddCircleFilled(center, radiusIn, colIn);
-								if (bpLine.anyComplex) {
-									auto d = 0.3f * textSize;
-									auto c = IM_COL32(0, 0, 0, 192);
-									auto t = 0.2f * textSize;
-									drawList->AddLine(center - gl::vec2(d, 0.0f), center + gl::vec2(d, 0.0f), c, t);
-									drawList->AddLine(center - gl::vec2(0.0f, d), center + gl::vec2(0.0f, d), c, t);
-								}
-							}
-							if (ImGui::InvisibleButton("##bp-button", {-FLT_MIN, textSize})) {
-								toggleBp(addr16, bpLine, guiBps, cpuInterface, debugger, addBp, removeBpId);
-							} else {
-								bpRightClick = hasBp && ImGui::IsItemClicked(ImGuiMouseButton_Right);
-								if (bpRightClick) ImGui::OpenPopup("bp-context");
-								im::Popup("bp-context", [&]{
-									manager.breakPoints->paintBpTab(cpuInterface, debugger, addr16);
-								});
-							}
-						}
-
-						mnemonic.clear();
-						std::optional<uint16_t> mnemonicAddr;
-						std::span<const Symbol* const> mnemonicLabels;
-						auto len = dasm(cpuInterface, addr16, opcodes, mnemonic, time,
-							[&](std::string& output, uint16_t a) {
-								mnemonicAddr = a;
-								mnemonicLabels = symbolManager.lookupValue(a);
-								if (!mnemonicLabels.empty()) {
-									strAppend(output, mnemonicLabels[cycleLabelsCounter % mnemonicLabels.size()]->name);
-								} else {
-									appendAddrAsHex(output, a);
-								}
-							});
-						assert(len >= 1);
-						if ((addr < pc) && (pc < (addr + len))) {
-							// pc is strictly inside current instruction,
-							// replace the just disassembled instruction with "db #..."
-							mnemonicAddr.reset();
-							mnemonicLabels = {};
-							len = pc - addr;
-							assert((1 <= len) && (len <= 3));
-							mnemonic = strCat("db     ", join(
-								view::transform(xrange(len),
-									[&](unsigned i) { return strCat('#', hex_string<2>(opcodes[i])); }),
-								','));
-						}
-
-						if (ImGui::TableNextColumn()) { // addr
-							bool focusScrollToAddress = false;
-							bool focusRunToAddress = false;
-
-							// do the full-row-selectable stuff in a column that cannot be hidden
-							auto pos = ImGui::GetCursorPos();
-							ImGui::Selectable("##row", false,
-									ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap);
-							using enum Shortcuts::ID;
-							auto& shortcuts = manager.getShortcuts();
-							if (shortcuts.checkShortcut(DISASM_GOTO_ADDR)) {
-								ImGui::OpenPopup("disassembly-context");
-								focusScrollToAddress = true;
-							}
-							if (shortcuts.checkShortcut(DISASM_RUN_TO_ADDR)) {
-								ImGui::OpenPopup("disassembly-context");
-								focusRunToAddress = true;
-							}
-							if (!bpRightClick && ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
-								ImGui::OpenPopup("disassembly-context");
-							}
-
-							auto addrStr = tmpStrCat(hex_string<4>(addr));
-							im::Popup("disassembly-context", [&]{
-								auto addrToolTip = [&](const std::string& str) {
-									simpleToolTip([&]{
-										if (auto a = symbolManager.parseSymbolOrValue(str)) {
-											return strCat("0x", hex_string<4>(*a));
-										}
-										return std::string{};
-									});
-								};
-
-								if (ImGui::MenuItem("Scroll to PC")) {
-									nextGotoTarget = pc;
-								}
-
-								im::Indent([&]{
-									ImGui::Checkbox("Follow PC while running", &followPC);
-								});
-
-								ImGui::AlignTextToFramePadding();
-								ImGui::TextUnformatted("Scroll to address:"sv);
-								ImGui::SameLine();
-								if (focusScrollToAddress) ImGui::SetKeyboardFocusHere();
-								if (ImGui::InputText("##goto", &gotoAddr, ImGuiInputTextFlags_EnterReturnsTrue)) {
-									if (auto a = symbolManager.parseSymbolOrValue(gotoAddr)) {
-										nextGotoTarget = *a;
-									}
-								}
-								addrToolTip(gotoAddr);
-
-								ImGui::Separator();
-
-								auto runTo = strCat("Run to here (address 0x", addrStr, ')');
-								if (ImGui::MenuItem(runTo.c_str())) {
-									manager.executeDelayed(makeTclList("run_to", addr));
-								}
-
-								ImGui::AlignTextToFramePadding();
-								ImGui::TextUnformatted("Run to address:"sv);
-								ImGui::SameLine();
-								if (focusRunToAddress) ImGui::SetKeyboardFocusHere();
-								if (ImGui::InputText("##run", &runToAddr, ImGuiInputTextFlags_EnterReturnsTrue)) {
-									if (auto a = symbolManager.parseSymbolOrValue(runToAddr)) {
-										manager.executeDelayed(makeTclList("run_to", *a));
-									}
-								}
-								addrToolTip(runToAddr);
-
-								ImGui::Separator();
-
-								auto setPc = strCat("Set PC to 0x", addrStr);
-								if (ImGui::MenuItem(setPc.c_str())) {
-									regs.setPC(addr16);
-								}
-							});
-
-							enum Priority {
-								MISSING_BOTH = 0, // from lowest to highest
-								MISSING_ONE,
-								SLOT_AND_SEGMENT
-							};
-							Priority currentPriority = Priority::MISSING_BOTH;
-							candidates.clear();
-							auto add = [&](const Symbol* sym, Priority newPriority) {
-								if (newPriority < currentPriority) return; // we already have a better candidate
-								if (newPriority > currentPriority) candidates.clear(); // drop previous candidates, we found a better one
-								currentPriority = newPriority;
-								candidates.push_back(sym->name); // cycle symbols in the same priority level
-							};
-
-							auto slot = getCurrentSlot(cpuInterface, debugger, addr16);
-							auto psss = (slot.ss.value_or(0) << 2) + slot.ps;
-							auto addrLabels = symbolManager.lookupValue(addr16);
-							for (const Symbol* symbol: addrLabels) {
-								// skip symbols with any mismatch
-								if (symbol->slot && *symbol->slot != psss) continue;
-								if (symbol->segment && *symbol->segment != slot.seg) continue;
-								// the info that's present does match
-								if (symbol->slot && symbol->segment == slot.seg) {
-									add(symbol, Priority::SLOT_AND_SEGMENT);
-								} else if (!symbol->slot && !symbol->segment) {
-									add(symbol, Priority::MISSING_BOTH);
-								} else {
-									add(symbol, Priority::MISSING_ONE);
-								}
-							}
-							ImGui::SetCursorPos(pos);
-							im::Font(manager.fontMono, [&]{
-								ImGui::TextUnformatted(candidates.empty() ? addrStr : candidates[cycleLabelsCounter % candidates.size()]);
-							});
-							if (!addrLabels.empty()) {
-								simpleToolTip([&]{
-									std::string tip(addrStr);
-									if (addrLabels.size() > 1) {
-										strAppend(tip, "\nmultiple possibilities (click to cycle):\n",
-											join(view::transform(addrLabels, &Symbol::name), ' '));
-									}
-									return tip;
-								});
-								ImGui::SetCursorPos(pos);
-								if (ImGui::InvisibleButton("##addrButton", {-FLT_MIN, textSize})) {
-									++cycleLabelsCounter;
-								}
-							}
-						}
-
-						if (ImGui::TableNextColumn()) { // opcode
-							opcodesStr.clear();
-							for (auto i : xrange(len)) {
-								strAppend(opcodesStr, hex_string<2>(opcodes[i]), ' ');
-							}
-							im::Font(manager.fontMono, [&]{
-								ImGui::TextUnformatted(opcodesStr.data(), opcodesStr.data() + 3 * len - 1);
-							});
-						}
-
-						if (ImGui::TableNextColumn()) { // mnemonic
-							auto pos = ImGui::GetCursorPos();
-							im::Font(manager.fontMono, [&]{
-								ImGui::TextUnformatted(mnemonic);
-							});
-							if (mnemonicAddr) {
-								ImGui::SetCursorPos(pos);
-								if (ImGui::InvisibleButton("##mnemonicButton", {-FLT_MIN, textSize})) {
-									if (!mnemonicLabels.empty()) {
-										++cycleLabelsCounter;
-									}
-								}
-								if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-									nextGotoTarget = *mnemonicAddr;
-								}
-								if (!mnemonicLabels.empty()) {
-									simpleToolTip([&]{
-										auto tip = strCat('#', hex_string<4>(*mnemonicAddr));
-										if (mnemonicLabels.size() > 1) {
-											strAppend(tip, "\nmultiple possibilities (click to cycle):\n",
-												join(view::transform(mnemonicLabels, &Symbol::name), ' '));
-										}
-										return tip;
-									});
-								}
-							}
-						}
-						addr16 += len;
-					});
+			r.segment = strCat(mapper->getSelectedSegment(page));
+		} else if (auto [rom, romBlocks] = ImGuiDisassembly::getRomBlocks(debugger, device); romBlocks) {
+			if (unsigned blockSize = RomInfo::getBlockSize(rom->getRomType())) {
+				auto addr = 0x4000 * page;
+				char separator = 'R';
+				for (int offset = 0; offset < 0x4000; offset += blockSize) {
+					r.segment += separator;
+					if (auto seg = romBlocks->readExt(addr + offset); seg != unsigned(-1)) {
+						strAppend(r.segment, seg);
+					} else {
+						r.segment += '-';
+					}
+					separator = '/';
 				}
+			} else {
+				r.segment = "-";
 			}
-			gotoTarget = nextGotoTarget;
-			if (syncDisassemblyWithPC) {
-				syncDisassemblyWithPC = false; // only once
-
-				auto itemHeight = ImGui::GetTextLineHeightWithSpacing();
-				auto winHeight = ImGui::GetWindowHeight();
-				auto lines = std::max(1, int(winHeight / itemHeight) - 1); // approx
-
-				auto topAddr = nInstructionsBefore(cpuInterface, pc, time, narrow<int>(lines / 4) + 1);
-
-				ImGui::SetScrollY(topAddr * itemHeight);
-			} else if (setDisassemblyScrollY) {
-				ImGui::SetScrollY(*setDisassemblyScrollY);
-				setDisassemblyScrollY.reset();
-			}
-			disassemblyScrollY = ImGui::GetScrollY();
-		});
-		// only add/remove bp's after drawing (can't change list of bp's while iterating over it)
-		if (addBp) {
-			cpuInterface.insertBreakPoint(std::move(*addBp));
+		} else {
+			r.segment = "-";
 		}
-		if (removeBpId) {
-			cpuInterface.removeBreakPoint(*removeBpId);
-		}
-	});
+	}
+	return result;
 }
 
 void ImGuiDebugger::drawSlots(MSXCPUInterface& cpuInterface, Debugger& debugger)
@@ -798,42 +496,35 @@ void ImGuiDebugger::drawSlots(MSXCPUInterface& cpuInterface, Debugger& debugger)
 			ImGui::TableSetupColumn("Segment");
 			ImGui::TableHeadersRow();
 
+			auto slots = getSlotInfo(cpuInterface, debugger);
+
+			if (!slotSnapshot && needSnapshot()) {
+				slotSnapshot = slots;
+			}
+			bool drawChanges = slotSnapshot && needDrawChanges();
+			auto color = getChangesColor();
+
 			for (auto page : xrange(uint8_t(4))) {
-				auto addr = 0x4000 * page;
+				const auto& p = slots[page];
 				if (ImGui::TableNextColumn()) { // page
 					ImGui::StrCat(page);
 				}
 				if (ImGui::TableNextColumn()) { // address
-					ImGui::StrCat("0x", hex_string<4>(addr));
+					ImGui::StrCat("0x", hex_string<4>(0x4000 * page));
 				}
 				if (ImGui::TableNextColumn()) { // slot
-					int ps = cpuInterface.getPrimarySlot(page);
-					if (cpuInterface.isExpanded(ps)) {
-						int ss = cpuInterface.getSecondarySlot(page);
-						ImGui::StrCat(ps, '-', ss);
-					} else {
-						ImGui::StrCat(' ', ps);
-					}
+					auto s = p.ss ? strCat(p.ps, '-', *p.ss) : strCat(' ', p.ps);
+					bool changed = drawChanges && ((p.ps != (*slotSnapshot)[page].ps) ||
+					                               (p.ss != (*slotSnapshot)[page].ss));
+					im::StyleColor(changed, ImGuiCol_Text, color, [&]{
+						ImGui::TextUnformatted(s);
+					});
 				}
 				if (ImGui::TableNextColumn()) { // segment
-					const auto* device = cpuInterface.getVisibleMSXDevice(page);
-					if (const auto* mapper = dynamic_cast<const MSXMemoryMapperBase*>(device)) {
-						ImGui::StrCat(mapper->getSelectedSegment(page));
-					} else if (auto [rom, romBlocks] = getRomBlocks(debugger, device); romBlocks) {
-						if (unsigned blockSize = RomInfo::getBlockSize(rom->getRomType())) {
-							std::string text;
-							char separator = 'R';
-							for (int offset = 0; offset < 0x4000; offset += blockSize) {
-								strAppend(text, separator, romBlocks->read(addr + offset));
-								separator = '/';
-							}
-							ImGui::TextUnformatted(text);
-						} else {
-							ImGui::TextUnformatted("-"sv);
-						}
-					} else {
-						ImGui::TextUnformatted("-"sv);
-					}
+					bool changed = drawChanges && (p.segment != (*slotSnapshot)[page].segment);
+					im::StyleColor(changed, ImGuiCol_Text, color, [&]{
+						ImGui::TextUnformatted(p.segment);
+					});
 				}
 			}
 		});
@@ -883,25 +574,41 @@ void ImGuiDebugger::drawStack(const CPURegs& regs, const MSXCPUInterface& cpuInt
 	});
 }
 
+bool ImGuiDebugger::needDrawChanges() const
+{
+	if (showChanges == SHOW_NEVER) return false;
+	if (showChanges == SHOW_ALWAYS) return true;
+	return MSXCPUInterface::isBreaked() || showChangesFrameCounter;
+}
+
 void ImGuiDebugger::drawRegisters(CPURegs& regs)
 {
 	if (!showRegisters) return;
 	im::Window("CPU registers", &showRegisters, [&]{
-		im::ScopedFont sf(manager.fontMono);
+		std::optional<im::ScopedFont> sf(manager.fontMono);
+
+		if (!cpuRegsSnapshot && needSnapshot()) {
+			cpuRegsSnapshot = regs;
+		}
+		bool drawChanges = cpuRegsSnapshot && needDrawChanges();
+		auto color = getChangesColor();
 
 		const auto& style = ImGui::GetStyle();
 		auto padding = 2 * style.FramePadding.x;
 		auto width16 = ImGui::CalcTextSize("FFFF"sv).x + padding;
 		auto edit16 = [&](std::string_view label, std::string_view high, std::string_view low, auto getter, auto setter) {
-			uint16_t value = getter();
+			auto value = getter(regs);
 			im::Group([&]{
 				ImGui::AlignTextToFramePadding();
 				ImGui::TextUnformatted(label);
 				ImGui::SameLine();
 				ImGui::SetNextItemWidth(width16);
-				if (ImGui::InputScalar(tmpStrCat("##", label).c_str(), ImGuiDataType_U16, &value, nullptr, nullptr, "%04X")) {
-					setter(value);
-				}
+				bool changed = drawChanges && (getter(*cpuRegsSnapshot) != value);
+				im::StyleColor(changed, ImGuiCol_Text, color, [&]{
+					if (ImGui::InputScalar(tmpStrCat("##", label).c_str(), ImGuiDataType_U16, &value, nullptr, nullptr, "%04X")) {
+						setter(value);
+					}
+				});
 			});
 			simpleToolTip([&]{
 				return strCat(
@@ -912,15 +619,18 @@ void ImGuiDebugger::drawRegisters(CPURegs& regs)
 			});
 		};
 		auto edit8 = [&](std::string_view label, auto getter, auto setter) {
-			uint8_t value = getter();
+			auto value = getter(regs);
 			im::Group([&]{
 				ImGui::AlignTextToFramePadding();
 				ImGui::TextUnformatted(label);
 				ImGui::SameLine();
 				ImGui::SetNextItemWidth(width16);
-				if (ImGui::InputScalar(tmpStrCat("##", label).c_str(), ImGuiDataType_U8, &value, nullptr, nullptr, "%02X")) {
-					setter(value);
-				}
+				bool changed = drawChanges && (getter(*cpuRegsSnapshot) != value);
+				im::StyleColor(changed, ImGuiCol_Text, color, [&]{
+					if (ImGui::InputScalar(tmpStrCat("##", label).c_str(), ImGuiDataType_U8, &value, nullptr, nullptr, "%02X")) {
+						setter(value);
+					}
+				});
 			});
 			simpleToolTip([&]{
 				return strCat(
@@ -929,54 +639,81 @@ void ImGuiDebugger::drawRegisters(CPURegs& regs)
 			});
 		};
 
-		edit16("AF", "A", "F", [&]{ return regs.getAF(); }, [&](uint16_t value) { regs.setAF(value); });
+		edit16("AF", "A", "F", [&](const CPURegs& r) { return r.getAF(); }, [&](uint16_t value) { regs.setAF(value); });
 		ImGui::SameLine(0.0f, 20.0f);
-		edit16("AF'", "A'", "F'", [&]{ return regs.getAF2(); }, [&](uint16_t value) { regs.setAF2(value); });
+		edit16("AF'", "A'", "F'", [&](const CPURegs& r) { return r.getAF2(); }, [&](uint16_t value) { regs.setAF2(value); });
 
-		edit16("BC", "B", "C", [&]{ return regs.getBC(); }, [&](uint16_t value) { regs.setBC(value); });
+		edit16("BC", "B", "C", [&](const CPURegs& r) { return r.getBC(); }, [&](uint16_t value) { regs.setBC(value); });
 		ImGui::SameLine(0.0f, 20.0f);
-		edit16("BC'", "B'", "C'", [&]{ return regs.getBC2(); }, [&](uint16_t value) { regs.setBC2(value); });
+		edit16("BC'", "B'", "C'", [&](const CPURegs& r) { return r.getBC2(); }, [&](uint16_t value) { regs.setBC2(value); });
 
-		edit16("DE", "D", "E", [&]{ return regs.getDE(); }, [&](uint16_t value) { regs.setDE(value); });
+		edit16("DE", "D", "E", [&](const CPURegs& r) { return r.getDE(); }, [&](uint16_t value) { regs.setDE(value); });
 		ImGui::SameLine(0.0f, 20.0f);
-		edit16("DE'", "D'", "E'", [&]{ return regs.getDE2(); }, [&](uint16_t value) { regs.setDE2(value); });
+		edit16("DE'", "D'", "E'", [&](const CPURegs& r) { return r.getDE2(); }, [&](uint16_t value) { regs.setDE2(value); });
 
-		edit16("HL", "H", "L", [&]{ return regs.getHL(); }, [&](uint16_t value) { regs.setHL(value); });
+		edit16("HL", "H", "L", [&](const CPURegs& r) { return r.getHL(); }, [&](uint16_t value) { regs.setHL(value); });
 		ImGui::SameLine(0.0f, 20.0f);
-		edit16("HL'", "H'", "L'", [&]{ return regs.getHL2(); }, [&](uint16_t value) { regs.setHL2(value); });
+		edit16("HL'", "H'", "L'", [&](const CPURegs& r) { return r.getHL2(); }, [&](uint16_t value) { regs.setHL2(value); });
 
-		edit16("IX", "IXh", "IXl", [&]{ return regs.getIX(); }, [&](uint16_t value) { regs.setIX(value); });
+		edit16("IX", "IXh", "IXl", [&](const CPURegs& r) { return r.getIX(); }, [&](uint16_t value) { regs.setIX(value); });
 		ImGui::SameLine(0.0f, 20.0f);
-		edit16("IY ", "IYh", "IYl", [&]{ return regs.getIY(); }, [&](uint16_t value) { regs.setIY(value); });
+		edit16("IY ", "IYh", "IYl", [&](const CPURegs& r) { return r.getIY(); }, [&](uint16_t value) { regs.setIY(value); });
 
-		edit16("PC", "PCh", "PCl", [&]{ return regs.getPC(); }, [&](uint16_t value) { regs.setPC(value); });
+		edit16("PC", "PCh", "PCl", [&](const CPURegs& r) { return r.getPC(); }, [&](uint16_t value) { regs.setPC(value); });
 		ImGui::SameLine(0.0f, 20.0f);
-		edit16("SP ", "SPh", "SPl", [&]{ return regs.getSP(); }, [&](uint16_t value) { regs.setSP(value); });
+		edit16("SP ", "SPh", "SPl", [&](const CPURegs& r) { return r.getSP(); }, [&](uint16_t value) { regs.setSP(value); });
 
-		edit8("I ", [&]{ return regs.getI(); }, [&](uint8_t value) { regs.setI(value); });
+		edit8("I ", [&](const CPURegs& r) { return r.getI(); }, [&](uint8_t value) { regs.setI(value); });
 		ImGui::SameLine(0.0f, 20.0f);
-		edit8("R  ", [&]{ return regs.getR(); }, [&](uint8_t value) { regs.setR(value); });
+		edit8("R  ", [&](const CPURegs& r) { return r.getR(); }, [&](uint8_t value) { regs.setR(value); });
 
 		ImGui::AlignTextToFramePadding();
 		ImGui::TextUnformatted("IM"sv);
 		ImGui::SameLine();
 		ImGui::SetNextItemWidth(width16);
-		if (uint8_t im = regs.getIM();
-		    ImGui::InputScalar("##IM", ImGuiDataType_U8, &im, nullptr, nullptr, "%d")) {
-			if (im <= 2) regs.setIM(im);
-		}
+		uint8_t im = regs.getIM();
+		bool imChanged = drawChanges && (im != cpuRegsSnapshot->getIM());
+		im::StyleColor(imChanged, ImGuiCol_Text, color, [&]{
+			if (ImGui::InputScalar("##IM", ImGuiDataType_U8, &im, nullptr, nullptr, "%d")) {
+				if (im <= 2) regs.setIM(im);
+			}
+		});
 
 		ImGui::SameLine(0.0f, 20.0f);
 		ImGui::AlignTextToFramePadding();
-		if (bool ei = regs.getIFF1();
-		    ImGui::Selectable(ei ? "EI" : "DI", false, ImGuiSelectableFlags_AllowDoubleClick)) {
-			if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-				regs.setIFF1(!ei);
-				regs.setIFF2(!ei);
+		bool ei = regs.getIFF1();
+		bool eiChanged = drawChanges && (ei != cpuRegsSnapshot->getIFF1());
+		im::StyleColor(eiChanged, ImGuiCol_Text, color, [&]{
+			auto size = ImGui::CalcTextSize("EI");
+			if (ImGui::Selectable(ei ? "EI" : "DI", false, ImGuiSelectableFlags_AllowDoubleClick, size)) {
+				if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+					regs.setIFF1(!ei);
+					regs.setIFF2(!ei);
+				}
 			}
-		}
+		});
+
+		sf.reset();
 		simpleToolTip("double-click to toggle");
+
+		HelpMarker("Click values to edit, double-click EI/DI to toggle.\n"
+		           "Right-click to configure",
+		           2.0f * ImGui::GetFontSize());
+
+		im::PopupContextWindow([&]{
+			configureChangesMenu();
+		});
 	});
+}
+
+void ImGuiDebugger::configureChangesMenu()
+{
+	ImGui::TextUnformatted("Highlight changes between breaks"sv);
+	ImGui::RadioButton("don't show", &showChanges, SHOW_NEVER);
+	ImGui::RadioButton("show during break", &showChanges, SHOW_DURING_BREAK);
+	ImGui::RadioButton("always show", &showChanges, SHOW_ALWAYS);
+	ImGui::ColorEdit4("highlight color", changesColor.data(),
+		ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoAlpha);
 }
 
 void ImGuiDebugger::drawFlags(CPURegs& regs)
@@ -994,29 +731,40 @@ void ImGuiDebugger::drawFlags(CPURegs& regs)
 		// clang workaround
 		auto sizeH1 = sizeH1_; auto sizeH2 = sizeH2_; auto sizeV = sizeV_;
 
+		if (!cpuRegsSnapshot && needSnapshot()) {
+			cpuRegsSnapshot = regs;
+		}
+		bool drawChanges = cpuRegsSnapshot && needDrawChanges();
+		auto color = getChangesColor();
+
 		auto f = regs.getF();
+		auto oldF = drawChanges ? cpuRegsSnapshot->getF() : f;
 
 		auto draw = [&](const char* name, uint8_t bit, const char* val0 = nullptr, const char* val1 = nullptr) {
 			std::string s;
 			ImVec2 sz;
+			bool val = f & bit;
+			bool oldVal = oldF & bit;
+
 			if (flagsLayout == 0) {
 				// horizontal
 				if (val0) {
-					s = (f & bit) ? val1 : val0;
+					s = val ? val1 : val0;
 					sz = sizeH1;
 				} else {
-					s = strCat(name, ':', (f & bit) ? '1' : '0');
+					s = strCat(name, ':', val ? '1' : '0');
 					sz = sizeH2;
 				}
 			} else {
 				// vertical
-				s = strCat(name, ' ', (f & bit) ? '1' : '0');
+				s = strCat(name, ' ', val ? '1' : '0');
 				if (val0) {
-					strAppend(s, " (", (f & bit) ? val1 : val0, ')');
+					strAppend(s, " (", val ? val1 : val0, ')');
 				}
 				sz = sizeV;
 			}
-			im::Font(manager.fontMono, [&]{
+
+			im::StyleColor(val != oldVal, ImGuiCol_Text, color, [&]{
 				if (ImGui::Selectable(s.c_str(), false, ImGuiSelectableFlags_AllowDoubleClick, sz)) {
 					if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
 						regs.setF(f ^ bit);
@@ -1030,14 +778,16 @@ void ImGuiDebugger::drawFlags(CPURegs& regs)
 			}
 		};
 
-		draw("S", 0x80, " P", " M");
-		draw("Z", 0x40, "NZ", " Z");
-		if (showXYFlags) draw("Y", 0x20);
-		draw("H", 0x10);
-		if (showXYFlags) draw("X", 0x08);
-		draw("P", 0x04, "PO", "PE");
-		draw("N", 0x02);
-		draw("C", 0x01, "NC", " C");
+		im::Font(manager.fontMono, [&]{
+			draw("S", 0x80, " P", " M");
+			draw("Z", 0x40, "NZ", " Z");
+			if (showXYFlags) draw("Y", 0x20);
+			draw("H", 0x10);
+			if (showXYFlags) draw("X", 0x08);
+			draw("P", 0x04, "PO", "PE");
+			draw("N", 0x02);
+			draw("C", 0x01, "NC", " C");
+		});
 
 		im::PopupContextWindow([&]{
 			ImGui::TextUnformatted("Layout"sv);

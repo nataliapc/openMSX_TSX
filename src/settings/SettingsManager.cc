@@ -7,10 +7,9 @@
 #include "TclObject.hh"
 
 #include "outer.hh"
-#include "view.hh"
-#include "vla.hh"
 
 #include <cassert>
+#include <ranges>
 
 namespace openmsx {
 
@@ -63,11 +62,7 @@ BaseSetting* SettingsManager::findSetting(std::string_view name) const
 
 BaseSetting* SettingsManager::findSetting(std::string_view prefix, std::string_view baseName) const
 {
-	auto size = prefix.size() + baseName.size();
-	VLA(char, fullname, size);
-	ranges::copy(prefix,   fullname);
-	ranges::copy(baseName, fullname.subspan(prefix.size()));
-	return findSetting(std::string_view(fullname.data(), size)); // TODO simplify in c++23
+	return findSetting(tmpStrCat(prefix, baseName));
 }
 
 // Helper functions for setting commands
@@ -83,7 +78,7 @@ BaseSetting& SettingsManager::getByName(std::string_view cmd, std::string_view n
 std::vector<std::string> SettingsManager::getTabSettingNames() const
 {
 	std::vector<std::string> result;
-	result.reserve(settings.size() * 2);
+	result.reserve(size_t(settings.size()) * 2);
 	for (const auto* s : settings) {
 		std::string_view name = s->getFullName();
 		result.emplace_back(name);
@@ -129,7 +124,7 @@ void SettingsManager::SettingInfo::execute(
 	auto& manager = OUTER(SettingsManager, settingInfo);
 	switch (tokens.size()) {
 	case 2:
-		result.addListElements(view::transform(
+		result.addListElements(std::views::transform(
 			manager.settings,
 			[](auto* p) { return p->getFullNameObj(); }));
 		break;

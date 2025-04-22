@@ -10,6 +10,7 @@
 #include "endian.hh"
 #include "narrow.hh"
 #include "ranges.hh"
+#include "small_buffer.hh"
 #include "stl.hh"
 #include "zstring_view.hh"
 
@@ -56,7 +57,7 @@ AviWriter::~AviWriter()
 
 	auto AVIOUT4 = [&](std::string_view s) {
 		assert(s.size() == 4);
-		ranges::copy(s, subspan(avi_header, header_pos));
+		copy_to_range(s, subspan(avi_header, header_pos));
 		header_pos += 4;
 	};
 	auto AVIOUTw = [&](uint16_t w) {
@@ -69,7 +70,7 @@ AviWriter::~AviWriter()
 	};
 	auto AVIOUTs = [&](zstring_view s) {
 		auto len1 = s.size() + 1; // +1 for zero-terminator
-		ranges::copy(std::span{s.data(), len1}, subspan(avi_header, header_pos));
+		copy_to_range(std::span{s.data(), len1}, subspan(avi_header, header_pos));
 		header_pos += narrow<unsigned>((len1 + 1) & ~1); // round-up to even
 	};
 
@@ -252,7 +253,7 @@ void AviWriter::addAviChunk(std::span<const char, 4> tag, std::span<const uint8_
 
 	auto size32 = narrow<uint32_t>(data.size());
 
-	ranges::copy(tag, chunk.t);
+	copy_to_range(tag, chunk.t);
 	chunk.s = size32;
 	file.write(std::span{&chunk, 1});
 
@@ -283,9 +284,7 @@ void AviWriter::addFrame(const FrameSource* video, std::span<const int16_t> audi
 		assert((audio.size() % channels) == 0);
 		assert(audioRate != 0);
 		if constexpr (Endian::BIG) {
-			// See comment in WavWriter::write()
-			//VLA(Endian::L16, buf, samples); // doesn't work in clang
-			auto buf = to_vector<Endian::L16>(audio);
+			small_buffer<Endian::L16, 4096> buf(audio);
 			addAviChunk(subspan<4>("01wb"), as_byte_span(std::span{buf}), 0);
 		} else {
 			addAviChunk(subspan<4>("01wb"), as_byte_span(audio), 0);

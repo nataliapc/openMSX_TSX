@@ -26,6 +26,7 @@
 */
 
 #include "YM2413NukeYKT.hh"
+
 #include "serialize.hh"
 #include "cstd.hh"
 #include "enumerate.hh"
@@ -35,6 +36,7 @@
 #include "ranges.hh"
 #include "unreachable.hh"
 #include "xrange.hh"
+
 #include <algorithm>
 #include <array>
 #include <cstring>
@@ -42,11 +44,11 @@
 namespace openmsx {
 namespace YM2413NukeYKT {
 
-[[nodiscard]] constexpr bool is_rm_cycle(int cycle)
+[[nodiscard]] static constexpr bool is_rm_cycle(int cycle)
 {
 	return (11 <= cycle) && (cycle <= 16);
 }
-[[nodiscard]] constexpr YM2413::RmNum rm_for_cycle(int cycle)
+[[nodiscard]] static constexpr YM2413::RmNum rm_for_cycle(int cycle)
 {
 	return static_cast<YM2413::RmNum>(cycle - 11);
 }
@@ -117,7 +119,7 @@ YM2413::YM2413()
 	, releasePtr(/*dummy*/releaseData[0])
 {
 	// copy ROM patches to array (for faster lookup)
-	ranges::copy(m_patches, subspan(patches, 1));
+	copy_to_range(m_patches, subspan(patches, 1));
 	reset();
 }
 
@@ -133,17 +135,17 @@ void YM2413::reset()
 	attackPtr  = attack[eg_timer_shift_lock][eg_timer_lock];
 	auto idx = releaseIndex[eg_timer_shift_lock][eg_timer_lock][eg_counter_state];
 	releasePtr = releaseData[idx];
-	ranges::fill(eg_state, EgState::release);
-	ranges::fill(eg_level, 0x7f);
-	ranges::fill(eg_dokon, false);
+	std::ranges::fill(eg_state, EgState::release);
+	std::ranges::fill(eg_level, 0x7f);
+	std::ranges::fill(eg_dokon, false);
 	eg_rate[0] = eg_rate[1] = 0;
 	eg_sl[0] = eg_sl[1] = eg_out[0] = eg_out[1] = 0;
 	eg_timer_shift_stop = false;
 	eg_kon[0] = eg_kon[1] = eg_off[0] = eg_off[1] = false;
 
-	ranges::fill(pg_phase, 0);
-	ranges::fill(op_fb1, 0);
-	ranges::fill(op_fb2, 0);
+	std::ranges::fill(pg_phase, 0);
+	std::ranges::fill(op_fb1, 0);
+	std::ranges::fill(op_fb2, 0);
 
 	op_mod = 0;
 	op_phase[0] = op_phase[1] = 0;
@@ -153,11 +155,11 @@ void YM2413::reset()
 	lfo_vib = VIB_TAB[lfo_vib_counter];
 	lfo_am_step = lfo_am_dir = false;
 
-	ranges::fill(fnum, 0);
-	ranges::fill(block, 0);
-	ranges::fill(vol8, 0);
-	ranges::fill(inst, 0);
-	ranges::fill(sk_on, 0);
+	std::ranges::fill(fnum, 0);
+	std::ranges::fill(block, 0);
+	std::ranges::fill(vol8, 0);
+	std::ranges::fill(inst, 0);
+	std::ranges::fill(sk_on, 0);
 	for (auto i : xrange(9)) {
 		p_inst[i] = &patches[inst[i]];
 		changeFnumBlock(i);
@@ -171,7 +173,7 @@ void YM2413::reset()
 
 	delay6 = delay7 = delay10 = delay11 = delay12 = 0;
 
-	ranges::fill(regs, 0);
+	std::ranges::fill(regs, 0);
 	latch = 0;
 }
 
@@ -629,7 +631,7 @@ template<uint32_t CYCLES> ALWAYS_INLINE void YM2413::doOperator(std::span<float*
 	auto output = [&]() -> int32_t {
 		if (eg_silent) return 0;
 		auto prev2_phase = op_phase[(CYCLES - 2) & 1];
-		uint8_t quarter = narrow_cast<uint8_t>((prev2_phase & 0x100) ? ~prev2_phase : prev2_phase);
+		auto quarter = narrow_cast<uint8_t>((prev2_phase & 0x100) ? ~prev2_phase : prev2_phase);
 		auto logSin = logSinTab[quarter];
 		auto op_level = std::min(4095, logSin + (eg_out[(CYCLES - 2) & 1] << 4));
 		uint32_t op_exp_m = expTab[op_level & 0xff];
@@ -815,7 +817,7 @@ ALWAYS_INLINE void YM2413::step(Locals& l)
 void YM2413::generateChannels(std::span<float*, 9 + 5> out_, uint32_t n)
 {
 	std::array<float*, 9 + 5> out;
-	ranges::copy(out_, out);
+	copy_to_range(out_, out);
 
 	// Loop here (instead of in step18) seems faster. (why?)
 	if (test_mode_active) [[unlikely]] {
@@ -879,7 +881,7 @@ void YM2413::writePort(bool port, uint8_t value, int cycle_offset)
 		allowed_offset = ((port ? 84 : 12) / 4) + cycle_offset;
 	}
 
-	writes[cycle_offset] = {port, value};
+	writes[cycle_offset] = {.port = port, .value = value};
 	if (port && (write_address == 0xf)) {
 		test_mode_active = true;
 	}

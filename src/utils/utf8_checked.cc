@@ -1,7 +1,6 @@
 #ifdef _WIN32
 
 #include "utf8_checked.hh"
-#include "vla.hh"
 #include "MSXException.hh"
 #include <windows.h>
 
@@ -11,12 +10,10 @@ static bool multiByteToUtf16(zstring_view multiByte, UINT cp, DWORD dwFlags, std
 {
 	const char* multiByteA = multiByte.c_str();
 	if (int len = MultiByteToWideChar(cp, dwFlags, multiByteA, -1, nullptr, 0)) {
-		VLA(wchar_t, utf16W, len);
-		len = MultiByteToWideChar(cp, dwFlags, multiByteA, -1, utf16W.data(), len);
-		if (len) {
-			utf16 = utf16W.data();
-			return true;
-		}
+		utf16.resize(len); // TODO use c++23 resize_and_overwrite()
+		int len2 = MultiByteToWideChar(cp, dwFlags, multiByteA, -1, utf16.data(), len);
+		utf16.resize(len - 1); // remove 0-terminator, std::wstring handles it internally
+		if (len2) return true;
 	}
 	return false;
 }
@@ -25,12 +22,10 @@ static bool utf16ToMultiByte(const std::wstring& utf16, UINT cp, std::string& mu
 {
 	const wchar_t* utf16W = utf16.c_str();
 	if (int len = WideCharToMultiByte(cp, 0, utf16W, -1, nullptr, 0, nullptr, nullptr)) {
-		VLA(char, multiByteA, len);
-		len = WideCharToMultiByte(cp, 0, utf16W, -1, multiByteA.data(), len, nullptr, nullptr);
-		if (len) {
-			multiByte = multiByteA.data();
-			return true;
-		}
+		multiByte.resize(len); // TODO use c++23 resize_and_overwrite()
+		int len2 = WideCharToMultiByte(cp, 0, utf16W, -1, multiByte.data(), len, nullptr, nullptr);
+		multiByte.resize(len - 1); // remove 0-terminator, std::string handles it internally
+		if (len2) return true;
 	}
 	return false;
 }

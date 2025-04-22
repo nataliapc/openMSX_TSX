@@ -71,7 +71,7 @@ static void insertRGB(std::span<uint16_t, 16> msxPalette, unsigned index, std::a
 	msxPalette[index] = narrow<int16_t>(((rgb[1] & 7) << 8) | ((rgb[0] & 7) << 4) | ((rgb[2] & 7) << 0));
 }
 
-uint32_t ImGuiPalette::toRGBA(uint16_t msxColor)
+[[nodiscard]] static uint32_t toRGBA(uint16_t msxColor)
 {
 	auto [r, g, b] = extractRGB(msxColor);
 	static constexpr float scale = 1.0f / 7.0f;
@@ -90,15 +90,30 @@ static bool coloredButton(const char* id, ImU32 color, ImVec2 size)
 	return result;
 }
 
-std::span<const uint16_t, 16> ImGuiPalette::getPalette(const VDP* vdp) const
+std::array<uint32_t, 16> ImGuiPalette::getPalette(const VDP* vdp) const
 {
-	if (whichPalette == PALETTE_CUSTOM) {
-		return customPalette;
-	} else if (whichPalette == PALETTE_VDP && vdp && !vdp->isMSX1VDP()) {
-		return vdp->getPalette();
+	std::array<uint32_t, 16> result;
+	if (vdp && vdp->isMSX1VDP() && (whichPalette != PALETTE_CUSTOM)) {
+		auto rgb = vdp->getMSX1Palette();
+		for (auto i : xrange(16)) {
+			auto [r, g, b] = rgb[i];
+			result[i] = ImColor(r, g, b);
+		}
 	} else {
-		return fixedPalette;
+		auto rgb = [&]() -> std::span<const uint16_t, 16> {
+			if (whichPalette == PALETTE_CUSTOM) {
+				return customPalette;
+			} else if (whichPalette == PALETTE_VDP && vdp && !vdp->isMSX1VDP()) {
+				return vdp->getPalette();
+			} else {
+				return fixedPalette;
+			}
+		}();
+		for (auto i : xrange(16)) {
+			result[i] = toRGBA(rgb[i]);
+		}
 	}
+	return result;
 }
 
 void ImGuiPalette::paint(MSXMotherBoard* motherBoard)
@@ -107,40 +122,44 @@ void ImGuiPalette::paint(MSXMotherBoard* motherBoard)
 	im::Window("Palette editor", window, [&]{
 		VDP* vdp = motherBoard ? dynamic_cast<VDP*>(motherBoard->findDevice("VDP")) : nullptr; // TODO name based OK?
 
-		im::Disabled(!vdp || vdp->isMSX1VDP(), [&]{
-			ImGui::RadioButton("VDP palette", &whichPalette, PALETTE_VDP);
-		});
+		ImGui::RadioButton("VDP palette", &whichPalette, PALETTE_VDP);
 		ImGui::SameLine();
 		ImGui::RadioButton("Custom palette", &whichPalette, PALETTE_CUSTOM);
 		ImGui::SameLine();
 		ImGui::RadioButton("Fixed palette", &whichPalette, PALETTE_FIXED);
 
-		std::array<uint16_t, 16> paletteCopy;
-		std::span<uint16_t, 16> palette = customPalette;
+		std::array<uint16_t, 16> paletteCopy; // uninitialized
 		bool disabled = (whichPalette == PALETTE_FIXED) ||
 				((whichPalette == PALETTE_VDP) && (!vdp || vdp->isMSX1VDP()));
-		if (disabled) {
-			palette = std::span<uint16_t, 16>{const_cast<uint16_t*>(fixedPalette.data()), 16};
-		} else if (whichPalette == PALETTE_VDP) {
-			ranges::copy(vdp->getPalette(), paletteCopy);
-			palette = paletteCopy;
-		}
+		auto palette = [&]() -> std::span<uint16_t, 16> {
+			if (disabled) {
+				copy_to_range(fixedPalette, paletteCopy);
+				return paletteCopy;
+			} else if (whichPalette == PALETTE_VDP) {
+				assert(vdp);
+				copy_to_range(vdp->getPalette(), paletteCopy);
+				return paletteCopy;
+			} else {
+				return customPalette;
+			}
+		}();
 
 		im::Table("left/right", 2, [&]{
 			ImGui::TableSetupColumn("left",  ImGuiTableColumnFlags_WidthFixed, 200.0f);
 			ImGui::TableSetupColumn("right", ImGuiTableColumnFlags_WidthFixed, 150.0f);
 
 			if (ImGui::TableNextColumn()) { // left pane
+				std::array<uint32_t, 16> paletteRGB = getPalette(vdp);
 				im::Table("grid", 4, [&]{
 					im::ID_for_range(16, [&](int i) {
 						if (ImGui::TableNextColumn()) {
-							if (i == selectedColor) {
-								ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, ImGui::GetColorU32(ImGuiCol_HeaderActive));
-							}
-							auto color = toRGBA(palette[i]);
-							if (coloredButton("", color, {44.0f, 30.0f})) {
-								selectedColor = i;
-							}
+							im::StyleColor(i == selectedColor, ImGuiCol_Border, ImGui::GetColorU32(ImGuiCol_HeaderActive), [&]{
+								ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, i == selectedColor ? 3.0f : 1.0f);
+								if (coloredButton("", paletteRGB[i], {44.0f, 30.0f})) {
+									selectedColor = i;
+								}
+								ImGui::PopStyleVar();
+							});
 						}
 					});
 				});

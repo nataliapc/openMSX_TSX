@@ -10,12 +10,15 @@
 #include "Reactor.hh"
 
 #include "stl.hh"
+#include "Timer.hh"
 
 #include <imgui_stdlib.h>
 #include <imgui.h>
 
+#include <algorithm>
 #include <cassert>
 #include <concepts>
+#include <utility>
 
 namespace openmsx {
 
@@ -231,7 +234,7 @@ void ImGuiMessages::paintOSD()
 				auto x = int(256.0f * (t / step1.start));
 				auto tCol = p.lerp(step0.colors.text,       step1.colors.text,       x);
 				auto bCol = p.lerp(step0.colors.background, step1.colors.background, x);
-				return Colors{tCol, bCol};
+				return Colors{.text = tCol, .background = bCol};
 			}
 			t -= step1.start;
 		}
@@ -244,8 +247,8 @@ void ImGuiMessages::paintOSD()
 
 	struct DrawInfo {
 		// clang workaround:
-		DrawInfo(const std::string& m, gl::vec2 s, float y, uint32_t t, uint32_t b)
-			: message(m), boxSize(s), yPos(y), textCol(t), bgCol(b) {}
+		DrawInfo(std::string m, gl::vec2 s, float y, uint32_t t, uint32_t b)
+			: message(std::move(m)), boxSize(s), yPos(y), textCol(t), bgCol(b) {}
 
 		std::string message;
 		gl::vec2 boxSize;
@@ -304,11 +307,11 @@ void ImGuiMessages::paintLog()
 	im::Window("Message Log", logWindow, ImGuiWindowFlags_NoFocusOnAppearing, [&]{
 		const auto& style = ImGui::GetStyle();
 		auto buttonHeight = ImGui::GetFontSize() + 2.0f * style.FramePadding.y + style.ItemSpacing.y;
-		im::Child("messages", {0.0f, -buttonHeight}, ImGuiChildFlags_Border, ImGuiWindowFlags_HorizontalScrollbar, [&]{
+		im::Child("messages", {0.0f, -buttonHeight}, ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar, [&]{
 			printMessages(allMessages, [&](std::string_view prefix, std::string_view message) {
 				if (filterLog.empty()) return true;
 				auto full = tmpStrCat(prefix, message);
-				return ranges::all_of(StringOp::split_view<StringOp::EmptyParts::REMOVE>(filterLog, ' '),
+				return std::ranges::all_of(StringOp::split_view<StringOp::EmptyParts::REMOVE>(filterLog, ' '),
 					[&](auto part) { return StringOp::containsCaseInsensitive(full, part); });
 			});
 		});
@@ -356,7 +359,7 @@ void ImGuiMessages::paintConfigure()
 			}
 			for (auto level : {LOGLEVEL_ERROR, WARNING, INFO}) {
 				if (ImGui::TableNextColumn()) {
-					ImGui::RadioButton(tmpStrCat("##modal", to_underlying(level)).c_str(), &popupAction[level], MODAL_POPUP);
+					ImGui::RadioButton(tmpStrCat("##modal", std::to_underlying(level)).c_str(), &popupAction[level], MODAL_POPUP);
 				}
 			}
 			if (ImGui::TableNextColumn()) {
@@ -364,7 +367,7 @@ void ImGuiMessages::paintConfigure()
 			}
 			for (auto level : {LOGLEVEL_ERROR, WARNING, INFO}) {
 				if (ImGui::TableNextColumn()) {
-					ImGui::RadioButton(tmpStrCat("##popup", to_underlying(level)).c_str(), &popupAction[level], POPUP);
+					ImGui::RadioButton(tmpStrCat("##popup", std::to_underlying(level)).c_str(), &popupAction[level], POPUP);
 				}
 			}
 			if (ImGui::TableNextColumn()) {
@@ -372,7 +375,7 @@ void ImGuiMessages::paintConfigure()
 			}
 			for (auto level : {LOGLEVEL_ERROR, WARNING, INFO}) {
 				if (ImGui::TableNextColumn()) {
-					ImGui::RadioButton(tmpStrCat("##noPopup", to_underlying(level)).c_str(), &popupAction[level], NO_POPUP);
+					ImGui::RadioButton(tmpStrCat("##noPopup", std::to_underlying(level)).c_str(), &popupAction[level], NO_POPUP);
 				}
 			}
 
@@ -385,7 +388,7 @@ void ImGuiMessages::paintConfigure()
 			}
 			for (auto level : {LOGLEVEL_ERROR, WARNING, INFO}) {
 				if (ImGui::TableNextColumn()) {
-					ImGui::RadioButton(tmpStrCat("##focus", to_underlying(level)).c_str(), &openLogAction[level], OPEN_LOG_FOCUS);
+					ImGui::RadioButton(tmpStrCat("##focus", std::to_underlying(level)).c_str(), &openLogAction[level], OPEN_LOG_FOCUS);
 				}
 			}
 			if (ImGui::TableNextColumn()) {
@@ -393,7 +396,7 @@ void ImGuiMessages::paintConfigure()
 			}
 			for (auto level : {LOGLEVEL_ERROR, WARNING, INFO}) {
 				if (ImGui::TableNextColumn()) {
-					ImGui::RadioButton(tmpStrCat("##log", to_underlying(level)).c_str(), &openLogAction[level], OPEN_LOG);
+					ImGui::RadioButton(tmpStrCat("##log", std::to_underlying(level)).c_str(), &openLogAction[level], OPEN_LOG);
 				}
 			}
 			if (ImGui::TableNextColumn()) {
@@ -401,7 +404,7 @@ void ImGuiMessages::paintConfigure()
 			}
 			for (auto level : {LOGLEVEL_ERROR, WARNING, INFO}) {
 				if (ImGui::TableNextColumn()) {
-					ImGui::RadioButton(tmpStrCat("##nolog", to_underlying(level)).c_str(), &openLogAction[level], NO_OPEN_LOG);
+					ImGui::RadioButton(tmpStrCat("##nolog", std::to_underlying(level)).c_str(), &openLogAction[level], NO_OPEN_LOG);
 				}
 			}
 
@@ -414,7 +417,7 @@ void ImGuiMessages::paintConfigure()
 			}
 			for (auto level : {LOGLEVEL_ERROR, WARNING, INFO}) {
 				if (ImGui::TableNextColumn()) {
-					ImGui::RadioButton(tmpStrCat("##osd", to_underlying(level)).c_str(), &osdAction[level], SHOW_OSD);
+					ImGui::RadioButton(tmpStrCat("##osd", std::to_underlying(level)).c_str(), &osdAction[level], SHOW_OSD);
 				}
 			}
 			if (ImGui::TableNextColumn()) {
@@ -422,7 +425,7 @@ void ImGuiMessages::paintConfigure()
 			}
 			for (auto level : {LOGLEVEL_ERROR, WARNING, INFO}) {
 				if (ImGui::TableNextColumn()) {
-					ImGui::RadioButton(tmpStrCat("##no-osd", to_underlying(level)).c_str(), &osdAction[level], NO_OSD);
+					ImGui::RadioButton(tmpStrCat("##no-osd", std::to_underlying(level)).c_str(), &osdAction[level], NO_OSD);
 				}
 			}
 			if (ImGui::TableNextColumn()) {
@@ -431,13 +434,19 @@ void ImGuiMessages::paintConfigure()
 			for (auto level : {LOGLEVEL_ERROR, WARNING, INFO}) {
 				if (ImGui::TableNextColumn()) {
 					float& d = colorSequence[level][2].start;
-					if (ImGui::InputFloat(tmpStrCat("##dur", to_underlying(level)).c_str(), &d, 0.0f, 0.0f, "%.0f", ImGuiInputTextFlags_CharsDecimal)) {
+					if (ImGui::InputFloat(tmpStrCat("##dur", std::to_underlying(level)).c_str(), &d, 0.0f, 0.0f, "%.0f", ImGuiInputTextFlags_CharsDecimal)) {
 						d = std::clamp(d, 1.0f, 99.0f);
 					}
 				}
 			}
 		});
 	});
+}
+
+static bool needThrottle(const circular_buffer<ImGuiMessages::Message>& buffer, uint64_t now)
+{
+	return ((buffer.size() >=  5) && ((now - buffer[4].timestamp) <  1'000'000)) || // 5 in the last second
+	       ((buffer.size() >= 10) && ((now - buffer[9].timestamp) < 60'000'000));   // 10 in the last minute
 }
 
 void ImGuiMessages::log(CliComm::LogLevel level, std::string_view text, float fraction)
@@ -449,25 +458,35 @@ void ImGuiMessages::log(CliComm::LogLevel level, std::string_view text, float fr
 		return;
 	}
 
-	Message message{level, std::string(text)};
+	auto now = Timer::getTime();
+	Message message{level, std::string(text), now};
 
 	if (popupAction[level] == MODAL_POPUP) {
 		if (modalMessages.full()) modalMessages.pop_back();
 		modalMessages.push_front(message);
-		doOpenModal = true;
+		if (!needThrottle(modalMessages, now)) {
+			doOpenModal = true;
+		}
 	} else if (popupAction[level] == POPUP) {
 		if (popupMessages.full()) popupMessages.pop_back();
 		popupMessages.push_front(message);
-		doOpenPopup = popupMessages.size();
+		if (!needThrottle(popupMessages, now)) {
+			doOpenPopup = popupMessages.size();
+		}
 	}
 
 	if (openLogAction[level] == OPEN_LOG) {
 		logWindow.open = true;
 	} else if (openLogAction[level] == OPEN_LOG_FOCUS) {
-		logWindow.raise();
+		if (!needThrottle(allMessages, now)) {
+			logWindow.raise();
+		}
 	}
 
 	if (osdAction[level] == SHOW_OSD) {
+		if (osdMessages.size() >= 10) {
+			osdMessages.erase(osdMessages.begin());
+		}
 		osdMessages.emplace_back(std::string(text), 0.0f, level);
 	}
 

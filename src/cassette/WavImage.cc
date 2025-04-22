@@ -1,13 +1,16 @@
 #include "WavImage.hh"
+
 #include "File.hh"
 #include "Filename.hh"
 #include "FilePool.hh"
+
 #include "Math.hh"
 #include "narrow.hh"
-#include "ranges.hh"
 #include "xrange.hh"
-#include <cassert>
+
+#include <algorithm>
 #include <array>
+#include <cassert>
 #include <map>
 
 namespace openmsx {
@@ -94,7 +97,7 @@ const WavImageCache::WavInfo& WavImageCache::get(const Filename& filename, FileP
 void WavImageCache::release(const WavData* wav)
 {
 	// cache contains very few entries, so linear search is ok
-	auto it = ranges::find(cache, wav, [](auto& pr) { return &pr.second.info.wav; });
+	auto it = std::ranges::find(cache, wav, [](auto& pr) { return &pr.second.info.wav; });
 	assert(it != end(cache));
 	auto& entry = it->second;
 	--entry.refCount; // decrease reference count
@@ -132,7 +135,7 @@ int16_t WavImage::getSampleAt(EmuTime::param time) const
 	// work in openMSX (with sample-and-hold it didn't work).
 	auto [sample, x] = clock.getTicksTillAsIntFloat(time);
 	std::array<float, 4> p = {
-		float(wav->getSample(unsigned(sample) - 1)), // intentional: underflow wraps to UINT_MAX
+		float(wav->getSample(sample - 1)), // intentional: underflow wraps to UINT_MAX
 		float(wav->getSample(sample + 0)),
 		float(wav->getSample(sample + 1)),
 		float(wav->getSample(sample + 2))

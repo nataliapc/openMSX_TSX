@@ -46,15 +46,16 @@
 #include "Timer.hh"
 
 #include "narrow.hh"
-#include "ranges.hh"
 #include "serialize.hh"
 #include "stl.hh"
 #include "unreachable.hh"
 #include "build-info.hh"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <memory>
+#include <ranges>
 
 using std::make_unique;
 using std::string;
@@ -366,8 +367,9 @@ vector<string> Reactor::getHwConfigs(string_view type)
 		foreach_file_and_directory(FileOperations::join(p, type), fileAction, dirAction);
 	}
 	// remove duplicates
-	ranges::sort(result);
-	result.erase(ranges::unique(result), end(result));
+	std::ranges::sort(result);
+	auto u = std::ranges::unique(result);
+	result.erase(u.begin(), u.end());
 	return result;
 }
 
@@ -377,7 +379,7 @@ const MsxChar2Unicode& Reactor::getMsxChar2Unicode() const
 	// 'MsxChar2Unicode' object. Probably the 'Keyboard' class is not the
 	// right location to store it.
 	try {
-		if (MSXMotherBoard* board = getMotherBoard()) {
+		if (const auto* board = getMotherBoard()) {
 			if (const auto* keyb = board->getKeyboard()) {
 				return keyb->getMsxChar2Unicode();
 			}
@@ -396,7 +398,7 @@ void Reactor::createMachineSetting()
 	EnumSetting<int>::Map machines; // int's are unique dummy values
 	machines.reserve(names.size() + 1);
 	int count = 1;
-	append(machines, view::transform(names,
+	append(machines, std::views::transform(names,
 		[&](auto& name) { return EnumSettingBase::MapEntry(std::move(name), count++); }));
 	machines.emplace_back("C-BIOS_MSX2+", 0); // default machine
 
@@ -419,7 +421,7 @@ string_view Reactor::getMachineID() const
 
 Reactor::Board Reactor::getMachine(string_view machineID) const
 {
-	if (auto it = ranges::find(boards, machineID, &MSXMotherBoard::getMachineID);
+	if (auto it = std::ranges::find(boards, machineID, &MSXMotherBoard::getMachineID);
 	    it != boards.end()) {
 		return *it;
 	}
@@ -541,8 +543,9 @@ void Reactor::runStartupScripts(const CommandLineParser& parser)
 	try {
 		commandController.source(
 			preferSystemFileContext().resolve("init.tcl"));
-	} catch (FileException&) {
-		// no init.tcl, ignore
+	} catch (FileException& e) {
+		throw FatalError("Couldn't execute \"<openmsx>/share/init.tcl\": ", e.getMessage(), "\n"
+		                 "Most likely you have an incomplete openMSX installation!!!");
 	}
 
 	// execute startup scripts

@@ -189,10 +189,10 @@ private:
 
 	struct TextureData {
 		gl::ColorTexture tex;
-		gl::PixelBuffer<unsigned> pbo;
 		[[nodiscard]] unsigned width() const { return tex.getWidth(); }
 	};
 	std::vector<TextureData> textures;
+	gl::PixelBuffer<unsigned> pbo;
 
 	gl::ColorTexture superImposeTex;
 
@@ -212,6 +212,7 @@ private:
 		unsigned lineWidth;
 	};
 	std::vector<Region> regions;
+	unsigned regionsDstHeight = 0; // 'regions' were calculated for this output height (relevant when changing scale_factor when paused)
 
 	unsigned frameCounter = 0;
 

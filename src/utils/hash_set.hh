@@ -113,7 +113,8 @@ public:
 	}
 	[[nodiscard]] const Elem& get(PoolIndex idx) const
 	{
-		return const_cast<Pool&>(*this).get(idx);
+		assert(idx.idx < capacity_);
+		return buf_[idx.idx];
 	}
 
 	// - Insert a new Element in the pool (will be created with the given
@@ -639,7 +640,7 @@ public:
 protected:
 	// Returns the smallest value that is >= x that is also a power of 2.
 	// (for x=0 it returns 0)
-	[[nodiscard]] static inline unsigned nextPowerOf2(unsigned x)
+	[[nodiscard]] static unsigned nextPowerOf2(unsigned x)
 	{
 		static_assert(sizeof(unsigned) == sizeof(uint32_t), "only works for exactly 32 bit");
 		x -= 1;
